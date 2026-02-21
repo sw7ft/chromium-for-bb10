@@ -1,8 +1,6 @@
 # Copyright 2025 SW7FT. All rights reserved.
 # QNX Screen Ozone platform backend
 
-import("//build/config/qnx/BUILD.gn")
-
 source_set("qnx_screen") {
   sources = [
     "ozone_platform_qnx_screen.cc",

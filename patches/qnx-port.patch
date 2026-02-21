@@ -1397,18 +1397,9 @@ index 80bc79e5fb..8232f096d7 100644
          cflags += [
            "-march=$arm_arch",
 diff --git a/build/config/ozone.gni b/build/config/ozone.gni
-index e85db6b332..ee83a90be4 100644
+index e85db6b332..cae8707bce 100644
 --- a/build/config/ozone.gni
 +++ b/build/config/ozone.gni
-@@ -9,7 +9,7 @@ import("//build/toolchain/toolchain.gni")
- declare_args() {
-   # Indicates if Ozone is enabled. Ozone is a low-level library layer for Linux
-   # that does not require X11.
--  use_ozone = is_chromeos || is_fuchsia || is_linux
-+  use_ozone = is_chromeos || is_fuchsia || is_linux || (target_os == "qnx")
- }
- 
- declare_args() {
 @@ -57,6 +57,9 @@ declare_args() {
    # Compile the 'wayland' platform.
    ozone_platform_wayland = false
@@ -5844,16 +5835,18 @@ index 83daef460d..8cb4ee1424 100644
  
    RenderMediaClient::Initialize();
 diff --git a/content/shell/BUILD.gn b/content/shell/BUILD.gn
-index 098c17ec80..1767dc4624 100644
+index 098c17ec80..13cd8a3461 100644
 --- a/content/shell/BUILD.gn
 +++ b/content/shell/BUILD.gn
-@@ -401,7 +401,12 @@ static_library("content_shell_lib") {
+@@ -401,7 +401,14 @@ static_library("content_shell_lib") {
      deps += [ "//ui/views" ]
    }
  
 -  if (use_aura) {
 +  if (is_qnx) {
 +    sources += [
++      "browser/berry_browser_chrome.cc",
++      "browser/berry_browser_chrome.h",
 +      "browser/shell_platform_delegate_qnx.cc",
 +      "browser/shell_web_contents_view_delegate_aura.cc",
 +    ]
@@ -5861,7 +5854,7 @@ index 098c17ec80..1767dc4624 100644
      deps += [
        "//ui/aura",
        "//ui/aura:test_support",
-@@ -647,6 +652,14 @@ if (is_android) {
+@@ -647,6 +654,14 @@ if (is_android) {
        sources += [ "app/shell.rc" ]
      }
  

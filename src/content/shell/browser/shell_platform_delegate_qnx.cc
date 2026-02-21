@@ -6,7 +6,6 @@
 #include "base/command_line.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/content_switches.h"
 #include "content/shell/browser/shell.h"
 
 #if !defined(HEADLESS_MODE_ONLY)
@@ -34,7 +33,7 @@ void ShellPlatformDelegate::CreatePlatformWindow(
   auto& data = shell_data_map_[shell];
 #if !defined(HEADLESS_MODE_ONLY)
   bool headless = base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kHeadless);
+      "headless");
   if (!headless) {
     int w = initial_size.width() > 0 ? initial_size.width() : 1440;
     int h = initial_size.height() > 0 ? initial_size.height() : 1440;
