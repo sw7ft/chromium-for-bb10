@@ -1396,6 +1396,50 @@ index 80bc79e5fb..8232f096d7 100644
        if (!is_nacl) {
          cflags += [
            "-march=$arm_arch",
+diff --git a/build/config/ozone.gni b/build/config/ozone.gni
+index e85db6b332..ee83a90be4 100644
+--- a/build/config/ozone.gni
++++ b/build/config/ozone.gni
+@@ -9,7 +9,7 @@ import("//build/toolchain/toolchain.gni")
+ declare_args() {
+   # Indicates if Ozone is enabled. Ozone is a low-level library layer for Linux
+   # that does not require X11.
+-  use_ozone = is_chromeos || is_fuchsia || is_linux
++  use_ozone = is_chromeos || is_fuchsia || is_linux || (target_os == "qnx")
+ }
+ 
+ declare_args() {
+@@ -57,6 +57,9 @@ declare_args() {
+   # Compile the 'wayland' platform.
+   ozone_platform_wayland = false
+ 
++  # Compile the 'qnx_screen' platform.
++  ozone_platform_qnx_screen = false
++
+   if (ozone_auto_platforms) {
+     # Use headless as the default platform unless modified below.
+     ozone_platform = "headless"
+@@ -91,6 +94,10 @@ declare_args() {
+     } else if (is_fuchsia) {
+       ozone_platform = "flatland"
+       ozone_platform_flatland = true
++    } else if (target_os == "qnx") {
++      ozone_platform = "qnx_screen"
++      ozone_platform_qnx_screen = true
++      ozone_platform_headless = true
+     }
+   }
+ 
+@@ -112,7 +119,8 @@ if (is_a_target_toolchain) {
+   assert(
+       use_ozone || !(ozone_platform_cast || ozone_platform_drm ||
+                          ozone_platform_flatland || ozone_platform_headless ||
+-                         ozone_platform_x11 || ozone_platform_wayland),
++                         ozone_platform_x11 || ozone_platform_wayland ||
++                         ozone_platform_qnx_screen),
+       "Must set use_ozone to select ozone platforms")
+ }
+ 
 diff --git a/build/config/ui.gni b/build/config/ui.gni
 index b560f372c6..9c7be3a053 100644
 --- a/build/config/ui.gni
@@ -6834,7 +6878,7 @@ index db4bc58a50..ba66a9bee7 100644
  #error Undefined AGC configuration. Add a case above for the current platform.
  #endif
 diff --git a/mojo/core/channel_posix.cc b/mojo/core/channel_posix.cc
-index 0a3596382d..11130a7c62 100644
+index 0a3596382d..89c1d85f74 100644
 --- a/mojo/core/channel_posix.cc
 +++ b/mojo/core/channel_posix.cc
 @@ -28,6 +28,9 @@
@@ -6847,6 +6891,65 @@ index 0a3596382d..11130a7c62 100644
  
  #if (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID))
  #include "mojo/core/channel_linux.h"
+@@ -146,6 +149,14 @@ void ChannelPosix::ShutDownImpl() {
+ }
+ 
+ void ChannelPosix::Write(MessagePtr message) {
++#if defined(__QNX__)
++  {
++    char buf[80];
++    int n = snprintf(buf, sizeof(buf), "QNX:Mojo:Write sz=%u\n",
++                     message ? message->data_num_bytes() : 0);
++    write(2, buf, n);
++  }
++#endif
+   if (ShouldRecordSubsampledHistograms()) {
+     UMA_HISTOGRAM_COUNTS_100000("Mojo.Channel.WriteMessageSize",
+                                 message->data_num_bytes());
+@@ -210,14 +221,28 @@ bool ChannelPosix::GetReadPlatformHandlesForIpcz(
+ void ChannelPosix::StartOnIOThread() {
+   DCHECK(!read_watcher_);
+   DCHECK(!write_watcher_);
++#if defined(__QNX__)
++  {
++    char buf[80];
++    int n = snprintf(buf, sizeof(buf), "QNX:Mojo:StartIO fd=%d\n", socket_.get());
++    write(2, buf, n);
++  }
++#endif
+   read_watcher_ =
+       std::make_unique<base::MessagePumpForIO::FdWatchController>(FROM_HERE);
+   base::CurrentThread::Get()->AddDestructionObserver(this);
+   write_watcher_ =
+       std::make_unique<base::MessagePumpForIO::FdWatchController>(FROM_HERE);
+-  base::CurrentIOThread::Get()->WatchFileDescriptor(
++  bool ok = base::CurrentIOThread::Get()->WatchFileDescriptor(
+       socket_.get(), true /* persistent */, base::MessagePumpForIO::WATCH_READ,
+       read_watcher_.get(), this);
++#if defined(__QNX__)
++  {
++    char buf[80];
++    int n = snprintf(buf, sizeof(buf), "QNX:Mojo:WatchFD ok=%d\n", ok);
++    write(2, buf, n);
++  }
++#endif
+   base::AutoLock lock(write_lock_);
+   FlushOutgoingMessagesNoLock();
+ }
+@@ -268,6 +293,13 @@ void ChannelPosix::WillDestroyCurrentMessageLoop() {
+ }
+ 
+ void ChannelPosix::OnFileCanReadWithoutBlocking(int fd) {
++#if defined(__QNX__)
++  {
++    char buf[80];
++    int n = snprintf(buf, sizeof(buf), "QNX:Mojo:Read fd=%d\n", fd);
++    write(2, buf, n);
++  }
++#endif
+   CHECK_EQ(fd, socket_.get());
+ 
+   bool validation_error = false;
 diff --git a/mojo/public/cpp/bindings/lib/multiplex_router.cc b/mojo/public/cpp/bindings/lib/multiplex_router.cc
 index ed69861c96..b3b9ba7f47 100644
 --- a/mojo/public/cpp/bindings/lib/multiplex_router.cc
@@ -11838,6 +11941,22 @@ index b5cbddf28b..4c04d3d63f 100644
  
   private:
    const unsigned int name_;
+diff --git a/ui/ozone/BUILD.gn b/ui/ozone/BUILD.gn
+index 03398e253d..5ef4bfbd29 100644
+--- a/ui/ozone/BUILD.gn
++++ b/ui/ozone/BUILD.gn
+@@ -71,6 +71,11 @@ if (ozone_platform_flatland) {
+   ozone_platform_test_deps += [ "platform/flatland:flatland_unittests" ]
+ }
+ 
++if (ozone_platform_qnx_screen) {
++  ozone_platforms += [ "qnx_screen" ]
++  ozone_platform_deps += [ "platform/qnx_screen" ]
++}
++
+ platform_list_cc_file = "$target_gen_dir/platform_list.cc"
+ platform_list_h_file = "$target_gen_dir/platform_list.h"
+ platform_list_txt_file = "$target_gen_dir/platform_list.txt"
 diff --git a/ui/webui/resources/cr_components/localized_link/localized_link.ts b/ui/webui/resources/cr_components/localized_link/localized_link.ts
 index 1c471f96d7..9f9246c787 100644
 --- a/ui/webui/resources/cr_components/localized_link/localized_link.ts

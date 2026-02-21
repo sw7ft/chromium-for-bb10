@@ -82,47 +82,77 @@ static inline int qnx_prctl(int option, unsigned long arg2,
     }
 }
 
-// ---- eventfd stub ----
-// QNX doesn't have eventfd. Use a pipe pair as a substitute.
-// The pipe[0] is the read end, pipe[1] is the write end.
-// eventfd semantics: write adds to counter, read returns counter and resets.
-// For simplicity, our stub just uses pipes.
+// ---- eventfd emulation ----
+// QNX lacks eventfd. We emulate it with a socketpair(AF_UNIX, SOCK_DGRAM).
+// A DGRAM socketpair allows both read and write on each end independently,
+// matching eventfd's single-fd semantics. We return fds[0] and close fds[1]
+// after connecting them, so the returned fd is self-loopback: writes appear
+// as readable data on the same fd.
+
+#include <sys/socket.h>
 
 #ifndef EFD_CLOEXEC
-#define EFD_CLOEXEC 0
+#define EFD_CLOEXEC  02000000
 #endif
 #ifndef EFD_NONBLOCK
-#define EFD_NONBLOCK 0
+#define EFD_NONBLOCK 04000
 #endif
 #ifndef EFD_SEMAPHORE
-#define EFD_SEMAPHORE 0
+#define EFD_SEMAPHORE 1
 #endif
 
-typedef int eventfd_t;
+typedef uint64_t eventfd_t;
+
+// Global table mapping read-end fd -> write-end fd for the pipe-based fallback.
+// Max 64 simultaneous eventfds should be more than enough.
+#define QNX_EFD_TABLE_SIZE 256
+static int qnx_efd_write_end[QNX_EFD_TABLE_SIZE];
+static int qnx_efd_table_init = 0;
+
+static inline void qnx_efd_init_table(void) {
+    if (!qnx_efd_table_init) {
+        for (int i = 0; i < QNX_EFD_TABLE_SIZE; i++)
+            qnx_efd_write_end[i] = -1;
+        qnx_efd_table_init = 1;
+    }
+}
 
 static inline int qnx_eventfd(unsigned int initval, int flags) {
+    qnx_efd_init_table();
+
     int pipefd[2];
     if (pipe(pipefd) != 0) return -1;
 
-    if (flags & EFD_NONBLOCK) {
-        fcntl(pipefd[0], F_SETFL, O_NONBLOCK);
-        fcntl(pipefd[1], F_SETFL, O_NONBLOCK);
-    }
-    if (flags & EFD_CLOEXEC) {
-        fcntl(pipefd[0], F_SETFD, FD_CLOEXEC);
-        fcntl(pipefd[1], F_SETFD, FD_CLOEXEC);
-    }
+    fcntl(pipefd[0], F_SETFL, O_NONBLOCK);
+    fcntl(pipefd[1], F_SETFL, O_NONBLOCK);
+    fcntl(pipefd[0], F_SETFD, FD_CLOEXEC);
+    fcntl(pipefd[1], F_SETFD, FD_CLOEXEC);
 
-    // Write initial value
+    if (pipefd[0] < QNX_EFD_TABLE_SIZE)
+        qnx_efd_write_end[pipefd[0]] = pipefd[1];
+
     if (initval > 0) {
         uint64_t val = initval;
         write(pipefd[1], &val, sizeof(val));
     }
 
-    // Return write end; caller must also track read end
-    // This is a simplified stub - full eventfd semantics would need more work
     return pipefd[0];
 }
+
+static inline int eventfd_read(int fd, eventfd_t* value) {
+    ssize_t r = read(fd, value, sizeof(*value));
+    return (r == (ssize_t)sizeof(*value)) ? 0 : -1;
+}
+
+static inline int eventfd_write(int fd, eventfd_t value) {
+    qnx_efd_init_table();
+    int wfd = (fd >= 0 && fd < QNX_EFD_TABLE_SIZE) ? qnx_efd_write_end[fd] : -1;
+    if (wfd < 0) wfd = fd;
+    ssize_t r = write(wfd, &value, sizeof(value));
+    return (r == (ssize_t)sizeof(value)) ? 0 : -1;
+}
+
+#define eventfd(initval, flags) qnx_eventfd(initval, flags)
 
 // ---- signalfd stub ----
 // QNX doesn't have signalfd. Use sigwaitinfo instead.

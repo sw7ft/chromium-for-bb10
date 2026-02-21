@@ -17,11 +17,17 @@ $ ssh passport "cd /accounts/devuser/berry-deploy && ./content_shell \
 <html><head></head><body><h1>Hello from BlackBerry</h1></body></html>
 ```
 
+## In Progress (BerryBrowserNative)
+
+- **Mojo IPC debugging** -- eventfd emulation fixed; channel-level traces added to diagnose message delivery
+- **Ozone platform for QNX Screen** -- windowed rendering backend using `screen_create_window()` + Skia software rasterizer
+- **Browser chrome UI** -- Skia-rendered toolbar with URL bar, back/forward/reload buttons
+- **Touch and keyboard input** -- via `screen_get_event()` polling
+
 ## What Doesn't Work (Yet)
 
 - **HTTP/HTTPS loading** -- Mojo IPC message delivery is unreliable on QNX after the first navigation, blocking the network URL loader pipeline
 - **Multi-process mode** -- same Mojo IPC limitation
-- **Graphical/windowed mode** -- only headless is implemented
 - **Service workers, web workers** -- disabled
 
 ## Target Hardware
@@ -52,9 +58,10 @@ All patches apply against this commit. Fetch Chromium source using `depot_tools`
 │   ├── base/qnx/               # platform abstractions (memory, process, files, threading)
 │   ├── build/config/qnx/       # GN platform config (defines, sysroot, flags)
 │   ├── build/toolchain/qnx/    # GN toolchain (Clang 17 compile + GCC 9.3 link)
-│   ├── content/                 # shell platform delegate, stubs
+│   ├── content/                 # shell platform delegate, stubs, browser chrome
 │   ├── gpu/qnx/                # GPU stubs
 │   ├── sandbox/qnx/            # sandbox stubs
+│   ├── ui/ozone/platform/qnx_screen/  # Ozone platform backend for QNX Screen
 │   └── ...
 ├── build/
 │   ├── args.gn                  # GN build arguments

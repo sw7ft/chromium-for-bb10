@@ -1,0 +1,37 @@
+# Copyright 2025 SW7FT. All rights reserved.
+# QNX Screen Ozone platform backend
+
+import("//build/config/qnx/BUILD.gn")
+
+source_set("qnx_screen") {
+  sources = [
+    "ozone_platform_qnx_screen.cc",
+    "ozone_platform_qnx_screen.h",
+    "qnx_screen_event_source.cc",
+    "qnx_screen_event_source.h",
+    "qnx_screen_surface_factory.cc",
+    "qnx_screen_surface_factory.h",
+    "qnx_screen_window.cc",
+    "qnx_screen_window.h",
+    "qnx_screen_window_manager.cc",
+    "qnx_screen_window_manager.h",
+  ]
+
+  deps = [
+    "//base",
+    "//skia",
+    "//ui/base/cursor",
+    "//ui/base/ime",
+    "//ui/display/types",
+    "//ui/events",
+    "//ui/events/ozone/layout:layout",
+    "//ui/gfx",
+    "//ui/ozone:ozone_base",
+    "//ui/ozone/common",
+    "//ui/platform_window",
+  ]
+
+  libs = [
+    "screen",
+  ]
+}
