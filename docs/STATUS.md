@@ -89,9 +89,9 @@ Do not use subpaths like `berry-deploy/y/` — `run-on-passport.sh` expects file
 
 **Debug cycle:** Add `write(2, "QNX:...\n", N)` traces → rebuild → patch → deploy → run → read last trace line before hang → add finer traces → repeat.
 
-### ⚠️ Workflow: User runs deploy/run
+### ⚠️ Workflow: Deploy/run from local shell
 
-**The user always executes deploy and run commands themselves.** The assistant does not run `run-on-passport.sh`, SSH, or remote execution. After building, the assistant provides the commands; the user runs them on their shell and pastes the output back. This avoids SSH/shell automation issues and lets the user control when to deploy.
+**Deploy and run commands must be executed from the local shell.** After building, run the deploy commands manually and check the output. This avoids SSH/shell automation issues and provides direct control over when to deploy.
 
 ---
 
@@ -109,11 +109,11 @@ Do not use subpaths like `berry-deploy/y/` — `run-on-passport.sh` expects file
 
 ---
 
-## INSTRUCTIONS FOR NEXT AGENT
+## Development Notes
 
-### Workflow: User executes deploy/run
+### Workflow: Deploy/run
 
-**Do not run deploy or run commands yourself.** Provide the commands; the user runs them and pastes the output back. This applies to `run-on-passport.sh`, SSH, scp, or any remote execution. Build (`ninja`) on the container is fine to run; patch and deploy/run are for the user.
+Deploy and run commands (`run-on-passport.sh`, SSH, scp, or any remote execution) should be run manually from the local shell. Build (`ninja`) can be run directly in the container; patch and deploy/run are done from the host.
 
 ### Debug methodology (pick up from here)
 
@@ -124,7 +124,7 @@ Do not use subpaths like `berry-deploy/y/` — `run-on-passport.sh` expects file
    patchelf --set-interpreter /accounts/devuser/berry-deploy/ldqnx.so.2 /root/mytmp/berry-deploy/content_shell
    ```
 
-2. **Deploy and run** — provide these commands for the user to run (user pastes output back):
+2. **Deploy and run** — execute from local shell:
    ```bash
    /root/mytmp/berry-deploy/run-on-passport.sh --deploy
    ```
