@@ -469,7 +469,7 @@ void AdAuctionNegativeTargeter::AddInterestGroupInfo(
     const blink::InterestGroup::AdditionalBidKey& key) {
   // Should not have any duplicates since (buyer, name) ought to be the DB
   // primary key.
-  DCHECK(!negative_interest_groups_.contains(std::make_pair(buyer, name)));
+  DCHECK(negative_interest_groups_.count(std::make_pair(buyer, name)) == 0);
   auto& spot = negative_interest_groups_[std::make_pair(buyer, name)];
   spot.joining_origin = joining_origin;
   spot.key = key;

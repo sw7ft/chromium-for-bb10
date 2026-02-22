@@ -623,7 +623,7 @@ void BackForwardCacheMetrics::SetRelatedActiveContentsInfo(
                                                  RenderFrameHost* rfh) {
     const SiteInfo& site_info = static_cast<RenderFrameHostImpl*>(rfh)
                                     ->last_committed_url_derived_site_info();
-    if (doc_count_in_page.contains(site_info)) {
+    if (doc_count_in_page.count(site_info) > 0) {
       doc_count_in_page[site_info]++;
     } else {
       doc_count_in_page[site_info] = 1;

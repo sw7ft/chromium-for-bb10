@@ -38,7 +38,7 @@ void TracingProcessSetMonitor::DevToolsAgentHostDestroyed(
 
 void TracingProcessSetMonitor::DevToolsAgentHostProcessChanged(
     DevToolsAgentHost* host) {
-  if (!hosts_.contains(host)) {
+  if (hosts_.count(host) == 0) {
     return;
   }
   MaybeAddProcess(host);

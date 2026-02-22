@@ -101,7 +101,8 @@ AggregatableReportScheduler::GetFailedReportDelay(int failed_send_attempts) {
     return absl::nullopt;
 
   return kInitialRetryDelay *
-         std::pow(kRetryDelayFactor, failed_send_attempts - 1);
+         std::pow(static_cast<double>(kRetryDelayFactor),
+                  static_cast<double>(failed_send_attempts - 1));
 }
 
 AggregatableReportScheduler::TimerDelegate::TimerDelegate(

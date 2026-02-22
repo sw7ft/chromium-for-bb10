@@ -28,6 +28,9 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
 #include "third_party/skia/include/core/SkGraphics.h"
+#if BUILDFLAG(IS_QNX)
+#include <unistd.h>
+#endif
 #include "ui/base/ime/init/input_method_initializer.h"
 #include "ui/gfx/font_util.h"
 
@@ -81,6 +84,9 @@ int BrowserMainRunnerImpl::Initialize(MainFunctionParams parameters) {
     initialization_started_ = true;
 
     SkGraphics::Init();
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:BMRI:1 SkiaInit\n", 20);
+#endif
 
     if (parameters.command_line->HasSwitch(switches::kWaitForDebugger)) {
       base::debug::WaitForDebugger(60, true);
@@ -94,48 +100,64 @@ int BrowserMainRunnerImpl::Initialize(MainFunctionParams parameters) {
 
 #if BUILDFLAG(IS_WIN)
     base::win::EnableHighDPISupport();
-    // Ole must be initialized before starting message pump, so that TSF
-    // (Text Services Framework) module can interact with the message pump
-    // on Windows 8 Metro mode.
     ole_initializer_ = std::make_unique<ui::ScopedOleInitializer>();
-#endif  // BUILDFLAG(IS_WIN)
+#endif
 
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:BMRI:2 Fonts\n", 17);
+#endif
     gfx::InitializeFonts();
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:BMRI:3 MainLoop\n", 20);
+#endif
 
     auto created_main_parts_closure =
         std::move(parameters.created_main_parts_closure);
 
     main_loop_ = std::make_unique<BrowserMainLoop>(
         std::move(parameters), std::move(scoped_execution_fence_));
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:BMRI:4 Init\n", 16);
+#endif
 
     main_loop_->Init();
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:BMRI:5 EarlyInit\n", 21);
+#endif
 
     if (created_main_parts_closure) {
       std::move(created_main_parts_closure).Run(main_loop_->parts());
     }
 
     const int early_init_error_code = main_loop_->EarlyInitialization();
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:BMRI:6 Toolkit\n", 19);
+#endif
     if (early_init_error_code > 0) {
       main_loop_->CreateMessageLoopForEarlyShutdown();
       return early_init_error_code;
     }
 
-    // Must happen before we try to use a message loop or display any UI.
     if (!main_loop_->InitializeToolkit()) {
       main_loop_->CreateMessageLoopForEarlyShutdown();
       return 1;
     }
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:BMRI:7 MsgLoop\n", 19);
+#endif
 
     main_loop_->PreCreateMainMessageLoop();
     main_loop_->CreateMainMessageLoop();
     main_loop_->PostCreateMainMessageLoop();
-
-    // WARNING: If we get a WM_ENDSESSION, objects created on the stack here
-    // are NOT deleted. If you need something to run during WM_ENDSESSION add it
-    // to browser_shutdown::Shutdown or BrowserProcess::EndSession.
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:BMRI:8 InputMethod\n", 23);
+#endif
 
     ui::InitializeInputMethod();
   }
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:BMRI:9 StartupTasks\n", 24);
+#endif
   main_loop_->CreateStartupTasks();
   int result_code = main_loop_->GetResultCode();
   if (result_code > 0) {

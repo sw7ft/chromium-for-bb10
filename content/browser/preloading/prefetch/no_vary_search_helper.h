@@ -138,8 +138,8 @@ void IterateCandidates(
         PrefetchKeyTraits<PrefetchKey>::GetURL(it->first);
 
     if (!PrefetchKeyTraits<PrefetchKey>::NonUrlPartIsSame(key, it->first) ||
-        !prefetch_container_url.possibly_invalid_spec().starts_with(
-            url_with_no_query.possibly_invalid_spec())) {
+        prefetch_container_url.possibly_invalid_spec().find(
+                url_with_no_query.possibly_invalid_spec()) != 0) {
       break;
     }
 

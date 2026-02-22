@@ -31,7 +31,7 @@ bool AdAuctionPageData::WitnessedAuctionResultForOrigin(
     return false;
   }
 
-  return it->second.contains(response);
+  return it->second.count(response) > 0;
 }
 
 void AdAuctionPageData::AddAuctionSignalsWitnessForOrigin(

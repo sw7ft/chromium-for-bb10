@@ -1894,7 +1894,7 @@ CreateNotRestoredExplanation(
         // number of details reported is limited.
         auto details_list = std::make_unique<
             protocol::Array<Page::BackForwardCacheBlockingDetails>>();
-        CHECK(details.contains(feature));
+        CHECK(details.count(feature) > 0);
         for (const auto& detail : details.at(feature)) {
           if (detail->line_number != 0 && detail->column_number != 0) {
             details_list->push_back(BlockingDetailsToProtocol(detail));

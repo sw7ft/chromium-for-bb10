@@ -113,8 +113,8 @@ class CONTENT_EXPORT InterestGroupAuction
 
     ~PostAuctionSignals();
 
-    PostAuctionSignals(PostAuctionSignals&) = delete;
-    PostAuctionSignals& operator=(PostAuctionSignals&) = delete;
+    PostAuctionSignals(const PostAuctionSignals&) = delete;
+    PostAuctionSignals& operator=(const PostAuctionSignals&) = delete;
 
     // Computes appropriate information to provide for winningBid information,
     // dependent on whether bidder-currency or seller-currency is expected.

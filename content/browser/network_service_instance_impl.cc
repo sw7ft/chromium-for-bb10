@@ -7,6 +7,11 @@
 #include <memory>
 #include <string>
 #include <utility>
+#if defined(__QNX__) || defined(__QNXNTO__)
+#include <unistd.h>
+#include <cstdio>
+#include <pthread.h>
+#endif
 
 #include "base/base_paths.h"
 #include "base/check.h"
@@ -162,9 +167,22 @@ static NetworkServiceClient* g_client = nullptr;
 
 void CreateInProcessNetworkServiceOnThread(
     mojo::PendingReceiver<network::mojom::NetworkService> receiver) {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    char m[96];
+    int n = snprintf(m, sizeof(m), "QNX:CIPNST:enter tid=%lu\n", (unsigned long)pthread_self());
+    ::write(2, m, n);
+  }
+#endif
   g_in_process_instance = new network::NetworkService(
       nullptr /* registry */, std::move(receiver),
       true /* delay_initialization_until_set_client */);
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    const char m[] = "QNX:CIPNST:done\n";
+    ::write(2, m, sizeof(m) - 1);
+  }
+#endif
 }
 
 // A utility function to make it clear what behavior is expected by the network
@@ -312,6 +330,12 @@ void CreateNetworkContextInternal(
     }
   }
 
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    const char m[] = "QNX:CNCI:enter\n";
+    ::write(2, m, sizeof(m) - 1);
+  }
+#endif
   // This might recreate g_client if the network service needed to be restarted.
   auto* network_service = GetNetworkService();
 
@@ -341,20 +365,51 @@ scoped_refptr<base::SequencedTaskRunner>& GetNetworkTaskRunnerStorage() {
 void CreateInProcessNetworkService(
     mojo::PendingReceiver<network::mojom::NetworkService> receiver) {
   TRACE_EVENT0("loading", "CreateInProcessNetworkService");
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    char m[96];
+    int n = snprintf(m, sizeof(m), "QNX:CIPNS:enter tid=%lu\n", (unsigned long)pthread_self());
+    ::write(2, m, n);
+  }
+#endif
   scoped_refptr<base::SingleThreadTaskRunner> task_runner;
   if (base::FeatureList::IsEnabled(kNetworkServiceDedicatedThread)) {
     base::Thread::Options options(base::MessagePumpType::IO, 0);
     GetNetworkServiceDedicatedThread().StartWithOptions(std::move(options));
     task_runner = GetNetworkServiceDedicatedThread().task_runner();
+#if defined(__QNX__) || defined(__QNXNTO__)
+    {
+      const char m[] = "QNX:CIPNS:dedicatedThread\n";
+      ::write(2, m, sizeof(m) - 1);
+    }
+#endif
   } else {
     task_runner = GetIOThreadTaskRunner({});
+#if defined(__QNX__) || defined(__QNXNTO__)
+    {
+      const char m[] = "QNX:CIPNS:ioThread\n";
+      ::write(2, m, sizeof(m) - 1);
+    }
+#endif
   }
 
   GetNetworkTaskRunnerStorage() = std::move(task_runner);
 
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    const char m[] = "QNX:CIPNS:postingTask\n";
+    ::write(2, m, sizeof(m) - 1);
+  }
+#endif
   GetNetworkTaskRunner()->PostTask(
       FROM_HERE, base::BindOnce(&CreateInProcessNetworkServiceOnThread,
                                 std::move(receiver)));
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    const char m[] = "QNX:CIPNS:posted\n";
+    ::write(2, m, sizeof(m) - 1);
+  }
+#endif
 }
 
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_LINUX)
@@ -574,10 +629,23 @@ class NetworkServiceInstancePrivate {
 };
 
 network::mojom::NetworkService* GetNetworkService() {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    char m[96];
+    int n = snprintf(m, sizeof(m), "QNX:GNS:enter tid=%lu\n", (unsigned long)pthread_self());
+    ::write(2, m, n);
+  }
+#endif
   if (!g_network_service_remote)
     g_network_service_remote = new mojo::Remote<network::mojom::NetworkService>;
   if (!g_network_service_remote->is_bound() ||
       !g_network_service_remote->is_connected()) {
+#if defined(__QNX__) || defined(__QNXNTO__)
+    {
+      const char m[] = "QNX:GNS:needsCreate!\n";
+      ::write(2, m, sizeof(m) - 1);
+    }
+#endif
     bool service_was_bound = g_network_service_remote->is_bound();
     g_network_service_remote->reset();
     if (GetContentClient()->browser()->IsShuttingDown()) {
@@ -986,6 +1054,21 @@ void CreateNetworkContextInNetworkService(
   // Create network context immediately without thread hops.
   CreateNetworkContextInternal(std::move(context), std::move(params),
                                grant_result);
+#elif defined(__QNX__) || defined(__QNXNTO__)
+  {
+    SandboxGrantResult grant_result = SandboxGrantResult::kNoMigrationRequested;
+    if (!params->file_paths) {
+      grant_result = SandboxGrantResult::kDidNotAttemptToGrantSandboxAccess;
+    } else if (!params->file_paths->unsandboxed_data_path) {
+      grant_result = SandboxGrantResult::kDidNotAttemptToGrantSandboxAccess;
+    }
+    {
+      const char m[] = "QNX:CNCINS:directCreate\n";
+      ::write(2, m, sizeof(m) - 1);
+    }
+    CreateNetworkContextInternal(std::move(context), std::move(params),
+                                 grant_result);
+  }
 #else
   // Restrict disk access to a certain path (on another thread) and continue
   // with network context creation.

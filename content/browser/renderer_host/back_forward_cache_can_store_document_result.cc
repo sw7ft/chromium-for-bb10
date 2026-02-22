@@ -587,7 +587,7 @@ void BackForwardCacheCanStoreDocumentResult::NoDueToFeatures(
   AddNotRestoredReason(
       BackForwardCacheMetrics::NotRestoredReason::kBlocklistedFeatures);
   for (const auto& [k, v] : map) {
-    if (blocking_details_map_.contains(k)) {
+    if (blocking_details_map_.count(k) > 0) {
       for (auto& details : map[k]) {
         blocking_details_map_[k].push_back(std::move(details));
       }

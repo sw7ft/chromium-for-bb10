@@ -8,6 +8,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+#if BUILDFLAG(IS_QNX)
+#include <unistd.h>
+#endif
 
 #include "base/auto_reset.h"
 #include "base/command_line.h"
@@ -34,6 +37,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/system/sys_info.h"
 #include "base/task/sequenced_task_runner.h"
+#include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "base/timer/elapsed_timer.h"
 #include "base/trace_event/trace_conversion_helper.h"
@@ -1181,6 +1185,9 @@ std::unique_ptr<NavigationRequest> NavigationRequest::Create(
     }
   }
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:NRCreate:1 ctor\n", 20);
+#endif
   std::unique_ptr<NavigationRequest> navigation_request(new NavigationRequest(
       frame_tree_node, std::move(common_params), std::move(navigation_params),
       std::move(commit_params), browser_initiated,
@@ -1194,6 +1201,9 @@ std::unique_ptr<NavigationRequest> NavigationRequest::Create(
       is_embedder_initiated_fenced_frame_navigation,
       mojo::NullReceiver() /* renderer_cancellation_listener */,
       embedder_shared_storage_context));
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:NRCreate:2 done\n", 20);
+#endif
 
   return navigation_request;
 }
@@ -1601,13 +1611,26 @@ NavigationRequest::NavigationRequest(
          commit_params_->data_url_as_string.empty());
 #endif
   CheckSoftNavigationHeuristicsInvariants();
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:NR:1 body\n", 14);
+#endif
 
+#if !BUILDFLAG(IS_QNX)
   ScopedCrashKeys crash_keys(*this);
+#endif
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:NR:1a crash\n", 16);
+#endif
 
   ComputeDownloadPolicy();
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:NR:1b dlpol\n", 16);
+#endif
 
-  // Ensure the blink::RuntimeFeatureStateContext is initialized.
   runtime_feature_state_context_ = blink::RuntimeFeatureStateContext();
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:NR:1c rtfeat\n", 17);
+#endif
 
   TRACE_EVENT1("navigation", "NavigationRequest::NavigationRequest",
                "navigation_request", this);
@@ -1615,6 +1638,9 @@ NavigationRequest::NavigationRequest(
                                     navigation_id_, "navigation_request", this);
   TRACE_EVENT_NESTABLE_ASYNC_BEGIN0("navigation", "Initializing",
                                     navigation_id_);
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:NR:1d trace\n", 16);
+#endif
 
   if (GetInitiatorFrameToken().has_value()) {
     RenderFrameHostImpl* initiator_rfh = RenderFrameHostImpl::FromFrameToken(
@@ -1622,16 +1648,11 @@ NavigationRequest::NavigationRequest(
     if (initiator_rfh)
       initiator_document_token_ = initiator_rfh->GetDocumentToken();
   }
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:NR:1e init\n", 15);
+#endif
 
-  // Spec: https://github.com/whatwg/html/issues/8846
-  // We only allow the parent to access a subframe resource timing if the
-  // navigation is container-initiated, e.g. iframe changed src.
   if (begin_params_->is_container_initiated) {
-    // Only same-origin navigations without cross-origin redirects can
-    // expose response details (status-code / mime-type).
-    // https://github.com/whatwg/fetch/issues/1602
-    // Note that this condition checks this navigation is not cross origin.
-    // Cross-origin redirects are checked as part of OnRequestRedirected().
     commit_params_->navigation_timing->parent_resource_timing_access =
         GetParentFrame()->GetLastCommittedOrigin().IsSameOriginWith(GetURL())
             ? blink::mojom::ParentResourceTimingAccess::
@@ -1642,6 +1663,9 @@ NavigationRequest::NavigationRequest(
 
   navigation_or_document_handle_ =
       NavigationOrDocumentHandle::CreateForNavigation(*this);
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:NR:1f navhdl\n", 17);
+#endif
 
   policy_container_builder_.emplace(
       GetParentFrame(),
@@ -1656,14 +1680,19 @@ NavigationRequest::NavigationRequest(
         frame_entry->document_sequence_number();
   }
 
-  // Sanitize the referrer.
   common_params_->referrer = Referrer::SanitizeForRequest(
       common_params_->url, *common_params_->referrer);
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:NR:2 gpu\n", 13);
+#endif
   if (IsInPrimaryMainFrame()) {
     loading_mem_tracker_ =
         PeakGpuMemoryTracker::Create(PeakGpuMemoryTracker::Usage::PAGE_LOAD);
   }
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:NR:3 post-gpu\n", 18);
+#endif
 
   if (frame_tree_node_->IsInFencedFrameTree()) {
     commit_params_->frame_policy.sandbox_flags |=
@@ -1765,7 +1794,9 @@ NavigationRequest::NavigationRequest(
   }
   commit_params_->is_browser_initiated = browser_initiated;
 
-  // Update the load flags with cache information.
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:NR:4 flags\n", 15);
+#endif
   UpdateLoadFlagsWithCacheFlags(&begin_params_->load_flags,
                                 common_params_->navigation_type,
                                 common_params_->method == "POST");
@@ -1867,6 +1898,9 @@ NavigationRequest::NavigationRequest(
     }
   }
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:NR:5 headers\n", 17);
+#endif
   begin_params_->headers = headers.ToString();
 
 #if BUILDFLAG(IS_ANDROID)
@@ -1888,6 +1922,9 @@ NavigationRequest::NavigationRequest(
   navigation_handle_proxy_ = std::make_unique<NavigationHandleProxy>(this);
 #endif
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:NR:6 preconn\n", 17);
+#endif
   if (NeedsUrlLoader() && common_params_->url.SchemeIsHTTPOrHTTPS()) {
     BrowserContext* browser_context =
         frame_tree_node_->navigator().controller().GetBrowserContext();
@@ -2000,6 +2037,9 @@ NavigationRequest::NavigationRequest(
         frame_tree_node_->current_frame_host(),
         blink::mojom::WebFeature::kSameDocumentCrossOriginInitiator);
   }
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:NR:7 end\n", 13);
+#endif
 }
 
 NavigationRequest::~NavigationRequest() {
@@ -2161,7 +2201,9 @@ void NavigationRequest::BeginNavigation() {
   EnterChildTraceEvent("BeginNavigation", this);
   DCHECK(!loader_);
   DCHECK(!HasRenderFrameHost());
+#if !BUILDFLAG(IS_QNX)
   ScopedCrashKeys crash_keys(*this);
+#endif
 
   if (begin_navigation_callback_for_testing_) {
     std::move(begin_navigation_callback_for_testing_).Run();
@@ -2441,6 +2483,9 @@ void NavigationRequest::OnFencedFrameURLMappingComplete(
 }
 
 void NavigationRequest::BeginNavigationImpl() {
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Browser:BeginNavImpl\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   base::ElapsedTimer timer;
   SetState(WILL_START_NAVIGATION);
 #if BUILDFLAG(IS_ANDROID)
@@ -2485,6 +2530,12 @@ void NavigationRequest::BeginNavigationImpl() {
   net::Error net_error = CheckContentSecurityPolicy(
       false /* has_followed redirect */,
       false /* url_upgraded_after_redirect */, false /* is_response_check */);
+#if BUILDFLAG(IS_QNX)
+  if (net_error != net::OK) {
+    const char m[] = "QNX:Browser:CSPblocked\n";
+    ::write(2, m, sizeof(m) - 1);
+  }
+#endif
   if (net_error != net::OK) {
     // Create a navigation handle so that the correct error code can be set on
     // it by OnRequestFailedInternal().
@@ -2512,8 +2563,14 @@ void NavigationRequest::BeginNavigationImpl() {
     // has destroyed the NavigationRequest.
     return;
   }
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Browser:postCred\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
 
   StartNavigation();
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Browser:postStartNav\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
 
   // The previous call to `StartNavigation()` could have changed the
   // is_overriding_user_agent value in CommitNavigationParams. If we're trying
@@ -2537,6 +2594,9 @@ void NavigationRequest::BeginNavigationImpl() {
     return;
   }
 
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Browser:preAboutSrcDoc\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   if (CheckAboutSrcDoc() == AboutSrcDocCheckResult::BLOCK_REQUEST) {
     OnRequestFailedInternal(
         network::URLLoaderCompletionStatus(net::ERR_INVALID_URL),
@@ -2565,9 +2625,15 @@ void NavigationRequest::BeginNavigationImpl() {
   // should be done at the beginning of the navigation instead. Otherwise, the
   // attribute might have change while waiting for the beforeunload handlers to
   // complete.
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Browser:preNeedsUrlLoader\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   SetupCSPEmbeddedEnforcement();
 
   if (!NeedsUrlLoader()) {
+#if BUILDFLAG(IS_QNX)
+    { const char m[] = "QNX:Browser:NoUrlLoader\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
     // The types of pages that don't need a URL Loader should never get served
     // from the BackForwardCache or activated from a prerender.
     DCHECK(!IsServedFromBackForwardCache());
@@ -2651,6 +2717,9 @@ void NavigationRequest::BeginNavigationImpl() {
 
 void NavigationRequest::
     SelectFrameHostForCrossDocumentNavigationWithNoUrlLoader() {
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Browser:SelFrameNoLoader\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   DCHECK(!NeedsUrlLoader());
   CHECK(!HasRenderFrameHost())
       << "`render_frame_host_` should not be set before the "
@@ -3082,7 +3151,9 @@ void NavigationRequest::OnRequestRedirected(
     const net::RedirectInfo& redirect_info,
     const net::NetworkAnonymizationKey& network_anonymization_key,
     network::mojom::URLResponseHeadPtr response_head) {
+#if !BUILDFLAG(IS_QNX)
   ScopedCrashKeys crash_keys(*this);
+#endif
 
   // Sanity check - this can only be set at commit time.
   DCHECK(!auth_challenge_info_);
@@ -3504,6 +3575,17 @@ void NavigationRequest::DetermineOriginAgentClusterEndResult() {
   DCHECK(state_ == WILL_PROCESS_RESPONSE ||
          state_ == WILL_COMMIT_WITHOUT_URL_LOADER ||
          state_ == WILL_FAIL_REQUEST || state_ == CANCELING);
+#if BUILDFLAG(IS_QNX)
+  // QNX workaround: skip full OAC logic for commit-without-loader (e.g.
+  // about:blank). This path can hang or crash on QNX; use minimal safe defaults.
+  if (state_ == WILL_COMMIT_WITHOUT_URL_LOADER) {
+    origin_agent_cluster_end_result_ =
+        OriginAgentClusterEndResult::kNotRequestedAndNotOriginKeyed;
+    commit_params_->origin_agent_cluster = true;  // opaque origin for about:blank
+    commit_params_->origin_agent_cluster_left_as_default = true;
+    return;
+  }
+#endif
   auto* policy = ChildProcessSecurityPolicyImpl::GetInstance();
   url::Origin origin = GetOriginToCommit().value();
   const IsolationContext& isolation_context =
@@ -3956,11 +4038,21 @@ void NavigationRequest::OnResponseStarted(
     net::NetworkAnonymizationKey network_anonymization_key,
     absl::optional<SubresourceLoaderParams> subresource_loader_params,
     EarlyHints early_hints) {
+#if BUILDFLAG(IS_QNX)
+  {
+    char buf[128];
+    int n = snprintf(buf, sizeof(buf), "QNX:NR:OnResponse code=%d\n",
+                     response_head ? response_head->headers->response_code() : -1);
+    write(2, buf, n);
+  }
+#endif
   if (is_download) {
     download_policy().RecordHistogram();
   }
 
+#if !BUILDFLAG(IS_QNX)
   ScopedCrashKeys crash_keys(*this);
+#endif
 
   // The |loader_|'s job is finished. It must not call the NavigationRequest
   // anymore from now.
@@ -4207,9 +4299,15 @@ void NavigationRequest::OnResponseStarted(
     // OnRequestFailedInternal has destroyed the NavigationRequest.
   }
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:NR:preSelect\n", 17);
+#endif
   SelectFrameHostForOnResponseStarted(std::move(url_loader_client_endpoints),
                                       is_download,
                                       std::move(subresource_loader_params));
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:NR:postSelect\n", 18);
+#endif
 }
 
 void NavigationRequest::SelectFrameHostForOnResponseStarted(
@@ -4219,11 +4317,15 @@ void NavigationRequest::SelectFrameHostForOnResponseStarted(
   CHECK(!HasRenderFrameHost())
       << "`render_frame_host_` should not be set before the "
          "`NavigationRequest` starts to select the RFH.";
+#if !BUILDFLAG(IS_QNX)
   ScopedCrashKeys crash_keys(*this);
+#endif
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:SFRS:0\n", 11);
+#endif
 
   std::string rfh_selected_reason;
 
-  // Select an appropriate renderer to commit the navigation.
   if (IsServedFromBackForwardCache()) {
     NavigationControllerImpl* controller = GetNavigationController();
     auto entry =
@@ -4251,10 +4353,16 @@ void NavigationRequest::SelectFrameHostForOnResponseStarted(
                                  prerender_frame_tree_node_id_.value())
                              ->GetSafeRef();
   } else if (response_should_be_rendered_) {
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:SFRS:1 preGetFH\n", 20);
+#endif
     if (auto result =
             frame_tree_node_->render_manager()->GetFrameHostForNavigation(
                 this, &browsing_context_group_swap_, &rfh_selected_reason);
         result.has_value()) {
+#if BUILDFLAG(IS_QNX)
+      write(2, "QNX:SFRS:2 gotRFH\n", 18);
+#endif
       render_frame_host_ = result.value()->GetSafeRef();
     } else {
       switch (result.error()) {
@@ -4291,6 +4399,9 @@ void NavigationRequest::SelectFrameHostForOnResponseStarted(
   } else {
     render_frame_host_ = absl::nullopt;
   }
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:SFRS:3 postRFH\n", 19);
+#endif
   if (!HasRenderFrameHost()) {
     DCHECK(!response_should_be_rendered_);
   }
@@ -4329,29 +4440,31 @@ void NavigationRequest::SelectFrameHostForOnResponseStarted(
   // started.  Hence, about:blank is the only possible URL which both uses
   // unassigned SiteInstances and can reach this point (via an extension
   // redirect).
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:SFRS:4 preURLCheck\n", 22);
+#endif
   if (common_params_->url.IsAboutBlank()) {
-    // TODO(alexmos): Convert to a CHECK after verifying that this doesn't
-    // happen in practice.
     if (!WasServerRedirect()) {
       DVLOG(1) << "about:blank should only go through the network stack "
                << "when an extension redirects to it.";
+#if !BUILDFLAG(IS_QNX)
       base::debug::DumpWithoutCrashing();
+#endif
     }
   } else {
-    // TODO(alexmos): Convert to a CHECK after verifying that this doesn't
-    // happen in practice.
     if (!SiteInstanceImpl::ShouldAssignSiteForUrlInfo(GetUrlInfo())) {
       DVLOG(1) << "This URL was unexpectedly loaded through the network stack: "
                << common_params_->url;
+#if !BUILDFLAG(IS_QNX)
       base::debug::DumpWithoutCrashing();
+#endif
     }
   }
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:SFRS:5 preSetSite\n", 21);
+#endif
   if (HasRenderFrameHost()) {
-    // Set the site URL now if it hasn't been set already. If the site requires
-    // a dedicated process, this will lock the process to that site, which will
-    // prevent other sites from incorrectly reusing this process. See
-    // https://crbug.com/738634.
     SiteInstanceImpl* instance = GetRenderFrameHost()->GetSiteInstance();
     if (!instance->HasSite() &&
         SiteInstanceImpl::ShouldAssignSiteForUrlInfo(GetUrlInfo())) {
@@ -4375,6 +4488,9 @@ void NavigationRequest::SelectFrameHostForOnResponseStarted(
     // IsUnused() value from the same process when making a process reuse
     // decision.
     GetRenderFrameHost()->GetProcess()->SetIsUsed();
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:SFRS:6 setUsed\n", 19);
+#endif
 
     // Now that we know the IsolationContext for the assigned SiteInstance, we
     // opt the origin into OAC here if needed. Note that this doesn't need to
@@ -4445,8 +4561,13 @@ void NavigationRequest::SelectFrameHostForOnResponseStarted(
     }
   }
 
+#if !BUILDFLAG(IS_QNX)
   devtools_instrumentation::OnNavigationResponseReceived(*this,
                                                          *response_head_);
+#endif
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:SFRS:7a postDev\n", 20);
+#endif
 
   // The response code indicates that this is an error page, but we don't
   // know how to display the content.  We follow Firefox here and show our
@@ -4467,6 +4588,9 @@ void NavigationRequest::SelectFrameHostForOnResponseStarted(
   // The CSP 'navigate-to' directive needs to know whether the response is a
   // redirect or not in order to perform its checks. This is the reason why we
   // need to check the CSP both on request and response.
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:SFRS:7b preCSP\n", 19);
+#endif
   net::Error net_error = CheckContentSecurityPolicy(
       was_redirected_ /* has_followed_redirect */,
       false /* url_upgraded_after_redirect */, true /* is_response_check */);
@@ -4482,13 +4606,16 @@ void NavigationRequest::SelectFrameHostForOnResponseStarted(
     return;
   }
 
-  // TODO(https://crbug.com/1454273): Remove.
+#if !BUILDFLAG(IS_QNX)
   SCOPED_CRASH_KEY_STRING256(
       "Bug1454273", "base_host_for_data_url",
       common_params_->base_url_for_data_url.host_piece());
   SCOPED_CRASH_KEY_STRING1024("Bug1454273", "rfh_selected_reason",
                               rfh_selected_reason);
-
+#endif
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:SFRS:8 preFence\n", 20);
+#endif
   if (HasRenderFrameHost() &&
       !CheckPermissionsPoliciesForFencedFrames(GetOriginToCommit().value())) {
     OnRequestFailedInternal(
@@ -4501,11 +4628,25 @@ void NavigationRequest::SelectFrameHostForOnResponseStarted(
   }
 
   // Check if the navigation should be allowed to proceed.
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:SFRS:9 preWPR\n", 18);
+#endif
   WillProcessResponse();
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:SFRS:10 postWPR\n", 20);
+#endif
 }
 
 void NavigationRequest::OnRequestFailed(
     const network::URLLoaderCompletionStatus& status) {
+#if BUILDFLAG(IS_QNX)
+  {
+    char buf[128];
+    int n = snprintf(buf, sizeof(buf), "QNX:NR:OnFailed err=%d\n",
+                     status.error_code);
+    write(2, buf, n);
+  }
+#endif
   DCHECK_NE(status.error_code, net::OK);
 
   OnRequestFailedInternal(
@@ -4601,7 +4742,9 @@ void NavigationRequest::OnRequestFailedInternal(
   CheckStateTransition(WILL_FAIL_REQUEST);
   DCHECK(!(status.error_code == net::ERR_ABORTED &&
            error_page_content.has_value()));
+#if !BUILDFLAG(IS_QNX)
   ScopedCrashKeys crash_keys(*this);
+#endif
 
   // The request failed, the |loader_| must not call the NavigationRequest
   // anymore from now while the error page is being loaded.
@@ -4947,6 +5090,15 @@ void NavigationRequest::OnStartChecksComplete(
   // Reset the compositor lock before starting the loader.
   compositor_lock_.reset();
 
+#if BUILDFLAG(IS_QNX)
+  {
+    char buf[128];
+    int n = snprintf(buf, sizeof(buf), "QNX:NR:CreateLoader url=%s\n",
+                     common_params_->url.spec().substr(0, 80).c_str());
+    write(2, buf, n);
+  }
+#endif
+
   BrowserContext* browser_context =
       frame_tree_node_->navigator().controller().GetBrowserContext();
 
@@ -5000,7 +5152,19 @@ void NavigationRequest::OnStartChecksComplete(
                     IsInMainFrame() ? "MainFrame" : "Subframe"}),
       base::TimeTicks::Now() - will_start_request_time_);
 
+#if BUILDFLAG(IS_QNX)
+  {
+    const char m[] = "QNX:NR:preLoaderStart\n";
+    write(2, m, sizeof(m) - 1);
+  }
+#endif
   loader_->Start();
+#if BUILDFLAG(IS_QNX)
+  {
+    const char m[] = "QNX:NR:postLoaderStart\n";
+    write(2, m, sizeof(m) - 1);
+  }
+#endif
   // DO NOT ADD CODE after this. The previous call to
   // NavigationURLLoader::Start() could cause the destruction of the
   // NavigationRequest.
@@ -5426,6 +5590,9 @@ void NavigationRequest::OnWillProcessResponseChecksComplete(
     return;
   };
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:NR:preRunCDC\n", 17);
+#endif
   RunCommitDeferringConditions();
   // DO NOT ADD CODE after this. The previous call to
   // RunCommitDeferringConditions may have caused the destruction of the
@@ -5566,6 +5733,9 @@ void NavigationRequest::AddOldPageInfoToCommitParamsIfNeeded() {
 }
 
 void NavigationRequest::CommitNavigation() {
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Browser:NR_CommitNav\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   // A navigation request should only commit once the response has been
   // processed.
   DCHECK_GE(state_, WILL_PROCESS_RESPONSE);
@@ -5574,22 +5744,46 @@ void NavigationRequest::CommitNavigation() {
   CHECK(!HasWebUI());
   CheckSoftNavigationHeuristicsInvariants();
 
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Browser:NR_CommitNav:preCoop\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   if (!CoopCoepSanityCheck())
     return;
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Browser:NR_CommitNav:postCoop\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
 
   DetermineOriginAgentClusterEndResult();
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Browser:NR_CommitNav:postOriginCluster\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
 
   UpdateCommitNavigationParamsHistory();
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Browser:NR_CommitNav:postUpdateHistory\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   DCHECK(NeedsUrlLoader() == !!response_head_ ||
          (was_redirected_ && common_params_->url.IsAboutBlank()));
   DCHECK(!common_params_->url.SchemeIs(url::kJavaScriptScheme));
   DCHECK(!blink::IsRendererDebugURL(common_params_->url));
 
   AddOldPageInfoToCommitParamsIfNeeded();
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Browser:NR_CommitNav:postAddOldPage\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
 
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Browser:NR_CommitNav:preOrigin\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   url::Origin origin = GetOriginToCommit().value();
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Browser:NR_CommitNav:postOrigin\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   // TODO(crbug.com/979296): Consider changing this code to copy an origin
   // instead of creating one from a URL which lacks opacity information.
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:CN:1 preIso\n", 16);
+#endif
   isolation_info_for_subresources_ =
       GetRenderFrameHost()->ComputeIsolationInfoForSubresourcesForPendingCommit(
           origin, is_credentialless(), ComputeFencedFrameNonce());
@@ -5602,12 +5796,18 @@ void NavigationRequest::CommitNavigation() {
       GetRenderFrameHost()->ComputeNonce(is_credentialless(),
                                          ComputeFencedFrameNonce());
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:CN:2 preStorage\n", 20);
+#endif
   commit_params_->storage_key = GetRenderFrameHost()->CalculateStorageKey(
       GetOriginToCommit().value(), base::OptionalToPtr(nonce));
   commit_params_->session_storage_key =
       frame_tree_node()->frame_tree().GetSessionStorageKey(
           commit_params_->storage_key);
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:CN:3 preTopics\n", 19);
+#endif
   if (topics_eligible_) {
     topics_eligible_ = false;
 
@@ -5619,12 +5819,18 @@ void NavigationRequest::CommitNavigation() {
     }
   }
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:CN:4 preRecordNav\n", 21);
+#endif
   if (!NavigationTypeUtils::IsSameDocument(common_params_->navigation_type)) {
     // We want to record this for the frame that we are navigating away from.
     frame_tree_node_->render_manager()
         ->current_frame_host()
         ->RecordNavigationSuddenTerminationHandlers();
   }
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:CN:5 preBF\n", 15);
+#endif
   if (IsServedFromBackForwardCache() || IsPrerenderedPageActivation()) {
     CommitPageActivation();
     return;
@@ -5636,12 +5842,29 @@ void NavigationRequest::CommitNavigation() {
   // have to handle, so it's easier to simply skip this in the hopes that the
   // non-mparch implementation will be removed soon.
   base::WeakPtr<NavigationRequest> weak_self(weak_factory_.GetWeakPtr());
+#if BUILDFLAG(IS_QNX)
+  {
+    const char m[] = "QNX:Browser:beforeReadyToCommit\n";
+    ::write(2, m, sizeof(m) - 1);
+    if (GetRenderFrameHost()->IsRenderFrameLive()) {
+      const char m2[] = "QNX:Browser:IsRenderFrameLive=1\n";
+      ::write(2, m2, sizeof(m2) - 1);
+    } else {
+      const char m2[] = "QNX:Browser:IsRenderFrameLive=0\n";
+      ::write(2, m2, sizeof(m2) - 1);
+    }
+  }
+#endif
   ReadyToCommitNavigation(false /* is_error */);
-  // The call above might block on showing a user dialog. The interaction of
-  // the user with this dialog might result in the WebContents owning this
-  // NavigationRequest to be destroyed. Return if this is the case.
-  if (!weak_self)
+  if (!weak_self) {
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:CN:6 destroyed!\n", 20);
+#endif
     return;
+  }
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:CN:7 postReady\n", 19);
+#endif
 
   DCHECK(GetRenderFrameHost() ==
              frame_tree_node_->render_manager()->current_frame_host() ||
@@ -5661,10 +5884,16 @@ void NavigationRequest::CommitNavigation() {
     }
   }
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:CN:8 preCoep\n", 17);
+#endif
   CreateCoepReporter(GetRenderFrameHost()->GetProcess()->GetStoragePartition());
   coop_status_.UpdateReporterStoragePartition(
       GetRenderFrameHost()->GetProcess()->GetStoragePartition());
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:CN:9 preClientHints\n", 23);
+#endif
   BrowserContext* browser_context =
       frame_tree_node_->navigator().controller().GetBrowserContext();
   ClientHintsControllerDelegate* client_hints_delegate =
@@ -5724,10 +5953,21 @@ void NavigationRequest::CommitNavigation() {
   // Generate a UKM source and track it on NavigationRequest. This will be
   // passed down to the blink::Document to be created, if any, and used for UKM
   // source creation when navigation has successfully committed.
+#if BUILDFLAG(IS_QNX)
+  commit_params_->document_ukm_source_id = ukm::kInvalidSourceId;
+#else
   commit_params_->document_ukm_source_id = ukm::UkmRecorder::GetNewSourceID();
+#endif
 
   blink::mojom::ServiceWorkerContainerInfoForClientPtr
       service_worker_container_info;
+#if BUILDFLAG(IS_QNX)
+  {
+    char _b[48];
+    int _n = snprintf(_b, sizeof(_b), "QNX:CN:10y sw=%d\n", service_worker_handle_ ? 1 : 0);
+    write(2, _b, _n);
+  }
+#endif
   if (service_worker_handle_) {
     DCHECK(coep_reporter());
     mojo::PendingRemote<network::mojom::CrossOriginEmbedderPolicyReporter>
@@ -5741,13 +5981,9 @@ void NavigationRequest::CommitNavigation() {
         &service_worker_container_info, commit_params_->document_ukm_source_id);
   }
 
-  // Determine if top-level navigation is allowed without sticky user
-  // activation. This is used to fix the exploit in https://crbug.com/1251790.
-  // If a child document is cross-origin with its parent, it loses its ability
-  // to navigate top without user gesture. One notable exception is made if its
-  // parent embeds it using sandbox="allow-top-navigation". Please note this is
-  // quite unusual, because it means using sandbox brings new capabilities, as
-  // opposed to new restrictions.
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:CN:10a postSW\n", 18);
+#endif
   using WebSandboxFlags = network::mojom::WebSandboxFlags;
   const bool embedder_allows_top_navigation_explicitly =
       ((commit_params_->frame_policy.sandbox_flags != WebSandboxFlags::kNone) &&
@@ -5762,6 +5998,9 @@ void NavigationRequest::CommitNavigation() {
     policy_container_builder_->SetAllowTopNavigationWithoutUserGesture(false);
   }
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:CN:10b preNavApi\n", 20);
+#endif
   if (!IsSameDocument()) {
     commit_params_->navigation_api_history_entry_arrays =
         GetNavigationController()->GetNavigationApiHistoryEntryVectors(
@@ -5769,6 +6008,9 @@ void NavigationRequest::CommitNavigation() {
     PopulateDocumentTokenForCrossDocumentNavigation();
   }
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:CN:10c preEarly\n", 20);
+#endif
   if (early_hints_manager_) {
     commit_params_->early_hints_preloaded_resources =
         early_hints_manager_->TakePreloadedResourceURLs();
@@ -5784,15 +6026,37 @@ void NavigationRequest::CommitNavigation() {
   commit_params_->modified_runtime_features =
       runtime_feature_state_context_.GetFeatureOverrides();
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:CN:11 preClone\n", 19);
+#endif
   auto common_params = common_params_->Clone();
   auto commit_params = commit_params_.Clone();
   auto response_head = response_head_.Clone();
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:CN:12 postClone\n", 20);
+#endif
   if (subresource_loader_params_ &&
       !subresource_loader_params_->prefetched_signed_exchanges.empty()) {
     commit_params->prefetched_signed_exchanges =
         std::move(subresource_loader_params_->prefetched_signed_exchanges);
   }
 
+#if BUILDFLAG(IS_QNX)
+  // Single-process: yield to let renderer bind NavigationClient before we send
+  // CommitNavigation Mojo. Without this, the Mojo may be delivered before the
+  // renderer has processed the GetInterface for NavigationClient.
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kSingleProcess)) {
+    for (int i = 0; i < 5; i++) {
+      base::PlatformThread::YieldCurrentThread();
+      base::PlatformThread::Sleep(base::Milliseconds(10));
+    }
+  }
+#endif
+
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:NR:preRFHI_Commit\n", 22);
+#endif
   GetRenderFrameHost()->CommitNavigation(
       this, std::move(common_params), std::move(commit_params),
       std::move(response_head), std::move(response_body_),
@@ -5800,6 +6064,9 @@ void NavigationRequest::CommitNavigation() {
       std::move(subresource_loader_params_), std::move(subresource_overrides_),
       std::move(service_worker_container_info), document_token_,
       devtools_navigation_token_);
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:NR:postRFHI_Commit\n", 23);
+#endif
   UpdateNavigationHandleTimingsOnCommitSent();
 
   // Give SpareRenderProcessHostManager a heads-up about the most recently used
@@ -6927,6 +7194,9 @@ void NavigationRequest::WillProcessResponse() {
 }
 
 void NavigationRequest::WillCommitWithoutUrlLoader() {
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Browser:NR_WillCommitNoLoader\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   EnterChildTraceEvent("WillCommitWithoutUrlLoader", this);
 
   throttle_runner_->RegisterNavigationThrottlesForCommitWithoutUrlLoader();
@@ -7174,6 +7444,14 @@ bool NavigationRequest::NeedsUrlLoader() {
       // URL, not from the MHTML archive. See https://crbug.com/969696.
       !common_params_->url.SchemeIs(url::kDataScheme);
 
+#if BUILDFLAG(IS_QNX)
+  // On QNX, force data: URLs to use the immediate-commit path (!NeedsUrlLoader)
+  // to bypass the network stack, which may not complete for data: URLs in
+  // single-process headless mode.
+  if (common_params_->url.SchemeIs(url::kDataScheme))
+    return false;
+#endif
+
   return IsURLHandledByNetworkStack(common_params_->url) && !IsSameDocument() &&
          !is_mhtml_subframe_loaded_from_achive;
 }
@@ -7243,6 +7521,9 @@ NavigationRequest::TakeWebFeaturesToLog() {
 }
 
 void NavigationRequest::ReadyToCommitNavigation(bool is_error) {
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Browser:NR_ReadyToCommit\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   EnterChildTraceEvent("ReadyToCommitNavigation", this);
 
   // We may come back to here asynchronously, and the renderer may be destroyed
@@ -7256,6 +7537,9 @@ void NavigationRequest::ReadyToCommitNavigation(bool is_error) {
     // by the previous call.
     return;
   }
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Browser:NR_afterLive\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
 
   // Note: This marks the RenderFrameHost as loading. This is important to
   // ensure that FrameTreeNode::IsLoading() still returns correct result for
@@ -7264,6 +7548,9 @@ void NavigationRequest::ReadyToCommitNavigation(bool is_error) {
   // RenderFrameHostImpl is not marked as loading yet, causing
   // FrameTreeNode::IsLoading() to incorrectly return false.
   frame_tree_node_->TransferNavigationRequestOwnership(GetRenderFrameHost());
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Browser:NR_afterTransfer\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
 
   // When a speculative RenderFrameHost reaches ReadyToCommitNavigation, the
   // browser process has asked the renderer to commit the navigation and is
@@ -7289,13 +7576,19 @@ void NavigationRequest::ReadyToCommitNavigation(bool is_error) {
   SetState(READY_TO_COMMIT);
   ready_to_commit_time_ = base::TimeTicks::Now();
   RestartCommitTimeout();
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Browser:NR_afterRestart\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
 
+#if !BUILDFLAG(IS_QNX)
+  // QNX: skip — session storage / policy can block in single-process.
   if (!IsSameDocument()) {
     MaybeRegisterOriginForUnpartitionedSessionStorageAccess();
   }
 
   if (!IsSameDocument() && !IsPageActivation())
     UpdatePrivateNetworkRequestPolicy();
+#endif
 
   RenderFrameHostImpl* previous_render_frame_host =
       frame_tree_node_->current_frame_host();
@@ -7306,14 +7599,23 @@ void NavigationRequest::ReadyToCommitNavigation(bool is_error) {
     is_same_process_ = GetRenderFrameHost()->GetProcess()->GetID() ==
                        previous_render_frame_host->GetProcess()->GetID();
 
+#if !BUILDFLAG(IS_QNX)
+    // QNX: skip metrics — UMA/histogram infra can block in single-process.
     RecordReadyToCommitMetrics(
         previous_render_frame_host, GetRenderFrameHost(), *common_params_.get(),
         ready_to_commit_time_, origin_agent_cluster_end_result_,
         did_receive_early_hints_before_cross_origin_redirect_);
+#endif
   }
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Browser:NR_postMetrics\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
 
   // TODO(https://crbug.com/888079) Take sandbox into account.
   absl::optional<url::Origin> origin_to_commit = GetOriginToCommit();
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Browser:NR_postGetOrigin\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   same_origin_ = (previous_render_frame_host->GetLastCommittedOrigin() ==
                   origin_to_commit);
 
@@ -7326,6 +7628,9 @@ void NavigationRequest::ReadyToCommitNavigation(bool is_error) {
   // process at commit time.
   browser_side_origin_to_commit_with_debug_info_ =
       GetOriginToCommitWithDebugInfo();
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Browser:NR_postGetOriginDebug\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
 
   // Set origin_to_commit for data: URLs. Set it here because otherwise the
   // origin (and hence the nonce) is separately calculated on the renderer side
@@ -7342,6 +7647,9 @@ void NavigationRequest::ReadyToCommitNavigation(bool is_error) {
       !IsLoadDataWithBaseURL()) {
     commit_params_->origin_to_commit = origin_to_commit;
   }
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Browser:NR_preDelegate\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
 
   if (!IsSameDocument()) {
 #if DCHECK_IS_ON()
@@ -7350,6 +7658,9 @@ void NavigationRequest::ReadyToCommitNavigation(bool is_error) {
 #endif
     GetDelegate()->ReadyToCommitNavigation(this);
   }
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Browser:NR_AfterDelegate\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
 
   // View-source URLs can't be prerendered or loaded in a fenced frame or a
   // portal.
@@ -7522,6 +7833,14 @@ NavigationRequest::GetOriginForURLLoaderFactoryAfterResponseWithDebugInfo() {
   // The origin to commit is not known until we get the final network response.
   DCHECK_GE(state_, WILL_PROCESS_RESPONSE);
 
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:GOFLAWRDBI:enter\n"; ::write(2, m, sizeof(m) - 1); }
+  if (GetRenderFrameHost()) {
+    return {absl::optional<url::Origin>(url::Origin()), "qnx_opaque"};
+  }
+  return std::make_pair(absl::nullopt, "qnx_no_rfh");
+#endif
+
   // Downloads and/or 204 responses don't commit anything - there is no frame to
   // commit in (and therefor there is no origin that will get committed and we
   // indicate this by returning `nullopt`).
@@ -7536,6 +7855,7 @@ NavigationRequest::GetOriginForURLLoaderFactoryAfterResponseWithDebugInfo() {
       GetOriginForURLLoaderFactoryBeforeResponseWithDebugInfo(
           SandboxFlagsToCommit());
 
+#if !BUILDFLAG(IS_QNX)
   // Add the crash keys for debugging navigation crashes with data URL.
   // TODO(https://crbug.com/1454273): Remove.
   SCOPED_CRASH_KEY_STRING256("Bug1454273", "calculated_origin",
@@ -7575,6 +7895,7 @@ NavigationRequest::GetOriginForURLLoaderFactoryAfterResponseWithDebugInfo() {
       "Bug1454273", "initiator_relationship",
       DetermineInitiatorRelationship(initiator_rfh,
                                      frame_tree_node_->current_frame_host()));
+#endif
 
   // MHTML documents should commit as an opaque origin. They should not be able
   // to make network request on behalf of the real origin.

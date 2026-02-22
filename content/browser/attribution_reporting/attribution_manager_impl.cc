@@ -446,7 +446,9 @@ absl::optional<base::TimeDelta> GetFailedReportDelay(int failed_send_attempts) {
     return absl::nullopt;
   }
 
-  return kInitialReportDelay * std::pow(kDelayFactor, failed_send_attempts - 1);
+  return kInitialReportDelay *
+         std::pow(static_cast<double>(kDelayFactor),
+                  static_cast<double>(failed_send_attempts - 1));
 }
 
 ScopedUseInMemoryStorageForTesting::ScopedUseInMemoryStorageForTesting()

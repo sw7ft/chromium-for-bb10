@@ -251,7 +251,8 @@ double ComputeChannelCapacity(int64_t num_states,
   }
 
   double p = randomized_response_rate * (num_states - 1) / num_states;
-  return log2(num_states) - BinaryEntropy(p) - p * log2(num_states - 1);
+  return log2(static_cast<double>(num_states)) - BinaryEntropy(p) -
+         p * log2(static_cast<double>(num_states - 1));
 }
 
 std::vector<FakeEventLevelReport> GetRandomFakeReports(

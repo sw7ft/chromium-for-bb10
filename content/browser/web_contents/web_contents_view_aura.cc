@@ -6,6 +6,9 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#if BUILDFLAG(IS_QNX)
+#include <unistd.h>
+#endif
 
 #include <memory>
 #include <string>
@@ -1009,21 +1012,36 @@ RenderWidgetHostViewBase* WebContentsViewAura::CreateViewForWidget(
         render_widget_host->GetView());
   }
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:CBWV:1 preNew\n", 18);
+#endif
   RenderWidgetHostViewAura* view =
       g_create_render_widget_host_view
           ? g_create_render_widget_host_view(render_widget_host)
           : new RenderWidgetHostViewAura(render_widget_host);
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:CBWV:2 preInitAsChild\n", 26);
+#endif
   view->InitAsChild(GetRenderWidgetHostViewParent());
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:CBWV:3 postInitAsChild\n", 28);
+#endif
   RenderWidgetHostImpl* host_impl =
       RenderWidgetHostImpl::From(render_widget_host);
 
   if (!host_impl->is_hidden())
     view->Show();
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:CBWV:4 preSetDragDrop\n", 27);
+#endif
   // We listen to drag drop events in the newly created view's window.
   aura::client::SetDragDropDelegate(view->GetNativeView(), this);
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:CBWV:5 postSetDragDrop\n", 28);
+#endif
   if (view->overscroll_controller() &&
       (!web_contents_->GetDelegate() ||
        web_contents_->GetDelegate()->CanOverscrollContent())) {

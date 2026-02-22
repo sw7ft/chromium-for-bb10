@@ -73,7 +73,8 @@ SharedStorageURNMappingResult CreateSharedStorageURNMappingResult(
   DCHECK_LT(index, urls_with_metadata.size());
   DCHECK(page);
 
-  double budget_to_charge = std::log2(urls_with_metadata.size());
+  double budget_to_charge =
+      std::log2(static_cast<double>(urls_with_metadata.size()));
 
   // If we are running out of budget, consider this mapping to be failed. Use
   // the default URL, and there's no need to further charge the budget.

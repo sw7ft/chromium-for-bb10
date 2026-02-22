@@ -79,6 +79,11 @@ class DeviceServiceURLLoaderFactory : public network::SharedURLLoaderFactory {
 
 void BindDeviceServiceReceiver(
     mojo::PendingReceiver<device::mojom::DeviceService> receiver) {
+#if BUILDFLAG(IS_QNX)
+  // QNX: Device services (USB, Bluetooth, sensors, NFC) are not available.
+  // Drop the receiver to avoid crashes from unimplemented device backends.
+  return;
+#endif
   // Bind the lifetime of the service instance to that of the sequence it's
   // running on.
   static base::SequenceLocalStorageSlot<std::unique_ptr<device::DeviceService>>

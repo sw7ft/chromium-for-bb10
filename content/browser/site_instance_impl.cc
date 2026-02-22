@@ -1522,7 +1522,7 @@ void SiteInstanceImpl::IncrementActiveDocumentCount(
     // increment the count.
     return;
   }
-  if (active_document_counts_.contains(url_derived_site_info)) {
+  if (active_document_counts_.count(url_derived_site_info) > 0) {
     active_document_counts_[url_derived_site_info]++;
   } else {
     active_document_counts_[url_derived_site_info] = 1;
@@ -1538,7 +1538,7 @@ void SiteInstanceImpl::DecrementActiveDocumentCount(
     // won't contain the SiteInfo, so just return early here.
     return;
   }
-  CHECK(active_document_counts_.contains(url_derived_site_info));
+  CHECK(active_document_counts_.count(url_derived_site_info) > 0);
   active_document_counts_[url_derived_site_info]--;
   if (active_document_counts_[url_derived_site_info] == 0) {
     active_document_counts_.erase(url_derived_site_info);
@@ -1547,7 +1547,7 @@ void SiteInstanceImpl::DecrementActiveDocumentCount(
 
 size_t SiteInstanceImpl::GetActiveDocumentCount(
     const SiteInfo& url_derived_site_info) {
-  if (active_document_counts_.contains(url_derived_site_info)) {
+  if (active_document_counts_.count(url_derived_site_info) > 0) {
     return active_document_counts_[url_derived_site_info];
   }
   return 0;

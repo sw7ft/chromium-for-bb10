@@ -315,6 +315,11 @@ void RenderWidgetHostViewAura::InitAsChild(gfx::NativeView parent_view) {
   if (parent_view)
     parent_view->AddChild(GetNativeView());
 
+#if BUILDFLAG(IS_QNX)
+  // QNX headless: no display/screen, avoid GetDeviceScaleFactor() and
+  // GetRootWindow()/cursor_client which can hang without proper Aura host.
+  device_scale_factor_ = 1.0f;
+#else
   device_scale_factor_ = GetDeviceScaleFactor();
 
   aura::Window* root = window_->GetRootWindow();
@@ -328,6 +333,7 @@ void RenderWidgetHostViewAura::InitAsChild(gfx::NativeView parent_view) {
   // This will fetch and set the display features.
   EnsureDevicePostureServiceConnection();
 #endif
+#endif  // BUILDFLAG(IS_QNX)
 }
 
 void RenderWidgetHostViewAura::InitAsPopup(
@@ -2378,7 +2384,11 @@ void RenderWidgetHostViewAura::CreateAuraWindow(aura::client::WindowType type) {
   wm::SetTooltipText(window_, &tooltip_);
   wm::SetActivationDelegate(window_, this);
   aura::client::SetFocusChangeObserver(window_, this);
+#if !BUILDFLAG(IS_QNX)
+  // On QNX headless there is no display/screen; DisplayObserver registration
+  // can hang when querying display metrics.
   display_observer_.emplace(this);
+#endif
 
   window_->SetType(type);
   window_->Init(ui::LAYER_SOLID_COLOR);

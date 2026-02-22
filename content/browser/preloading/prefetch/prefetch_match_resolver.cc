@@ -49,13 +49,13 @@ void PrefetchMatchResolver::PrefetchNotAvailable() {
 void PrefetchMatchResolver::PrefetchNotUsable(
     const PrefetchContainer& prefetch_container) {
   DVLOG(1) << *this << "::PrefetchNotUsable:" << prefetch_container.GetURL();
-  CHECK(!in_progress_prefetch_matches_.contains(prefetch_container.GetURL()));
+  CHECK(in_progress_prefetch_matches_.count(prefetch_container.GetURL()) == 0);
   MaybeFallbackToRegularNavigationWhenPrefetchNotUsable();
 }
 
 void PrefetchMatchResolver::PrefetchNotUsable(const GURL& prefetch_url) {
   DVLOG(1) << *this << "::PrefetchNotUsable: " << prefetch_url;
-  CHECK(!in_progress_prefetch_matches_.contains(prefetch_url));
+  CHECK(in_progress_prefetch_matches_.count(prefetch_url) == 0);
   MaybeFallbackToRegularNavigationWhenPrefetchNotUsable();
 }
 

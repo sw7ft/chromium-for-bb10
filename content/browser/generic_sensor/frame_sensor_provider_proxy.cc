@@ -20,7 +20,7 @@ namespace content {
 
 namespace {
 
-constexpr std::vector<blink::mojom::PermissionsPolicyFeature>
+const std::vector<blink::mojom::PermissionsPolicyFeature>
 SensorTypeToPermissionsPolicyFeatures(SensorType type) {
   switch (type) {
     case SensorType::AMBIENT_LIGHT:

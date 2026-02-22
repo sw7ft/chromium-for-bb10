@@ -4,6 +4,10 @@
 
 #include "content/browser/renderer_host/navigation_throttle_runner.h"
 
+#if BUILDFLAG(IS_QNX)
+#include <cstdio>
+#include <unistd.h>
+#endif
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/metrics_hashes.h"
 #include "base/strings/strcat.h"
@@ -287,9 +291,27 @@ void NavigationThrottleRunner::ProcessInternal() {
         "navigation", GetEventName(current_event_), local_navigation_id,
         "throttle", throttles_[i]->GetNameForLogging());
 
+#if BUILDFLAG(IS_QNX)
+    {
+      char _b[200];
+      int _n = snprintf(_b, sizeof(_b), "QNX:THR:%zu/%zu %s evt=%d\n",
+                        i, throttles_.size(),
+                        throttles_[i]->GetNameForLogging(),
+                        (int)current_event_);
+      write(2, _b, _n);
+    }
+#endif
     base::Time start = base::Time::Now();
     NavigationThrottle::ThrottleCheckResult result =
         ExecuteNavigationEvent(throttles_[i].get(), current_event_);
+#if BUILDFLAG(IS_QNX)
+    {
+      char _b[200];
+      int _n = snprintf(_b, sizeof(_b), "QNX:THR:%zu res=%d\n",
+                        i, (int)result.action());
+      write(2, _b, _n);
+    }
+#endif
     if (!weak_ref) {
       // The NavigationThrottle execution has destroyed this
       // NavigationThrottleRunner. Return immediately.

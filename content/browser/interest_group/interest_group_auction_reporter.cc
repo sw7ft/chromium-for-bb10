@@ -329,10 +329,11 @@ double InterestGroupAuctionReporter::RoundStochasticallyToKBits(double value,
   // frexp() returns numbers in the range +-[0.5, 1)
 
   if (value_exp < std::numeric_limits<int8_t>::min()) {
-    return std::copysign(0, value);
+    return std::copysign(0.0, static_cast<double>(value));
   }
   if (value_exp > std::numeric_limits<int8_t>::max()) {
-    return std::copysign(std::numeric_limits<double>::infinity(), value);
+    return std::copysign(std::numeric_limits<double>::infinity(),
+                         static_cast<double>(value));
   }
 
   // Shift so we get k integer bits. Since we are in the range +-[0.5, 1) we
@@ -348,7 +349,8 @@ double InterestGroupAuctionReporter::RoundStochasticallyToKBits(double value,
   if (std::abs(precision_scaled_value - truncated_scaled_value) >
       base::RandDouble()) {
     noised_truncated_scaled_value =
-        truncated_scaled_value + std::copysign(1, precision_scaled_value);
+        truncated_scaled_value +
+        std::copysign(1.0, static_cast<double>(precision_scaled_value));
 
     // Handle overflow caused by the increment. Incrementing can only
     // increase the absolute value, so only worry about the mantissa
@@ -356,7 +358,8 @@ double InterestGroupAuctionReporter::RoundStochasticallyToKBits(double value,
     if (value_exp == std::numeric_limits<int8_t>::max() &&
         std::abs(std::ldexp(noised_truncated_scaled_value, -k)) >= 1.0) {
       DCHECK_EQ(1.0, std::abs(std::ldexp(noised_truncated_scaled_value, -k)));
-      return std::copysign(std::numeric_limits<double>::infinity(), value);
+      return std::copysign(std::numeric_limits<double>::infinity(),
+                         static_cast<double>(value));
     }
   }
 

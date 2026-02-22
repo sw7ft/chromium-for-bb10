@@ -38,7 +38,7 @@ function requestHistograms() {
 
 /** Clears all loaded histograms on the webpage. */
 function clearHistograms(): void {
-  getRequiredElement('histograms').innerHTML = window.trustedTypes!.emptyHTML;
+  getRequiredElement('histograms').innerHTML = window.trustedTypes!.emptyHTML as unknown as string;
 }
 
 /** Makes the subprocess checkbox disabled, and sets a tooltip. */

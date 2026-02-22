@@ -5,6 +5,9 @@
 #include "content/browser/renderer_host/navigator.h"
 
 #include <utility>
+#if BUILDFLAG(IS_QNX)
+#include <unistd.h>
+#endif
 
 #include "base/check_op.h"
 #include "base/debug/dump_without_crashing.h"
@@ -775,12 +778,15 @@ void Navigator::Navigate(std::unique_ptr<NavigationRequest> request,
   bool is_pending_entry =
       controller_.GetPendingEntry() &&
       (nav_entry_id == controller_.GetPendingEntry()->GetUniqueID());
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:NNav:1 TakeReq\n", 19);
+#endif
   frame_tree_node->TakeNavigationRequest(std::move(request));
   DCHECK(frame_tree_node->navigation_request());
 
-  // Have the current renderer execute its beforeunload event if needed. If it
-  // is not needed then NavigationRequest::BeginNavigation should be directly
-  // called instead.
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:NNav:2 CheckBU\n", 19);
+#endif
   if (should_dispatch_beforeunload) {
     frame_tree_node->navigation_request()->SetWaitingForRendererResponse();
     frame_tree_node->current_frame_host()->DispatchBeforeUnload(
@@ -793,10 +799,13 @@ void Navigator::Navigate(std::unique_ptr<NavigationRequest> request,
                                        ->common_params()
                                        .navigation_start);
     }
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:NNav:3 BeginNav\n", 20);
+#endif
     frame_tree_node->navigation_request()->BeginNavigation();
-    // WARNING: The NavigationRequest might have been destroyed in
-    // BeginNavigation(). Do not use |frame_tree_node->navigation_request()|
-    // after this point without null checking it first.
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:NNav:4 NavDone\n", 19);
+#endif
   }
 
   // Make sure no code called via RFH::Navigate clears the pending entry.

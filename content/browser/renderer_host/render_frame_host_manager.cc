@@ -5,6 +5,9 @@
 #include "content/browser/renderer_host/render_frame_host_manager.h"
 
 #include <stddef.h>
+#if BUILDFLAG(IS_QNX)
+#include <unistd.h>
+#endif
 
 #include <string>
 #include <unordered_set>
@@ -1306,9 +1309,14 @@ bool RenderFrameHostManager::HasPendingCommitForCrossDocumentNavigation()
 
 void RenderFrameHostManager::DidCreateNavigationRequest(
     NavigationRequest* request) {
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:RFHM:0 entry\n", 17);
+#endif
+#if !BUILDFLAG(IS_QNX)
   TRACE_EVENT("navigation",
               "RenderFrameHostManager::DidCreateNavigationRequest",
               ChromeTrackEvent::kFrameTreeNodeInfo, *frame_tree_node_);
+#endif
 
   const bool force_use_current_render_frame_host =
       // Since the frame from the back-forward cache is being committed to the
@@ -1322,6 +1330,12 @@ void RenderFrameHostManager::DidCreateNavigationRequest(
       // do not want to load the document again, see https://crbug.com/1125106.
       request->IsSameDocument();
 
+#if BUILDFLAG(IS_QNX)
+  if (force_use_current_render_frame_host)
+    write(2, "QNX:RFHM:force\n", 15);
+  else
+    write(2, "QNX:RFHM:getFH\n", 16);
+#endif
   if (force_use_current_render_frame_host) {
     // This method should generally be calling GetFrameHostForNavigation() in
     // order to choose the correct RenderFrameHost, and choose a speculative
@@ -1345,20 +1359,38 @@ void RenderFrameHostManager::DidCreateNavigationRequest(
     // calling that method for navigations which will be forced into the current
     // document.
     if (ShouldAvoidRedundantNavigationCancellations()) {
+#if BUILDFLAG(IS_QNX)
+      write(2, "QNX:RFHM:discardIfUnused\n", 26);
+#endif
       // When avoiding redundant navigation cancellations, only delete the
       // speculative RFH if it is unused. In particular, this means that a
       // speculative RFH with a pending-commit navigation won't be deleted
       // anymore.
       DiscardSpeculativeRFHIfUnused(NavigationDiscardReason::kNewNavigation);
+#if BUILDFLAG(IS_QNX)
+      write(2, "QNX:RFHM:discardIfUnusedDone\n", 29);
+#endif
     } else {
+#if BUILDFLAG(IS_QNX)
+      write(2, "QNX:RFHM:discard\n", 18);
+#endif
       // When the flag is disabled, always delete the speculative RFH, even if
       // it means cancelling a pending commit navigation in that RFH.
       DiscardSpeculativeRFH(NavigationDiscardReason::kNewNavigation);
+#if BUILDFLAG(IS_QNX)
+      write(2, "QNX:RFHM:discardDone\n", 22);
+#endif
     }
   } else {
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:RFHM:1 GetFH\n", 18);
+#endif
     BrowsingContextGroupSwap ignored_bcg_swap_info =
         BrowsingContextGroupSwap::CreateDefault();
     auto result = GetFrameHostForNavigation(request, &ignored_bcg_swap_info);
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:RFHM:2 GotFH\n", 18);
+#endif
     if (result.has_value()) {
       DCHECK(result.value());
     } else if (result.error() ==
@@ -1593,16 +1625,24 @@ RenderFrameHostManager::GetFrameHostForNavigation(
   // The appropriate RenderFrameHost to commit the navigation.
   RenderFrameHostImpl* navigation_rfh = nullptr;
 
-  // First compute the SiteInstance to use for the navigation.
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:GFHFN:1 site\n", 18);
+#endif
   SiteInstanceImpl* current_site_instance =
       render_frame_host_->GetSiteInstance();
   bool is_same_site =
       render_frame_host_->IsNavigationSameSite(request->GetUrlInfo());
 
   IsSameSiteGetter is_same_site_getter(is_same_site);
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:GFHFN:2 getSI\n", 19);
+#endif
   scoped_refptr<SiteInstanceImpl> dest_site_instance =
       GetSiteInstanceForNavigationRequest(request, is_same_site_getter,
                                           browsing_context_group_swap, reason);
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:GFHFN:3 gotSI\n", 19);
+#endif
 
   // A subframe should always be in the same BrowsingInstance as the parent
   // (see also https://crbug.com/1107269).
@@ -1763,8 +1803,12 @@ RenderFrameHostManager::GetFrameHostForNavigation(
   // non-speculative RenderFrameHost that is being reused is already live. This
   // leaves only a non-speculative RenderFrameHost that has never been used
   // before.
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:GFHFN:4 live?\n", 19);
+#endif
   if (!navigation_rfh->IsRenderFrameLive()) {
     DCHECK(!frame_tree_node_->parent());
+#if !BUILDFLAG(IS_QNX)
     SCOPED_CRASH_KEY_BOOL("Bug1404162", "is_main_frame",
                           frame_tree_node_->IsMainFrame());
     SCOPED_CRASH_KEY_BOOL("Bug1404162", "use_current_rfh", use_current_rfh);
@@ -1782,11 +1826,18 @@ RenderFrameHostManager::GetFrameHostForNavigation(
     SCOPED_CRASH_KEY_STRING64("Bug1404162", "nav_rfh_lifecycle",
                               RenderFrameHostImpl::LifecycleStateImplToString(
                                   navigation_rfh->lifecycle_state()));
+#endif
 
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:GFHFN:5 reinit\n", 20);
+#endif
     if (!ReinitializeMainRenderFrame(navigation_rfh)) {
       return base::unexpected(
           GetFrameHostForNavigationFailed::kCouldNotReinitializeMainFrame);
     }
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:GFHFN:6 reinitOK\n", 22);
+#endif
 
     notify_webui_of_rf_creation = true;
 
@@ -4083,20 +4134,32 @@ bool RenderFrameHostManager::InitRenderView(
     SiteInstanceGroup* site_instance_group,
     RenderViewHostImpl* render_view_host,
     RenderFrameProxyHost* proxy) {
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:IRV:1 preInit\n", 18);
+#endif
   // Ensure the renderer process is initialized before creating the
   // `blink::WebView`.
   if (!render_view_host->GetAgentSchedulingGroup().Init())
     return false;
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:IRV:2 postInit\n", 19);
+#endif
   // We may have initialized this RenderViewHost for another RenderFrameHost.
   if (render_view_host->IsRenderViewLive())
     return true;
 
   auto opener_frame_token = GetOpenerFrameToken(site_instance_group);
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:IRV:3 preCreateRV\n", 23);
+#endif
   bool created = delegate_->CreateRenderViewForRenderManager(
       render_view_host, opener_frame_token, proxy);
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:IRV:4 postCreateRV\n", 24);
+#endif
   if (created && proxy) {
     proxy->SetRenderFrameProxyCreated(true);
 
@@ -4316,10 +4379,16 @@ bool RenderFrameHostManager::ReinitializeMainRenderFrame(
   DCHECK(!render_frame_host->IsRenderFrameLive());
   DCHECK(!render_frame_host->must_be_replaced());
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:Reinit:1 preOpener\n", 24);
+#endif
   // Recreate the opener chain.
   CreateOpenerProxies(render_frame_host->GetSiteInstance(), frame_tree_node_,
                       render_frame_host_->browsing_context_state());
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:Reinit:2 preIRV\n", 21);
+#endif
   // Main frames need both the `blink::WebView` and `RenderFrame` reinitialized,
   // so use `InitRenderView`.
   DCHECK(!render_frame_host->browsing_context_state()->GetRenderFrameProxyHost(
@@ -4328,6 +4397,9 @@ bool RenderFrameHostManager::ReinitializeMainRenderFrame(
                       render_frame_host->render_view_host(), nullptr))
     return false;
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:Reinit:3 postIRV\n", 22);
+#endif
   DCHECK(render_frame_host->IsRenderFrameLive());
 
   // The RenderWidgetHostView goes away with the render process. Initializing a
@@ -4338,8 +4410,15 @@ bool RenderFrameHostManager::ReinitializeMainRenderFrame(
   // TODO(danakj): We now hide the widget unconditionally (treating main frame
   // and child frames alike) and show in DidFinishNavigation() always, so this
   // should be able to go away. Try to remove this.
-  if (render_frame_host == render_frame_host_.get())
+  if (render_frame_host == render_frame_host_.get()) {
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:Reinit:4 preVisSync\n", 25);
+#endif
     EnsureRenderFrameHostVisibilityConsistent();
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:Reinit:5 postVisSync\n", 26);
+#endif
+  }
 
   return true;
 }

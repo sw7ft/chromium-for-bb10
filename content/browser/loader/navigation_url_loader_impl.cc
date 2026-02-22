@@ -8,6 +8,10 @@
 #include <memory>
 #include <set>
 #include <utility>
+#if defined(__QNX__) || defined(__QNXNTO__)
+#include <unistd.h>
+#include <cstdio>
+#endif
 
 #include "base/command_line.h"
 #include "base/containers/contains.h"
@@ -116,6 +120,16 @@
 namespace content {
 
 namespace {
+
+#if defined(__QNX__) || defined(__QNXNTO__)
+scoped_refptr<base::SingleThreadTaskRunner> GetNavNetworkResponseTaskRunner() {
+  return GetUIThreadTaskRunner({});
+}
+#else
+scoped_refptr<base::SingleThreadTaskRunner> GetNavNetworkResponseTaskRunner() {
+  return GetNavNetworkResponseTaskRunner();
+}
+#endif
 
 class NavigationLoaderInterceptorBrowserContainer
     : public NavigationLoaderInterceptor {
@@ -458,6 +472,12 @@ void NavigationURLLoaderImpl::StartImpl(
   DCHECK(!head_);
   head_ = network::mojom::URLResponseHead::New();
   started_ = true;
+#if defined(__QNX__)
+  {
+    const char m[] = "QNX:NULI:StartImpl\n";
+    ::write(2, m, sizeof(m) - 1);
+  }
+#endif
 
   resource_request_->headers.SetHeader(
       net::HttpRequestHeaders::kAccept,
@@ -479,7 +499,7 @@ void NavigationURLLoaderImpl::StartImpl(
           CreateURLLoaderThrottles(), global_request_id_.request_id,
           network::mojom::kURLLoadOptionNone, resource_request_.get(), this,
           kNavigationUrlLoaderTrafficAnnotation,
-          GetUIThreadTaskRunner({BrowserTaskType::kNavigationNetworkResponse}));
+          GetNavNetworkResponseTaskRunner());
       return;
     }
 
@@ -493,7 +513,7 @@ void NavigationURLLoaderImpl::StartImpl(
           CreateURLLoaderThrottles(), global_request_id_.request_id,
           network::mojom::kURLLoadOptionNone, resource_request_.get(), this,
           kNavigationUrlLoaderTrafficAnnotation,
-          GetUIThreadTaskRunner({BrowserTaskType::kNavigationNetworkResponse}));
+          GetNavNetworkResponseTaskRunner());
       return;
     }
   }
@@ -551,8 +571,7 @@ void NavigationURLLoaderImpl::CreateInterceptors(
           GetContentClient()->browser()->WillCreateURLLoaderRequestInterceptors(
               navigation_ui_data_.get(), frame_tree_node_id_,
               request_info_->navigation_id,
-              content::GetUIThreadTaskRunner(
-                  {content::BrowserTaskType::kNavigationNetworkResponse}));
+              GetNavNetworkResponseTaskRunner());
   if (!browser_interceptors.empty()) {
     for (auto& browser_interceptor : browser_interceptors) {
       interceptors_.push_back(
@@ -613,7 +632,7 @@ void NavigationURLLoaderImpl::MaybeStartLoader(
     // Non-intercepted requests usually go through the regular network
     // URLLoader, which does mime sniffing.
     throttles.push_back(std::make_unique<blink::MimeSniffingThrottle>(
-        GetUIThreadTaskRunner({BrowserTaskType::kNavigationNetworkResponse})));
+        GetNavNetworkResponseTaskRunner()));
 
     default_loader_used_ = false;
     // If `url_loader_` already exists, this means we are following a redirect
@@ -633,7 +652,7 @@ void NavigationURLLoaderImpl::MaybeStartLoader(
         std::move(single_request_factory), std::move(throttles),
         global_request_id_.request_id, network::mojom::kURLLoadOptionNone,
         resource_request_.get(), this, kNavigationUrlLoaderTrafficAnnotation,
-        GetUIThreadTaskRunner({BrowserTaskType::kNavigationNetworkResponse}));
+        GetNavNetworkResponseTaskRunner());
 
     subresource_loader_params_ =
         interceptor->MaybeCreateSubresourceLoaderParams();
@@ -685,12 +704,24 @@ void NavigationURLLoaderImpl::MaybeStartLoader(
   }
 
   // No interceptors wanted to handle this request.
+#if defined(__QNX__)
+  {
+    const char m[] = "QNX:NULI:Fallback\n";
+    ::write(2, m, sizeof(m) - 1);
+  }
+#endif
   FallbackToNonInterceptedRequest(false);
 }
 
 void NavigationURLLoaderImpl::FallbackToNonInterceptedRequest(
     bool reset_subresource_loader_params,
     const net::LoadTimingInfo& timing_info) {
+#if defined(__QNX__)
+  {
+    const char m[] = "QNX:NULI:FallbackImpl\n";
+    ::write(2, m, sizeof(m) - 1);
+  }
+#endif
   if (reset_subresource_loader_params)
     subresource_loader_params_.reset();
 
@@ -715,7 +746,7 @@ void NavigationURLLoaderImpl::FallbackToNonInterceptedRequest(
         std::move(factory), CreateURLLoaderThrottles(),
         global_request_id_.request_id, options, resource_request_.get(),
         /*client=*/this, kNavigationUrlLoaderTrafficAnnotation,
-        GetUIThreadTaskRunner({BrowserTaskType::kNavigationNetworkResponse}));
+        GetNavNetworkResponseTaskRunner());
   }
 }
 
@@ -834,6 +865,12 @@ void NavigationURLLoaderImpl::OnReceiveResponse(
     network::mojom::URLResponseHeadPtr head,
     mojo::ScopedDataPipeConsumerHandle response_body,
     absl::optional<mojo_base::BigBuffer> cached_metadata) {
+#if defined(__QNX__)
+  {
+    const char m[] = "QNX:NULI:OnRecvResp!\n";
+    ::write(2, m, sizeof(m) - 1);
+  }
+#endif
   DCHECK(!cached_metadata);
   LogQueueTimeHistogram("Navigation.QueueTime.OnReceiveResponse",
                         resource_request_->is_outermost_main_frame);
@@ -1023,6 +1060,14 @@ void NavigationURLLoaderImpl::OnTransferSizeUpdated(
 
 void NavigationURLLoaderImpl::OnComplete(
     const network::URLLoaderCompletionStatus& status) {
+#if defined(__QNX__)
+  {
+    char m[64];
+    int n = snprintf(m, sizeof(m), "QNX:NULI:OnComplete err=%d\n",
+                     status.error_code);
+    ::write(2, m, n);
+  }
+#endif
   // Successful load must have used OnResponseStarted first. In this case, the
   // URLLoaderClient has already been transferred to the renderer process and
   // OnComplete is not expected to be called here.
@@ -1158,7 +1203,7 @@ void NavigationURLLoaderImpl::Clone(
   // blocking navigation when they do.
   accept_ch_frame_observers_.Add(
       this, std::move(listener),
-      GetUIThreadTaskRunner({BrowserTaskType::kNavigationNetworkResponse}));
+      GetNavNetworkResponseTaskRunner());
 }
 
 // Returns true if an interceptor wants to handle the response, i.e. return a
@@ -1183,7 +1228,7 @@ bool NavigationURLLoaderImpl::MaybeCreateLoaderForResponse(
       response_loader_receiver_.reset();
       response_loader_receiver_.Bind(
           std::move(response_client_receiver),
-          GetUIThreadTaskRunner({BrowserTaskType::kNavigationNetworkResponse}));
+          GetNavNetworkResponseTaskRunner());
       default_loader_used_ = false;
       url_loader_.reset();     // Consumed above.
       response_body_.reset();  // Consumed above.
@@ -1348,7 +1393,7 @@ NavigationURLLoaderImpl::NavigationURLLoaderImpl(
   // blocking navigation when they do.
   accept_ch_frame_observers_.Add(
       this, accept_ch_frame_observer.InitWithNewPipeAndPassReceiver(),
-      GetUIThreadTaskRunner({BrowserTaskType::kNavigationNetworkResponse}));
+      GetNavNetworkResponseTaskRunner());
 
   FrameTreeNode* frame_tree_node =
       FrameTreeNode::GloballyFindByID(frame_tree_node_id_);
@@ -1380,8 +1425,7 @@ NavigationURLLoaderImpl::NavigationURLLoaderImpl(
         &factory_receiver, /*header_client=*/nullptr,
         /*bypass_redirect_checks=*/nullptr, /*disable_secure_dns=*/nullptr,
         /*factory_override=*/nullptr,
-        content::GetUIThreadTaskRunner(
-            {content::BrowserTaskType::kNavigationNetworkResponse}));
+        GetNavNetworkResponseTaskRunner());
 
     mojo::Remote<network::mojom::URLLoaderFactory> direct_factory_for_webui(
         CreateWebUIURLLoaderFactory(frame_tree_node->current_frame_host(),
@@ -1479,8 +1523,7 @@ NavigationURLLoaderImpl::CreateNetworkLoaderFactory(
       frame_tree_node->navigation_request()->GetNavigationId(), ukm_id,
       &factory_receiver, &header_client, bypass_redirect_checks,
       /*disable_secure_dns=*/nullptr, /*factory_override=*/nullptr,
-      content::GetUIThreadTaskRunner(
-          {content::BrowserTaskType::kNavigationNetworkResponse}));
+      GetNavNetworkResponseTaskRunner());
   if (devtools_instrumentation::WillCreateURLLoaderFactory(
           frame_tree_node->current_frame_host(), /*is_navigation=*/true,
           /*is_download=*/false, &factory_receiver,
@@ -1502,6 +1545,16 @@ NavigationURLLoaderImpl::CreateNetworkLoaderFactory(
         storage_partition->GetURLLoaderFactoryForBrowserProcess();
   }
   DCHECK(network_loader_factory);
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    char m[128];
+    int n = snprintf(m, sizeof(m),
+                     "QNX:CNLF proxy=%d hdrCli=%d\n",
+                     use_proxy ? 1 : 0,
+                     header_client.is_valid() ? 1 : 0);
+    ::write(2, m, n);
+  }
+#endif
   if (!use_proxy) {
     return network_loader_factory;
   }
@@ -1512,7 +1565,19 @@ NavigationURLLoaderImpl::CreateNetworkLoaderFactory(
 }
 
 void NavigationURLLoaderImpl::Start() {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    const char m[] = "QNX:NULI:Start!\n";
+    ::write(2, m, sizeof(m) - 1);
+  }
+#endif
   std::move(start_closure_).Run();
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    const char m[] = "QNX:NULI:StartDone!\n";
+    ::write(2, m, sizeof(m) - 1);
+  }
+#endif
 }
 
 void NavigationURLLoaderImpl::FollowRedirect(
@@ -1711,8 +1776,7 @@ void NavigationURLLoaderImpl::
       /*header_client=*/nullptr,
       /*bypass_redirect_checks=*/nullptr, /*disable_secure_dns=*/nullptr,
       /*factory_override=*/nullptr,
-      content::GetUIThreadTaskRunner(
-          {content::BrowserTaskType::kNavigationNetworkResponse}));
+      GetNavNetworkResponseTaskRunner());
 
   // TODO(lukasza, jam): It is unclear why FileURLLoaderFactory is the only
   // non-http factory that allows DevTools intereception.  For comparison all

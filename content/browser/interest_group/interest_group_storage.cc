@@ -3002,10 +3002,10 @@ DoGetKAnonymityData(sql::Database& db,
 
   std::vector<StorageInterestGroup::KAnonymityData> k_anon_data;
   while (interest_group_kanon_query.Step()) {
-    k_anon_data.emplace_back(
-        /*key=*/interest_group_kanon_query.ColumnString(0),
-        /*is_k_anonymous=*/interest_group_kanon_query.ColumnBool(1),
-        /*last_updated=*/interest_group_kanon_query.ColumnTime(2));
+    k_anon_data.push_back(
+        {/*key=*/interest_group_kanon_query.ColumnString(0),
+         /*is_k_anonymous=*/interest_group_kanon_query.ColumnBool(1),
+         /*last_updated=*/interest_group_kanon_query.ColumnTime(2)});
   }
   if (!interest_group_kanon_query.Succeeded()) {
     return absl::nullopt;
@@ -3039,10 +3039,10 @@ absl::optional<StorageInterestGroup> DoGetStoredInterestGroup(
         interest_group_kanon_query.ColumnString(0),
         /*is_k_anonymous=*/true,
         /*last_updated=*/interest_group_kanon_query.ColumnTime(1)};
-    if (kanon_data.key.starts_with(blink::kKAnonKeyForAdBidPrefix)) {
+    if (kanon_data.key.find(blink::kKAnonKeyForAdBidPrefix) == 0) {
       db_interest_group.bidding_ads_kanon.push_back(kanon_data);
-    } else if (kanon_data.key.starts_with(
-                   blink::kKAnonKeyForAdComponentBidPrefix)) {
+    } else if (kanon_data.key.find(blink::kKAnonKeyForAdComponentBidPrefix) ==
+               0) {
       db_interest_group.component_ads_kanon.push_back(kanon_data);
     } else {
       db_interest_group.reporting_ads_kanon.push_back(kanon_data);

@@ -4,6 +4,10 @@
 
 #include "content/browser/renderer_host/commit_deferring_condition_runner.h"
 
+#if BUILDFLAG(IS_QNX)
+#include <cstdio>
+#include <unistd.h>
+#endif
 #include "base/memory/ptr_util.h"
 #include "base/no_destructor.h"
 #include "content/browser/renderer_host/back_forward_cache_commit_deferring_condition.h"
@@ -152,35 +156,52 @@ void CommitDeferringConditionRunner::UninstallConditionGeneratorForTesting(
 }
 
 void CommitDeferringConditionRunner::ProcessConditions() {
+#if BUILDFLAG(IS_QNX)
+  {
+    char _b[64];
+    int _n = snprintf(_b, sizeof(_b), "QNX:CDC:0 count=%zu\n", conditions_.size());
+    write(2, _b, _n);
+  }
+#endif
   while (!conditions_.empty()) {
-    // If the condition isn't yet ready to commit, it'll be resolved
-    // asynchronously. The loop will continue from ResumeProcessing();
-
     auto resume_closure =
         base::BindOnce(&CommitDeferringConditionRunner::ResumeProcessing,
                        weak_factory_.GetWeakPtr());
     CommitDeferringCondition* condition = (*conditions_.begin()).get();
+#if BUILDFLAG(IS_QNX)
+    {
+      char _b[128];
+      int _n = snprintf(_b, sizeof(_b), "QNX:CDC:chk %p\n",
+                        (void*)condition);
+      write(2, _b, _n);
+    }
+#endif
     is_deferred_ = false;
-    switch (condition->WillCommitNavigation(std::move(resume_closure))) {
+    auto result = condition->WillCommitNavigation(std::move(resume_closure));
+#if BUILDFLAG(IS_QNX)
+    {
+      char _b[128];
+      int _n = snprintf(_b, sizeof(_b), "QNX:CDC:res %d\n",
+                        (int)result);
+      write(2, _b, _n);
+    }
+#endif
+    switch (result) {
       case CommitDeferringCondition::Result::kDefer:
         is_deferred_ = true;
         return;
       case CommitDeferringCondition::Result::kCancelled:
-        // DO NOT ADD CODE after this. The previous call to
-        // `WillCommitNavigation()` may have caused the destruction of the
-        // `NavigationRequest` that owns this `CommitDeferringConditionRunner`.
         return;
       case CommitDeferringCondition::Result::kProceed:
         break;
     }
 
-    // Otherwise, the condition is resolved synchronously so remove it and move
-    // on to the next one.
     conditions_.erase(conditions_.begin());
   }
 
-  // All checks are completed, proceed with the commit in the
-  // NavigationRequest.
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:CDC:done allOK\n", 19);
+#endif
   delegate_->OnCommitDeferringConditionChecksComplete(
       navigation_type_, candidate_prerender_frame_tree_node_id_);
 }
