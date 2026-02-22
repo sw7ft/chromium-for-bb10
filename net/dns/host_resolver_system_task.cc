@@ -273,7 +273,7 @@ void HostResolverSystemTask::StartLookupAttempt() {
         base::BindOnce(&HostResolverSystemTask::StartLookupAttempt,
                        weak_ptr_factory_.GetWeakPtr()),
         params_.unresponsive_delay *
-            std::pow(params_.retry_factor, attempt_number_ - 1));
+            std::pow(static_cast<double>(params_.retry_factor), static_cast<double>(attempt_number_ - 1)));
   }
 
   auto lookup_complete_cb =

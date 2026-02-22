@@ -20,7 +20,7 @@ const int64_t kLowBitsMask = (INT64_C(1) << 32) - 1;
 
 int64_t GetNumTypeBits() {
   return std::ceil(
-      std::log2(static_cast<int64_t>(SourceIdObj::Type::kMaxValue) + 1));
+      std::log2(static_cast<double>(static_cast<int64_t>(SourceIdObj::Type::kMaxValue) + 1)));
 }
 
 }  // namespace

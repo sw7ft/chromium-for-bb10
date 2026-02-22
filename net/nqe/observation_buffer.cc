@@ -133,14 +133,14 @@ void ObservationBuffer::ComputeWeightedObservations(
 
     base::TimeDelta time_since_sample_taken = now - observation.timestamp();
     double time_weight =
-        pow(weight_multiplier_per_second_, time_since_sample_taken.InSeconds());
+        pow(weight_multiplier_per_second_, static_cast<double>(time_since_sample_taken.InSeconds()));
 
     double signal_strength_weight = 1.0;
     if (current_signal_strength >= 0 && observation.signal_strength() >= 0) {
       int32_t signal_strength_weight_diff =
           std::abs(current_signal_strength - observation.signal_strength());
       signal_strength_weight =
-          pow(weight_multiplier_per_signal_level_, signal_strength_weight_diff);
+          pow(weight_multiplier_per_signal_level_, static_cast<double>(signal_strength_weight_diff));
     }
 
     double weight = time_weight * signal_strength_weight;

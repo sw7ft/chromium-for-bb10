@@ -5,6 +5,10 @@
 #include "services/network/cors/cors_url_loader_factory.h"
 
 #include <utility>
+#if defined(__QNX__) || defined(__QNXNTO__)
+#include <unistd.h>
+#include <cstdio>
+#endif
 
 #include "base/debug/crash_logging.h"
 #include "base/functional/bind.h"
@@ -335,6 +339,14 @@ void CorsURLLoaderFactory::CreateLoaderAndStart(
     const ResourceRequest& resource_request,
     mojo::PendingRemote<mojom::URLLoaderClient> client,
     const net::MutableNetworkTrafficAnnotationTag& traffic_annotation) {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    std::string u = resource_request.url.spec();
+    char m[256];
+    int n = snprintf(m, sizeof(m), "QNX:CORS:CreateLoader url=%s\n", u.c_str());
+    ::write(2, m, n);
+  }
+#endif
 #if BUILDFLAG(IS_ANDROID)
   // Use pseudo flag to investigate histogram issue.
   // See https://crbug.com/1439721.
@@ -343,12 +355,20 @@ void CorsURLLoaderFactory::CreateLoaderAndStart(
                             observed);
 #endif
 
+#if !defined(__QNX__) && !defined(__QNXNTO__)
   debug::ScopedResourceRequestCrashKeys request_crash_keys(resource_request);
   SCOPED_CRASH_KEY_NUMBER("net", "traffic_annotation_hash",
                           traffic_annotation.unique_id_hash_code);
   SCOPED_CRASH_KEY_STRING64("network", "factory_debug_tag", debug_tag_);
+#endif
 
   if (!IsValidRequest(resource_request, options)) {
+#if defined(__QNX__) || defined(__QNXNTO__)
+    {
+      const char m[] = "QNX:CORS:InvalidReq!\n";
+      ::write(2, m, sizeof(m) - 1);
+    }
+#endif
     mojo::Remote<mojom::URLLoaderClient>(std::move(client))
         ->OnComplete(URLLoaderCompletionStatus(net::ERR_INVALID_ARGUMENT));
     return;
@@ -389,6 +409,16 @@ void CorsURLLoaderFactory::CreateLoaderAndStart(
       factory_override_ ? factory_override_->get()
                         : network_loader_factory_.get();
   DCHECK(inner_url_loader_factory);
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    char m[128];
+    int n = snprintf(m, sizeof(m),
+                     "QNX:CORS:preStart disWebSec=%d override=%d\n",
+                     disable_web_security_ ? 1 : 0,
+                     factory_override_ ? 1 : 0);
+    ::write(2, m, n);
+  }
+#endif
   if (!disable_web_security_) {
     mojo::PendingRemote<mojom::DevToolsObserver> devtools_observer =
         GetDevToolsObserver(resource_request);
@@ -482,6 +512,19 @@ bool CorsURLLoaderFactory::IsValidCorsExemptHeaders(
 
 bool CorsURLLoaderFactory::IsValidRequest(const ResourceRequest& request,
                                           uint32_t options) {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    char m[256];
+    int n = snprintf(m, sizeof(m),
+                     "QNX:IVR mode=%d cred=%d pid=%d trusted=%d dest=%d\n",
+                     static_cast<int>(request.mode),
+                     static_cast<int>(request.credentials_mode),
+                     process_id_,
+                     is_trusted_ ? 1 : 0,
+                     static_cast<int>(request.destination));
+    ::write(2, m, n);
+  }
+#endif
   if (request.url.SchemeIs(url::kDataScheme)) {
     LOG(WARNING) << "CorsURLLoaderFactory doesn't support `data` scheme.";
     mojo::ReportBadMessage(

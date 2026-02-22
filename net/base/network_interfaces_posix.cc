@@ -4,6 +4,7 @@
 
 #include "net/base/network_interfaces_posix.h"
 
+#include <sys/socket.h>
 #include <netinet/in.h>
 #include <sys/types.h>
 

@@ -313,6 +313,7 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) MultiplexRouter
   // MultiplexRouter's primary thread. Note that exclusive off-thread sync waits
   // are not managed by the MultiplexRouter and thus are not relevant here.
   struct ExclusiveSyncWaitInfo {
+    ExclusiveSyncWaitInfo() = default;
     InterfaceId interface_id = kInvalidInterfaceId;
     uint64_t request_id = 0;
     bool finished = false;

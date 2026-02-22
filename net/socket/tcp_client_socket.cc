@@ -6,6 +6,9 @@
 
 #include <memory>
 #include <utility>
+#if defined(__QNX__) || defined(__QNXNTO__)
+#include <unistd.h>
+#endif
 
 #include "base/check_op.h"
 #include "base/functional/bind.h"
@@ -125,6 +128,12 @@ void TCPClientSocket::SetBeforeConnectCallback(
 }
 
 int TCPClientSocket::Connect(CompletionOnceCallback callback) {
+#if defined(__QNX__)
+  {
+    const char m[] = "QNX:TCP:Connect\n";
+    ::write(2, m, sizeof(m) - 1);
+  }
+#endif
   DCHECK(!callback.is_null());
 
   // If connecting or already connected, then just return OK.

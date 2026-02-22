@@ -250,18 +250,29 @@ void SharedDictionaryStorageOnDisk::OnRefCountedSharedDictionaryDeleted(
 
 void SharedDictionaryStorageOnDisk::OnDictionaryDeleted(
     const std::set<base::UnguessableToken>& disk_cache_key_tokens) {
-  std::erase_if(dictionaries_, [&disk_cache_key_tokens](const auto& it) {
-    return disk_cache_key_tokens.find(it.first) != disk_cache_key_tokens.end();
-  });
+  for (auto it = dictionaries_.begin(); it != dictionaries_.end(); ) {
+    if (disk_cache_key_tokens.find(it->first) != disk_cache_key_tokens.end())
+      it = dictionaries_.erase(it);
+    else
+      ++it;
+  }
 
   for (auto& it1 : dictionary_info_map_) {
-    std::erase_if(it1.second, [&disk_cache_key_tokens](const auto& it2) {
-      return disk_cache_key_tokens.find(it2.second.disk_cache_key_token()) !=
-             disk_cache_key_tokens.end();
-    });
+    for (auto it2 = it1.second.begin(); it2 != it1.second.end(); ) {
+      if (disk_cache_key_tokens.find(it2->second.disk_cache_key_token()) !=
+             disk_cache_key_tokens.end())
+        it2 = it1.second.erase(it2);
+      else
+        ++it2;
+    }
   }
-  std::erase_if(dictionary_info_map_,
-                [](const auto& it) { return it.second.empty(); });
+  for (auto it = dictionary_info_map_.begin();
+       it != dictionary_info_map_.end(); ) {
+    if (it->second.empty())
+      it = dictionary_info_map_.erase(it);
+    else
+      ++it;
+  }
 }
 
 }  // namespace network

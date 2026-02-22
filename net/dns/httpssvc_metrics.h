@@ -48,7 +48,7 @@ class NET_EXPORT_PRIVATE HttpssvcMetrics {
  public:
   explicit HttpssvcMetrics(bool secure);
   ~HttpssvcMetrics();
-  HttpssvcMetrics(HttpssvcMetrics&) = delete;
+  HttpssvcMetrics(const HttpssvcMetrics&) = delete;
   HttpssvcMetrics(HttpssvcMetrics&&) = delete;
 
   // May be called many times.

@@ -19,7 +19,8 @@ namespace network {
 namespace {
 
 bool HasSubdomainCoverage(std::string_view domain) {
-  return domain.starts_with(".") || domain.starts_with("*");
+  return (!domain.empty() && domain[0] == '.') ||
+         (!domain.empty() && domain[0] == '*');
 }
 
 void AddBypassRulesForDomain(net::SchemeHostPortMatcher& bypass_matcher,
@@ -126,7 +127,7 @@ UrlMatcherWithBypass::MatchResult UrlMatcherWithBypass::Matches(
 
   std::string resource_host_suffix = PartitionMapKey(request_url.host());
 
-  if (match_list_with_bypass_map_.contains(resource_host_suffix)) {
+  if (match_list_with_bypass_map_.count(resource_host_suffix) > 0) {
     for (const auto& [rule, bypass_matcher] :
          match_list_with_bypass_map_.at(resource_host_suffix)) {
       auto rule_result = rule->Evaluate(request_url);

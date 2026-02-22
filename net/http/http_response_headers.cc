@@ -252,9 +252,23 @@ HttpResponseHeaders::HttpResponseHeaders(const std::string& raw_input)
 
 HttpResponseHeaders::HttpResponseHeaders(base::PickleIterator* iter)
     : response_code_(-1) {
+#if defined(__QNX__)
+  write(2, "QNX:HRH:ctor:0\n", 15);
+#endif
   std::string raw_input;
-  if (iter->ReadString(&raw_input))
+  if (iter->ReadString(&raw_input)) {
+#if defined(__QNX__)
+    {
+      char _b[64];
+      int _n = snprintf(_b, sizeof(_b), "QNX:HRH:ctor:1 len=%u\n", (unsigned)raw_input.size());
+      write(2, _b, _n);
+    }
+#endif
     Parse(raw_input);
+#if defined(__QNX__)
+    write(2, "QNX:HRH:ctor:2 parsed\n", 21);
+#endif
+  }
 }
 
 HttpResponseHeaders::HttpResponseHeaders(
@@ -607,24 +621,35 @@ void HttpResponseHeaders::UpdateWithNewRange(const HttpByteRange& byte_range,
 }
 
 void HttpResponseHeaders::Parse(const std::string& raw_input) {
+#if defined(__QNX__)
+  write(2, "QNX:Parse:0\n", 12);
+#endif
   raw_headers_.reserve(raw_input.size());
-  // TODO(https://crbug.com/1470137): Call reserve() on `parsed_` with an
-  // appropriate value.
 
-  // ParseStatusLine adds a normalized status line to raw_headers_
   std::string::const_iterator line_begin = raw_input.begin();
   std::string::const_iterator line_end = base::ranges::find(raw_input, '\0');
-  // has_headers = true, if there is any data following the status line.
-  // Used by ParseStatusLine() to decide if a HTTP/0.9 is really a HTTP/1.0.
   bool has_headers =
       (line_end != raw_input.end() && (line_end + 1) != raw_input.end() &&
        *(line_end + 1) != '\0');
+#if defined(__QNX__)
+  {
+    char _b[64];
+    int _n = snprintf(_b, sizeof(_b), "QNX:Parse:1 hasH=%d atEnd=%d\n",
+                      (int)has_headers, (int)(line_end == raw_input.end()));
+    write(2, _b, _n);
+  }
+#endif
   ParseStatusLine(line_begin, line_end, has_headers);
-  raw_headers_.push_back('\0');  // Terminate status line with a null.
+#if defined(__QNX__)
+  write(2, "QNX:Parse:2 status\n", 19);
+#endif
+  raw_headers_.push_back('\0');
 
   if (line_end == raw_input.end()) {
-    raw_headers_.push_back('\0');  // Ensure the headers end with a double null.
-
+    raw_headers_.push_back('\0');
+#if defined(__QNX__)
+    write(2, "QNX:Parse:3 done-early\n", 23);
+#endif
     DCHECK_EQ('\0', raw_headers_[raw_headers_.size() - 2]);
     DCHECK_EQ('\0', raw_headers_[raw_headers_.size() - 1]);
     return;
@@ -830,10 +855,25 @@ void HttpResponseHeaders::ParseStatusLine(
     std::string::const_iterator line_begin,
     std::string::const_iterator line_end,
     bool has_headers) {
-  // Extract the version number
+#if defined(__QNX__)
+  {
+    char _b[64];
+    int _n = snprintf(_b, sizeof(_b), "QNX:PSL:0 len=%d hasH=%d\n",
+                      (int)(line_end - line_begin), (int)has_headers);
+    write(2, _b, _n);
+  }
+#endif
   HttpVersion parsed_http_version = ParseVersion(line_begin, line_end);
+#if defined(__QNX__)
+  {
+    char _b[64];
+    int _n = snprintf(_b, sizeof(_b), "QNX:PSL:1 ver=%d.%d\n",
+                      parsed_http_version.major_value(),
+                      parsed_http_version.minor_value());
+    write(2, _b, _n);
+  }
+#endif
 
-  // Clamp the version number to one of: {0.9, 1.0, 1.1, 2.0}
   if (parsed_http_version == HttpVersion(0, 9) && !has_headers) {
     http_version_ = HttpVersion(0, 9);
     raw_headers_ = "HTTP/0.9";
@@ -844,17 +884,25 @@ void HttpResponseHeaders::ParseStatusLine(
     http_version_ = HttpVersion(1, 1);
     raw_headers_ = "HTTP/1.1";
   } else {
-    // Treat everything else like HTTP 1.0
     http_version_ = HttpVersion(1, 0);
     raw_headers_ = "HTTP/1.0";
   }
+#if defined(__QNX__)
+  write(2, "QNX:PSL:2 clamp\n", 16);
+#endif
   if (parsed_http_version != http_version_) {
     DVLOG(1) << "assuming HTTP/" << http_version_.major_value() << "."
              << http_version_.minor_value();
   }
 
-  // TODO(eroman): this doesn't make sense if ParseVersion failed.
   std::string::const_iterator p = std::find(line_begin, line_end, ' ');
+#if defined(__QNX__)
+  {
+    char _b[48];
+    int _n = snprintf(_b, sizeof(_b), "QNX:PSL:3 find atEnd=%d\n", (int)(p == line_end));
+    write(2, _b, _n);
+  }
+#endif
 
   if (p == line_end) {
     DVLOG(1) << "missing response status; assuming 200 OK";
@@ -865,6 +913,13 @@ void HttpResponseHeaders::ParseStatusLine(
 
   response_code_ =
       ParseStatus(base::MakeStringPiece(p + 1, line_end), raw_headers_);
+#if defined(__QNX__)
+  {
+    char _b[48];
+    int _n = snprintf(_b, sizeof(_b), "QNX:PSL:4 code=%d\n", response_code_);
+    write(2, _b, _n);
+  }
+#endif
 }
 
 size_t HttpResponseHeaders::FindHeader(size_t from,

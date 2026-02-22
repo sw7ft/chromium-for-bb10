@@ -7,6 +7,10 @@
 #include <memory>
 #include <string>
 #include <utility>
+#if defined(__QNX__) || defined(__QNXNTO__)
+#include <unistd.h>
+#include <cstdio>
+#endif
 
 #include "base/check_op.h"
 #include "base/functional/bind.h"
@@ -121,6 +125,14 @@ void URLLoaderFactory::CreateLoaderAndStart(
     const ResourceRequest& resource_request,
     mojo::PendingRemote<mojom::URLLoaderClient> client,
     const net::MutableNetworkTrafficAnnotationTag& traffic_annotation) {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    std::string u = resource_request.url.spec();
+    char m[256];
+    int n = snprintf(m, sizeof(m), "QNX:ULF:CreateLoader url=%s\n", u.c_str());
+    ::write(2, m, n);
+  }
+#endif
   CreateLoaderAndStartWithSyncClient(std::move(receiver), request_id, options,
                                      resource_request, std::move(client),
                                      /* sync_client= */ nullptr,
@@ -185,6 +197,14 @@ void URLLoaderFactory::CreateLoaderAndStartWithSyncClient(
     mojo::PendingRemote<mojom::URLLoaderClient> client,
     base::WeakPtr<mojom::URLLoaderClient> sync_client,
     const net::MutableNetworkTrafficAnnotationTag& traffic_annotation) {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    std::string u = resource_request.url.spec();
+    char m[256];
+    int n = snprintf(m, sizeof(m), "QNX:ULF:CLASWSC url=%s\n", u.c_str());
+    ::write(2, m, n);
+  }
+#endif
   // Requests with |trusted_params| when params_->is_trusted is not set should
   // have been rejected at the CorsURLLoader layer.
   DCHECK(!resource_request.trusted_params || params_->is_trusted);

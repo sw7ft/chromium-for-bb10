@@ -8,6 +8,12 @@
 
 #include <tuple>
 
+#if defined(__QNX__)
+#include <cstdio>
+#include <unistd.h>
+#include <pthread.h>
+#endif
+
 #include "base/check.h"
 #include "base/containers/contains.h"
 #include "base/containers/cxx20_erase.h"
@@ -1013,7 +1019,27 @@ bool InterfaceEndpointClient::HandleValidatedMessage(Message* message) {
     if (mojo::internal::ControlMessageHandler::IsControlMessage(message))
       return control_message_handler_.Accept(message);
 
+#if defined(__QNX__)
+    {
+      char _b[128];
+      int _n = snprintf(_b, sizeof(_b), "QNX:IEC:pre tid=%x name=%u iface=%s\n",
+                        (unsigned)pthread_self(),
+                        message->name(),
+                        interface_name_ ? interface_name_ : "?");
+      write(2, _b, _n);
+    }
+#endif
     accepted_interface_message = incoming_receiver_->Accept(message);
+#if defined(__QNX__)
+    {
+      char _b[128];
+      int _n = snprintf(_b, sizeof(_b), "QNX:IEC:post tid=%x res=%d iface=%s\n",
+                        (unsigned)pthread_self(),
+                        (int)accepted_interface_message,
+                        interface_name_ ? interface_name_ : "?");
+      write(2, _b, _n);
+    }
+#endif
   }
 
   if (weak_self && accepted_interface_message &&

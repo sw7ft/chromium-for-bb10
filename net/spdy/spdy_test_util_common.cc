@@ -829,7 +829,7 @@ spdy::SpdySerializedFrame SpdyTestUtil::ConstructSpdyHeaders(
 
   priority_to_stream_id_list_[priority].push_back(stream_id);
 
-  if (block[spdy::kHttp2MethodHeader] != "CONNECT") {
+  if (!(block[spdy::kHttp2MethodHeader] == "CONNECT")) {
     RequestPriority header_priority =
         header_request_priority.value_or(priority);
     AddPriorityToHeaderBlock(header_priority, priority_incremental, &block);

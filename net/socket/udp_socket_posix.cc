@@ -612,18 +612,23 @@ int UDPSocketPosix::SetRecvEcn() {
     }
   }
 
+#if defined(__QNX__)
+  // QNX doesn't support IP_RECVTOS
+  return OK;
+#else
   int rv = setsockopt(socket_, IPPROTO_IP, IP_RECVTOS, &ecn, sizeof(ecn));
   return rv == 0 ? OK : MapSystemError(errno);
+#endif
 }
 
 void UDPSocketPosix::SetMsgConfirm(bool confirm) {
-#if !BUILDFLAG(IS_APPLE)
+#if !BUILDFLAG(IS_APPLE) && !defined(__QNX__)
   if (confirm) {
     sendto_flags_ |= MSG_CONFIRM;
   } else {
     sendto_flags_ &= ~MSG_CONFIRM;
   }
-#endif  // !BUILDFLAG(IS_APPLE)
+#endif  // !BUILDFLAG(IS_APPLE) && !defined(__QNX__)
 }
 
 int UDPSocketPosix::AllowAddressReuse() {
@@ -914,9 +919,14 @@ int UDPSocketPosix::SetMulticastOptions() {
   if (multicast_interface_ != 0) {
     switch (addr_family_) {
       case AF_INET: {
+#if defined(__QNX__)
+        ip_mreq mreq = {};
+        mreq.imr_interface.s_addr = htonl(INADDR_ANY);
+#else
         ip_mreqn mreq = {};
         mreq.imr_ifindex = multicast_interface_;
         mreq.imr_address.s_addr = htonl(INADDR_ANY);
+#endif
         int rv = setsockopt(socket_, IPPROTO_IP, IP_MULTICAST_IF,
                             reinterpret_cast<const char*>(&mreq), sizeof(mreq));
         if (rv)
@@ -979,9 +989,14 @@ int UDPSocketPosix::JoinGroup(const IPAddress& group_address) const {
     case IPAddress::kIPv4AddressSize: {
       if (addr_family_ != AF_INET)
         return ERR_ADDRESS_INVALID;
+#if defined(__QNX__)
+      ip_mreq mreq = {};
+      mreq.imr_interface.s_addr = htonl(INADDR_ANY);
+#else
       ip_mreqn mreq = {};
       mreq.imr_ifindex = multicast_interface_;
       mreq.imr_address.s_addr = htonl(INADDR_ANY);
+#endif
       memcpy(&mreq.imr_multiaddr, group_address.bytes().data(),
              IPAddress::kIPv4AddressSize);
       int rv = setsockopt(socket_, IPPROTO_IP, IP_ADD_MEMBERSHIP,
@@ -1019,9 +1034,14 @@ int UDPSocketPosix::LeaveGroup(const IPAddress& group_address) const {
     case IPAddress::kIPv4AddressSize: {
       if (addr_family_ != AF_INET)
         return ERR_ADDRESS_INVALID;
+#if defined(__QNX__)
+      ip_mreq mreq = {};
+      mreq.imr_interface.s_addr = htonl(INADDR_ANY);
+#else
       ip_mreqn mreq = {};
       mreq.imr_ifindex = multicast_interface_;
       mreq.imr_address.s_addr = INADDR_ANY;
+#endif
       memcpy(&mreq.imr_multiaddr, group_address.bytes().data(),
              IPAddress::kIPv4AddressSize);
       int rv = setsockopt(socket_, IPPROTO_IP, IP_DROP_MEMBERSHIP,

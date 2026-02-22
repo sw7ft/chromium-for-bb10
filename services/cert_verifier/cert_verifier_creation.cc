@@ -13,9 +13,13 @@
 #include "net/cert/multi_threaded_cert_verifier.h"
 #include "net/net_buildflags.h"
 
-#if BUILDFLAG(IS_FUCHSIA)
+#if BUILDFLAG(IS_FUCHSIA) || defined(__QNX__) || defined(__QNXNTO__)
 #include "net/cert/cert_verify_proc_builtin.h"
 #include "net/cert/internal/system_trust_store.h"
+#endif
+
+#if defined(__QNX__) || defined(__QNXNTO__)
+#include <unistd.h>
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS)
@@ -105,6 +109,10 @@ class CertVerifyProcFactoryImpl : public net::CertVerifyProcFactory {
     return net::CreateCertVerifyProcBuiltin(std::move(cert_net_fetcher),
                                             std::move(crl_set),
                                             net::CreateSslSystemTrustStore());
+#elif defined(__QNX__) || defined(__QNXNTO__)
+    return net::CreateCertVerifyProcBuiltin(std::move(cert_net_fetcher),
+                                            std::move(crl_set),
+                                            net::CreateEmptySystemTrustStore());
 #else
     return net::CertVerifyProc::CreateSystemVerifyProc(
         std::move(cert_net_fetcher), std::move(crl_set));

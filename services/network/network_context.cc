@@ -8,6 +8,10 @@
 #include <string>
 #include <tuple>
 #include <utility>
+#if defined(__QNX__) || defined(__QNXNTO__)
+#include <unistd.h>
+#include <cstdio>
+#endif
 
 #include "base/barrier_closure.h"
 #include "base/base64.h"
@@ -794,6 +798,12 @@ void NetworkContext::CreateURLLoaderFactory(
     mojo::PendingReceiver<mojom::URLLoaderFactory> receiver,
     mojom::URLLoaderFactoryParamsPtr params,
     scoped_refptr<ResourceSchedulerClient> resource_scheduler_client) {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    const char m[] = "QNX:NC:CreateULF!\n";
+    ::write(2, m, sizeof(m) - 1);
+  }
+#endif
   url_loader_factories_.emplace(std::make_unique<cors::CorsURLLoaderFactory>(
       this, std::move(params), std::move(resource_scheduler_client),
       std::move(receiver), &cors_origin_access_list_,

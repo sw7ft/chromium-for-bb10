@@ -19,7 +19,7 @@ int64_t GetExponentialBucketMin(int64_t sample, double bucket_spacing) {
   // instead of iteratively calculating each bucket, this calculates the lower
   // end of the specific bucket for network and cached bytes.
   return std::ceil(std::pow(
-      bucket_spacing, std::floor(std::log(sample) / std::log(bucket_spacing))));
+      bucket_spacing, std::floor(std::log((double)sample) / std::log(bucket_spacing))));
 }
 
 int64_t GetExponentialBucketMinForUserTiming(int64_t sample) {

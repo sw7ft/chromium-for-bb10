@@ -38,6 +38,10 @@ bool GetPeerEuid(base::PlatformFile fd, uid_t* peer_euid) {
   }
   *peer_euid = socket_euid;
   return true;
+#elif BUILDFLAG(IS_QNX)
+  // QNX does not support SO_PEERCRED / struct ucred.
+  *peer_euid = geteuid();
+  return true;
 #else
   struct ucred cred;
   socklen_t cred_len = sizeof(cred);

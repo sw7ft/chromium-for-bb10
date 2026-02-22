@@ -4,6 +4,12 @@
 
 #include "mojo/public/cpp/system/simple_watcher.h"
 
+#if defined(__QNX__)
+#include <cstdio>
+#include <unistd.h>
+#include <pthread.h>
+#endif
+
 #include "base/functional/bind.h"
 #include "base/memory/ptr_util.h"
 #include "base/synchronization/lock.h"
@@ -247,6 +253,16 @@ void SimpleWatcher::OnHandleReady(int watch_id,
                                   const HandleSignalsState& state) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
+#if defined(__QNX__)
+  {
+    char _b[96];
+    int _n = snprintf(_b, sizeof(_b), "QNX:OHR tid=%x wid=%d res=%d tag=%s\n",
+                      (unsigned)pthread_self(), watch_id, (int)result,
+                      handler_tag_ ? handler_tag_ : "?");
+    write(2, _b, _n);
+  }
+#endif
+
   // This notification may be for a previously watched context, in which case
   // we just ignore it.
   if (watch_id != watch_id_)
@@ -275,7 +291,13 @@ void SimpleWatcher::OnHandleReady(int watch_id,
                 });
 
     base::WeakPtr<SimpleWatcher> weak_self = weak_factory_.GetWeakPtr();
+#if defined(__QNX__)
+    write(2, "QNX:OHR:cb\n", 11);
+#endif
     callback.Run(result, state);
+#if defined(__QNX__)
+    if (weak_self) write(2, "QNX:OHR:cb done\n", 16);
+#endif
     if (!weak_self)
       return;
 

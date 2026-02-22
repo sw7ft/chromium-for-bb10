@@ -7,6 +7,11 @@
 #include <stdint.h>
 
 #include <memory>
+#if defined(__QNX__) || defined(__QNXNTO__)
+#include <unistd.h>
+#include <cstdio>
+#include <pthread.h>
+#endif
 
 #include "base/check_op.h"
 #include "base/compiler_specific.h"
@@ -504,6 +509,15 @@ MojoResult Connector::ReadMessage(ScopedMessageHandle& message) {
 bool Connector::DispatchMessage(ScopedMessageHandle handle) {
   DCHECK(!paused_);
 
+#if defined(__QNX__)
+  {
+    char _b[128];
+    int _n = snprintf(_b, sizeof(_b), "QNX:DM tid=%x iface=%s\n",
+                      (unsigned)pthread_self(),
+                      interface_name_ ? interface_name_ : "?");
+    write(2, _b, _n);
+  }
+#endif
   Message message = Message::CreateFromMessageHandle(&handle);
   if (message.IsNull()) {
     // If the Message is null, there was a problem extracting handles from it.
@@ -557,8 +571,28 @@ bool Connector::DispatchMessage(ScopedMessageHandle handle) {
 
   if (connection_group_)
     message.set_receiver_connection_group(&connection_group_);
+#if defined(__QNX__)
+  {
+    char _b[128];
+    int _n = snprintf(_b, sizeof(_b), "QNX:DM:pre tid=%x recv=%p name=%u iface=%s\n",
+                      (unsigned)pthread_self(),
+                      incoming_receiver_,
+                      message.name(),
+                      interface_name_ ? interface_name_ : "?");
+    write(2, _b, _n);
+  }
+#endif
   bool receiver_result =
       incoming_receiver_ && incoming_receiver_->Accept(&message);
+#if defined(__QNX__)
+  {
+    char _b[128];
+    int _n = snprintf(_b, sizeof(_b), "QNX:DM:post tid=%x res=%d iface=%s\n",
+                      (unsigned)pthread_self(), (int)receiver_result,
+                      interface_name_ ? interface_name_ : "?");
+    write(2, _b, _n);
+  }
+#endif
   if (!weak_self)
     return receiver_result;
 

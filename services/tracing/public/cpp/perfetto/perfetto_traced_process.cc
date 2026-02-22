@@ -72,8 +72,9 @@ const char* MaybeSocket() {
 void OnPerfettoLogMessage(perfetto::base::LogMessageCallbackArgs args) {
   // Perfetto levels start at 0, base's at -1.
   int severity = static_cast<int>(args.level) - 1;
-  ::logging::LogMessage(args.filename, args.line, severity).stream()
-      << args.message;
+  const char* filename = args.filename ? args.filename : "";
+  const char* message = args.message ? args.message : "";
+  ::logging::LogMessage(filename, args.line, severity).stream() << message;
 }
 
 }  // namespace

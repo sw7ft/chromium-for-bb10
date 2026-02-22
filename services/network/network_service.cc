@@ -8,6 +8,11 @@
 #include <map>
 #include <utility>
 #include <vector>
+#if defined(__QNX__) || defined(__QNXNTO__)
+#include <unistd.h>
+#include <cstdio>
+#include <pthread.h>
+#endif
 
 #include "base/check.h"
 #include "base/check_op.h"
@@ -356,6 +361,13 @@ NetworkService::NetworkService(
     mojo::PendingReceiver<mojom::NetworkService> receiver,
     bool delay_initialization_until_set_client)
     : net_log_(net::NetLog::Get()), registry_(std::move(registry)) {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    char m[96];
+    int n = snprintf(m, sizeof(m), "QNX:NS:ctor tid=%lu\n", (unsigned long)pthread_self());
+    ::write(2, m, n);
+  }
+#endif
   DCHECK(!g_network_service);
   g_network_service = this;
 
@@ -382,6 +394,14 @@ NetworkService::NetworkService(
 
 void NetworkService::Initialize(mojom::NetworkServiceParamsPtr params,
                                 bool mock_network_change_notifier) {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    char m[96];
+    int n = snprintf(m, sizeof(m), "QNX:NS:Init! already=%d tid=%lu\n",
+                     initialized_ ? 1 : 0, (unsigned long)pthread_self());
+    ::write(2, m, n);
+  }
+#endif
   if (initialized_) {
     return;
   }
@@ -618,6 +638,13 @@ void NetworkService::CreateNetLogEntriesForActiveObjects(
 }
 
 void NetworkService::SetParams(mojom::NetworkServiceParamsPtr params) {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    char m[64];
+    int n = snprintf(m, sizeof(m), "QNX:NS:SetParams! tid=%lu\n", (unsigned long)pthread_self());
+    ::write(2, m, n);
+  }
+#endif
   Initialize(std::move(params));
 }
 
@@ -667,6 +694,13 @@ void NetworkService::SetSSLKeyLogFile(base::File file) {
 void NetworkService::CreateNetworkContext(
     mojo::PendingReceiver<mojom::NetworkContext> receiver,
     mojom::NetworkContextParamsPtr params) {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    char m[96];
+    int n = snprintf(m, sizeof(m), "QNX:NS:CreateNetCtx! tid=%lu\n", (unsigned long)pthread_self());
+    ::write(2, m, n);
+  }
+#endif
   // If a custom proxy config is already set, the Masked Domain List proxy
   // configs should not be used.
   if (network_service_proxy_allow_list_->IsEnabled() &&
@@ -1108,8 +1142,24 @@ void NetworkService::OnNetworkContextConnectionClosed(
 
 void NetworkService::Bind(
     mojo::PendingReceiver<mojom::NetworkService> receiver) {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    char m[96];
+    int n = snprintf(m, sizeof(m), "QNX:NS:Bind valid=%d tid=%lu\n",
+                     receiver.is_valid() ? 1 : 0, (unsigned long)pthread_self());
+    ::write(2, m, n);
+  }
+#endif
   DCHECK(!receiver_.is_bound());
   receiver_.Bind(std::move(receiver));
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    char m[64];
+    int n = snprintf(m, sizeof(m), "QNX:NS:Bind done bound=%d\n",
+                     receiver_.is_bound() ? 1 : 0);
+    ::write(2, m, n);
+  }
+#endif
 }
 
 mojom::URLLoaderNetworkServiceObserver*

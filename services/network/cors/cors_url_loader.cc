@@ -4,6 +4,11 @@
 
 #include "services/network/cors/cors_url_loader.h"
 
+#if defined(__QNX__) || defined(__QNXNTO__)
+#include <unistd.h>
+#include <cstdio>
+#endif
+
 #include <sstream>
 #include <utility>
 
@@ -381,6 +386,15 @@ CorsURLLoader::~CorsURLLoader() {
 }
 
 void CorsURLLoader::Start() {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    std::string u = request_.url.spec();
+    char m[256];
+    int n = snprintf(m, sizeof(m), "QNX:CUL:Start url=%s mode=%d\n",
+                     u.c_str(), static_cast<int>(request_.mode));
+    ::write(2, m, n);
+  }
+#endif
   if (fetch_cors_flag_ && IsCorsEnabledRequestMode(request_.mode)) {
     // Username and password should be stripped in a CORS-enabled request.
     if (request_.url.has_username() || request_.url.has_password()) {
@@ -588,6 +602,15 @@ void CorsURLLoader::OnReceiveResponse(
     mojom::URLResponseHeadPtr response_head,
     mojo::ScopedDataPipeConsumerHandle body,
     absl::optional<mojo_base::BigBuffer> cached_metadata) {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    char m[128];
+    int n = snprintf(m, sizeof(m), "QNX:CUL:OnRecvResp body=%d code=%d\n",
+                     body.is_valid() ? 1 : 0,
+                     response_head->headers ? response_head->headers->response_code() : -1);
+    ::write(2, m, n);
+  }
+#endif
   DCHECK(network_loader_);
   DCHECK(forwarding_client_);
   DCHECK(!deferred_redirect_url_);
@@ -653,8 +676,23 @@ void CorsURLLoader::OnReceiveResponse(
   response_head->private_network_access_preflight_result =
       TakePrivateNetworkAccessPreflightResult();
 
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    char m[128];
+    int n = snprintf(m, sizeof(m), "QNX:CUL:preFwd bound=%d body=%d\n",
+                     forwarding_client_.is_bound() ? 1 : 0,
+                     body.is_valid() ? 1 : 0);
+    ::write(2, m, n);
+  }
+#endif
   forwarding_client_->OnReceiveResponse(
       std::move(response_head), std::move(body), std::move(cached_metadata));
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    const char m[] = "QNX:CUL:postFwd\n";
+    ::write(2, m, sizeof(m) - 1);
+  }
+#endif
 }
 
 void CorsURLLoader::CheckTainted(const net::RedirectInfo& redirect_info) {
@@ -802,6 +840,12 @@ void CorsURLLoader::OnComplete(const URLLoaderCompletionStatus& status) {
 }
 
 void CorsURLLoader::StartRequest() {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    const char m[] = "QNX:CUL:StartRequest\n";
+    ::write(2, m, sizeof(m) - 1);
+  }
+#endif
   // All results should be reported to `forwarding_client_` as part of a
   // `URLResponseHead`, then `pna_preflight_result_` reset to `kNone`.
   CHECK_EQ(pna_preflight_result_,
@@ -1030,6 +1074,15 @@ void CorsURLLoader::OnPreflightRequestComplete(
 }
 
 void CorsURLLoader::StartNetworkRequest() {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    char m[128];
+    int n = snprintf(m, sizeof(m),
+                     "QNX:CUL:StartNetReq sync=%d\n",
+                     sync_network_loader_factory_ ? 1 : 0);
+    ::write(2, m, n);
+  }
+#endif
   // Here we overwrite the credentials mode sent to URLLoader because
   // network::URLLoader doesn't understand |kSameOrigin|.
   // TODO(crbug.com/943939): Fix this.
