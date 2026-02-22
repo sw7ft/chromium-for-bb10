@@ -1,0 +1,46 @@
+# Copyright 2025 SW7FT. All rights reserved.
+# QNX Toolchain definitions for Chromium
+#
+# Provides ARM and x86 QNX cross-compilation toolchains.
+# Uses Clang 17 for compilation and GCC 9.3 linker for linking.
+
+import("//build/toolchain/gcc_toolchain.gni")
+
+# QNX ARM toolchain (Passport / Snapdragon 801)
+# Clang 17 compiles, GCC 9.3 links
+gcc_toolchain("qnx_arm") {
+  # Clang 17 as the cross-compiler
+  cc = "/usr/bin/clang-17"
+  cxx = "/usr/bin/clang++-17"
+  # GCC 9.3 for assembler, archiver, linker (has correct QNX library paths)
+  ar = "/root/qnx800/bin/arm-blackberry-qnx8eabi-ar"
+  ld = "/root/qnx800/bin/arm-blackberry-qnx8eabi-g++"
+  readelf = "/root/qnx800/bin/arm-blackberry-qnx8eabi-readelf"
+  nm = "/root/qnx800/bin/arm-blackberry-qnx8eabi-nm"
+  strip = "/root/qnx800/bin/arm-blackberry-qnx8eabi-strip"
+
+  toolchain_args = {
+    current_cpu = "arm"
+    current_os = "qnx"
+    is_clang = true
+  }
+}
+
+# QNX ARM toolchain using GCC 9.3 only (fallback, for code that needs GCC)
+gcc_toolchain("qnx_arm_gcc") {
+  toolprefix = "/root/qnx800/bin/arm-blackberry-qnx8eabi-"
+
+  cc = "${toolprefix}gcc"
+  cxx = "${toolprefix}g++"
+  ar = "${toolprefix}ar"
+  ld = cxx
+  readelf = "${toolprefix}readelf"
+  nm = "${toolprefix}nm"
+  strip = "${toolprefix}strip"
+
+  toolchain_args = {
+    current_cpu = "arm"
+    current_os = "qnx"
+    is_clang = false
+  }
+}

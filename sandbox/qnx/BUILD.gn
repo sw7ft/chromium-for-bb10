@@ -1,0 +1,13 @@
+# Copyright 2025 SW7FT. All rights reserved.
+# Sandbox stub for QNX - no-op implementations
+
+source_set("sandbox_qnx") {
+  sources = [
+    "sandbox_qnx.h",
+    "sandbox_qnx.cc",
+  ]
+
+  defines = [
+    "SANDBOX_DISABLED=1",
+  ]
+}

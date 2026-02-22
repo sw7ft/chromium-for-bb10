@@ -1,0 +1,199 @@
+# Copyright 2025 SW7FT. All rights reserved.
+# QNX-specific build configuration for Chromium
+#
+# Target: BlackBerry Passport (Snapdragon 801, QNX 8 / BB10, ARMv7-A)
+
+import("//build/config/arm.gni")
+
+# QNX sysroot paths
+qnx_sysroot = "/root/qnx800"
+qnx_arm_sysroot = "${qnx_sysroot}/arm-blackberry-qnx8eabi"
+
+# QNX system configuration
+config("system") {
+  cflags = [
+    # QNX platform defines (Clang doesn't set these automatically)
+    "-D__QNX__",
+    "-D__QNXNTO__",
+    "-D__ARM__",
+    "-D__LITTLEENDIAN__",
+    "-D__arm__",
+    "-D_NTO_HDR_DIR_=${qnx_sysroot}/include/",
+    "-D_NO_CPP_INLINES",
+    "-D_Const_return=",     # Prevent const/non-const overload conflict in string.h
+    "-D_QNX_SOURCE",        # Enable all POSIX extensions
+
+    # Suppress QNX header #pragma pack warnings
+    "-Wno-pragma-pack",
+
+    # QNX lacks these Linux-specific clock types; alias to CLOCK_MONOTONIC
+    "-DCLOCK_BOOTTIME=2",
+    "-DCLOCK_MONOTONIC_RAW=2",
+
+    # QNX lacks SA_RESTART; define as 0 (no-op)
+    "-DSA_RESTART=0",
+
+    # QNX lacks Linux-specific syscall numbers and socket options
+    "-D__NR_gettid=0",
+    "-DSO_PEERCRED=0",
+    "-DAT_HWCAP2=0",
+
+    # QNX dirent doesn't have d_type field; define DT_* constants anyway
+    "-DDT_DIR=4",
+    "-DDT_REG=8",
+
+    # QNX lacks PRIO_PROCESS (from sys/resource.h on Linux)
+    "-DPRIO_PROCESS=0",
+
+    # QNX lacks these coarse clock types; alias to standard clocks
+    "-DCLOCK_REALTIME_COARSE=0",
+    "-DCLOCK_MONOTONIC_COARSE=2",
+
+    # QNX lacks RLIMIT_NICE
+    "-DRLIMIT_NICE=13",
+
+    # QNX lacks IOV_MAX
+    "-DIOV_MAX=1024",
+
+    # QNX lacks MADV_FREE and MADV_DONTNEED; define stubs
+    "-DMADV_FREE=8",
+    "-DMADV_DONTNEED=4",
+
+    # QNX lacks SCM_CREDENTIALS/SO_PASSCRED
+    "-DSCM_CREDENTIALS=2",
+    "-DSO_PASSCRED=16",
+
+    # QNX lacks AI_ADDRCONFIG; define as 0 to effectively disable it
+    "-DAI_ADDRCONFIG=0",
+
+    # QNX lacks SA_ONSTACK
+    "-DSA_ONSTACK=0x10000000",
+
+    # QNX lacks SIOCGSTAMP (Linux ioctl for socket timestamp)
+    "-DSIOCGSTAMP=0x8906",
+
+    # QNX lacks IP_MTU_DISCOVER
+    "-DIP_MTU_DISCOVER=10",
+
+    # QNX lacks LC_ALL_MASK (used by Skia locale setter)
+    "-DLC_ALL_MASK=0",
+
+    # QNX lacks locale_t; typedef as int (stub for code that references it)
+    "-Dlocale_t=int",
+
+    # Suppress Clang error about defaulted copy ctor with non-copyable members
+    # (GCC 9.3 libstdc++ optional has `= default` copy ctor that Clang rejects)
+    "-Wno-defaulted-function-deleted",
+
+    # QNX uses emulated TLS (via __emutls_get_address in libgcc) instead of
+    # native ARM TLS (CP15 thread pointer register).  The TPIDRURO register
+    # on QNX stores the thread ID, not a TLS data pointer, so native TLS
+    # (__aeabi_read_tp + TPOFF / __tls_get_addr) crashes.
+    "-femulated-tls",
+  ]
+
+  cflags_c = []
+  cflags_cc = [
+    # Force-include C++20 backport headers for C++17
+    "-include", "bit",
+  ]
+
+  # Include paths - critical ordering for compatibility:
+  # QNX headers BEFORE Clang builtins so QNX's stddef.h defines max_align_t
+  # first (sets __CLANG_MAX_ALIGN_T_DEFINED guard, preventing Clang's conflicting def).
+  # For C++: libstdc++ first, then QNX C, then Clang builtins (for #include_next).
+  if (is_clang) {
+    cflags += [
+      "-nostdinc",
+    ]
+
+    # C files: QNX C headers first, then Clang builtins
+    cflags_c += [
+      # QNX assert.h doesn't define static_assert (C11 macro for _Static_assert)
+      "-Dstatic_assert=_Static_assert",
+      "-isystem", "${qnx_sysroot}/include",
+      "-isystem", "/usr/lib/llvm-17/lib/clang/17/include",
+    ]
+
+    # C++ files: libstdc++ -> QNX C headers -> Clang builtins
+    cflags_cc += [
+      "-nostdinc++",
+      "-isystem", "${qnx_sysroot}/include/libstdc++/9.3.0",
+      "-isystem", "${qnx_sysroot}/include/libstdc++/9.3.0/arm-blackberry-qnx8eabi",
+      "-isystem", "${qnx_sysroot}/include",
+      "-isystem", "/usr/lib/llvm-17/lib/clang/17/include",
+    ]
+  }
+
+  # ARM ABI flags matching GCC 9.3 configuration
+  if (current_cpu == "arm") {
+    cflags += [
+      "-march=armv7-a",
+      "-mfloat-abi=softfp",
+      "-mfpu=neon-vfpv3",
+      "-mthumb",
+      "-fPIC",
+    ]
+  }
+
+  ldflags = [
+    "-L${qnx_arm_sysroot}/lib",
+    "-L${qnx_arm_sysroot}/usr/lib",
+    "-fPIC",
+    # Note: -pie is NOT here; it belongs only in executable_config.
+    # Passing -pie for shared_library links causes QNX GCC linker to
+    # pull in crt1S.o which expects main(), breaking .so builds.
+
+    # Export our safe strlen/strlen_isr into the dynamic symbol table so
+    # shared libraries (libstdc++, libc) resolve strlen to our NULL-safe
+    # version instead of QNX's __strlen_isr in ldqnx.so.2.
+    "-Wl,--export-dynamic-symbol=strlen",
+    "-Wl,--export-dynamic-symbol=__strlen_isr",
+  ]
+
+  libs = [
+    "m",
+    "pthread",
+    "socket",
+  ]
+}
+
+# QNX default libraries
+config("default_libs") {
+  libs = [
+    "m",
+    "pthread",
+    "socket",
+    "atomic",
+  ]
+  lib_dirs = [
+    "/root/qnx800/x86_64-linux/arm-blackberry-qnx8eabi/lib64/gcc/arm-blackberry-qnx8eabi/4.8.3",
+  ]
+}
+
+# Runtime library config (QNX uses libstdc++ from GCC 9.3)
+config("runtime_library") {
+  ldflags = [
+    "-L${qnx_arm_sysroot}/lib",
+    "-L${qnx_arm_sysroot}/usr/lib",
+  ]
+  libs = [
+    "stdc++",
+    "m",
+    "pthread",
+  ]
+}
+
+# Executable config for QNX
+config("executable_config") {
+  ldflags = [
+    "-pie",
+  ]
+}
+
+# Shared library config for QNX
+config("shared_library_config") {
+  ldflags = [
+    "-shared",
+  ]
+}
