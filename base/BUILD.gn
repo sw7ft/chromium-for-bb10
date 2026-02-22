@@ -1651,15 +1651,24 @@ component("base") {
         "profiler/module_cache_posix.cc",
         "profiler/stack_base_address_posix.cc",
         "profiler/stack_base_address_posix.h",
-        "profiler/stack_copier_signal.cc",
-        "profiler/stack_copier_signal.h",
         "profiler/thread_delegate_posix.cc",
         "profiler/thread_delegate_posix.h",
       ]
+      if (!is_qnx) {
+        # stack_copier_signal.cc uses Linux-specific syscall/futex/tgkill
+        sources += [
+          "profiler/stack_copier_signal.cc",
+          "profiler/stack_copier_signal.h",
+        ]
+      }
     }
 
     if (is_posix && !is_android) {
       sources += [ "debug/stack_trace_posix.cc" ]
+    }
+
+    if (is_qnx) {
+      sources += [ "qnx_abort_override.cc" ]
     }
 
     if (is_posix && !is_ios) {

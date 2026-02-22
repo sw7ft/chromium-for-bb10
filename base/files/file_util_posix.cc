@@ -511,12 +511,33 @@ ScopedFD CreateAndOpenFdForTemporaryFileInDir(const FilePath& directory,
   ScopedBlockingCall scoped_blocking_call(
       FROM_HERE,
       BlockingType::MAY_BLOCK);  // For call to mkstemp().
+#if BUILDFLAG(IS_QNX)
+  // QNX mkstemp and FilePath::Append may not work reliably.
+  // Construct full path manually, bypassing both.
+  static volatile int g_counter = 0;
+  pid_t pid = getpid();
+  const std::string& dir_str = directory.value();
+  for (int attempt = 0; attempt < 1000; ++attempt) {
+    int c = __sync_fetch_and_add(&g_counter, 1);
+    char fullpath[1200];
+    snprintf(fullpath, sizeof(fullpath), "%s/.chromium_tmp_%d_%d",
+             dir_str.c_str(), (int)pid, c);
+    *path = FilePath(fullpath);
+    int fd = HANDLE_EINTR(open(fullpath, O_CREAT | O_EXCL | O_RDWR, 0600));
+    if (fd >= 0)
+      return ScopedFD(fd);
+    if (errno != EEXIST)
+      return ScopedFD();
+  }
+  return ScopedFD();
+#else
   *path = directory.Append(GetTempTemplate());
   const std::string& tmpdir_string = path->value();
   // this should be OK since mkstemp just replaces characters in place
   char* buffer = const_cast<char*>(tmpdir_string.c_str());
 
   return ScopedFD(HANDLE_EINTR(mkstemp(buffer)));
+#endif
 }
 
 #if !BUILDFLAG(IS_FUCHSIA)

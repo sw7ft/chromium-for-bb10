@@ -41,7 +41,7 @@ ThreadPriorityForTest NiceValueToThreadPriorityForTest(int nice_value) {
 }
 
 int GetCurrentThreadNiceValue() {
-#if BUILDFLAG(IS_NACL)
+#if BUILDFLAG(IS_NACL) || BUILDFLAG(IS_QNX)
   NOTIMPLEMENTED();
   return 0;
 #else

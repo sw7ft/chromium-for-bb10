@@ -57,6 +57,9 @@ declare_args() {
   # Compile the 'wayland' platform.
   ozone_platform_wayland = false
 
+  # Compile the 'qnx_screen' platform.
+  ozone_platform_qnx_screen = false
+
   if (ozone_auto_platforms) {
     # Use headless as the default platform unless modified below.
     ozone_platform = "headless"
@@ -91,6 +94,10 @@ declare_args() {
     } else if (is_fuchsia) {
       ozone_platform = "flatland"
       ozone_platform_flatland = true
+    } else if (target_os == "qnx") {
+      ozone_platform = "qnx_screen"
+      ozone_platform_qnx_screen = true
+      ozone_platform_headless = true
     }
   }
 
@@ -112,7 +119,8 @@ if (is_a_target_toolchain) {
   assert(
       use_ozone || !(ozone_platform_cast || ozone_platform_drm ||
                          ozone_platform_flatland || ozone_platform_headless ||
-                         ozone_platform_x11 || ozone_platform_wayland),
+                         ozone_platform_x11 || ozone_platform_wayland ||
+                         ozone_platform_qnx_screen),
       "Must set use_ozone to select ozone platforms")
 }
 

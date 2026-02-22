@@ -13,7 +13,7 @@
 #include "build/build_config.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
-#if !(BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS))
+#if !(BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)) && !defined(__QNX__)
 #include "base/profiler/stack_base_address_posix.h"
 #endif
 
@@ -24,6 +24,9 @@ std::unique_ptr<ThreadDelegatePosix> ThreadDelegatePosix::Create(
   absl::optional<uintptr_t> base_address;
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   base_address = thread_token.stack_base_address;
+#elif defined(__QNX__)
+  // QNX doesn't support pthread_getattr_np; profiling is not supported.
+  return nullptr;
 #else
   base_address =
       GetThreadStackBaseAddress(thread_token.id, thread_token.pthread_id);
@@ -46,7 +49,10 @@ uintptr_t ThreadDelegatePosix::GetStackBaseAddress() const {
 
 std::vector<uintptr_t*> ThreadDelegatePosix::GetRegistersToRewrite(
     RegisterContext* thread_context) {
-#if defined(ARCH_CPU_ARM_FAMILY) && defined(ARCH_CPU_32_BITS)
+#if defined(__QNX__)
+  // QNX uses a different register context structure; profiling is not supported.
+  return {};
+#elif defined(ARCH_CPU_ARM_FAMILY) && defined(ARCH_CPU_32_BITS)
   return {
       reinterpret_cast<uintptr_t*>(&thread_context->arm_r0),
       reinterpret_cast<uintptr_t*>(&thread_context->arm_r1),

@@ -22,6 +22,8 @@
 #include "base/message_loop/message_pump_glib.h"
 #elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_BSD)
 #include "base/message_loop/message_pump_libevent.h"
+#elif BUILDFLAG(IS_QNX)
+#include "base/message_loop/message_pump_libevent.h"
 #elif BUILDFLAG(IS_FUCHSIA)
 #include "base/message_loop/message_pump_fuchsia.h"
 #endif
@@ -45,6 +47,8 @@ using MessagePumpForUI = MessagePump;
 #elif defined(USE_GLIB)
 using MessagePumpForUI = MessagePumpGlib;
 #elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_BSD)
+using MessagePumpForUI = MessagePumpLibevent;
+#elif BUILDFLAG(IS_QNX)
 using MessagePumpForUI = MessagePumpLibevent;
 #elif BUILDFLAG(IS_FUCHSIA)
 using MessagePumpForUI = MessagePumpFuchsia;

@@ -84,6 +84,9 @@ class BASE_EXPORT TraceConfig {
              heap_profiler_options.breakdown_threshold_bytes ==
                  rhs.heap_profiler_options.breakdown_threshold_bytes;
     }
+    bool operator!=(const MemoryDumpConfig& rhs) const {
+      return !(*this == rhs);
+    }
 
     // Reset the values in the config.
     void Clear();
@@ -122,6 +125,9 @@ class BASE_EXPORT TraceConfig {
 
     bool operator==(const ProcessFilterConfig& other) const {
       return included_process_ids_ == other.included_process_ids_;
+    }
+    bool operator!=(const ProcessFilterConfig& other) const {
+      return !(*this == other);
     }
 
    private:

@@ -58,6 +58,8 @@ static const rlim_t kSystemDefaultMaxFds = 256;
 static const rlim_t kSystemDefaultMaxFds = 1024;
 #elif BUILDFLAG(IS_AIX)
 static const rlim_t kSystemDefaultMaxFds = 8192;
+#elif defined(__QNX__)
+static const rlim_t kSystemDefaultMaxFds = 1024;
 #endif
 
 size_t GetMaxFds() {

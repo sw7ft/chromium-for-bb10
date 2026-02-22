@@ -63,6 +63,10 @@ class BASE_EXPORT PersistentSparseHistogramDataManager {
   friend class PersistentSampleMapRecords;
 
   struct ReferenceAndSample {
+    ReferenceAndSample() = default;
+    ReferenceAndSample(PersistentMemoryAllocator::Reference ref,
+                       HistogramBase::Sample val)
+        : reference(ref), value(val) {}
     PersistentMemoryAllocator::Reference reference;
     HistogramBase::Sample value;
   };

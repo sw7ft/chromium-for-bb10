@@ -6,6 +6,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -17,6 +18,11 @@
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <unistd.h>
+#if BUILDFLAG(IS_QNX)
+#include <ucontext.h>
+#include <arm/context.h>
+#include <dlfcn.h>
+#endif
 
 #include <algorithm>
 #include <map>
@@ -327,6 +333,75 @@ void AlarmSignalHandler(int signal, siginfo_t* info, void* void_context) {
 void StackDumpSignalHandler(int signal, siginfo_t* info, void* void_context) {
   // NOTE: This code MUST be async-signal safe.
   // NO malloc or stdio is allowed here.
+
+#if BUILDFLAG(IS_QNX)
+  {
+    char buf[512];
+    const char* signame = "?";
+    if (signal == 6) signame = "SIGABRT";
+    else if (signal == 11) signame = "SIGSEGV";
+    else if (signal == 4) signame = "SIGILL";
+    else if (signal == 5) signame = "SIGTRAP";
+    int si_code = info ? info->si_code : -1;
+
+    ucontext_t* uc = (ucontext_t*)void_context;
+    unsigned pc = 0, lr = 0, sp = 0;
+    if (uc) {
+      pc = uc->uc_mcontext.cpu.gpr[15];
+      lr = uc->uc_mcontext.cpu.gpr[14];
+      sp = uc->uc_mcontext.cpu.gpr[13];
+    }
+    int n = snprintf(buf, sizeof(buf),
+      "QNX:CRASH tid=%x sig=%s(%d) code=%d pc=0x%x lr=0x%x sp=0x%x\n",
+      (unsigned)pthread_self(), signame, signal, si_code, pc, lr, sp);
+    write(STDERR_FILENO, buf, n);
+
+    Dl_info dli;
+    if (pc && dladdr((void*)pc, &dli)) {
+      n = snprintf(buf, sizeof(buf), "QNX:PC %s:%s+0x%x\n",
+        dli.dli_fname ? dli.dli_fname : "?",
+        dli.dli_sname ? dli.dli_sname : "?",
+        (unsigned)((char*)pc - (char*)dli.dli_saddr));
+      write(STDERR_FILENO, buf, n);
+    }
+    if (lr && dladdr((void*)lr, &dli)) {
+      n = snprintf(buf, sizeof(buf), "QNX:LR %s:%s+0x%x\n",
+        dli.dli_fname ? dli.dli_fname : "?",
+        dli.dli_sname ? dli.dli_sname : "?",
+        (unsigned)((char*)lr - (char*)dli.dli_saddr));
+      write(STDERR_FILENO, buf, n);
+    }
+    // Also print all GPRs for offline analysis
+    for (int r = 0; r < 16; r++) {
+      unsigned rv = uc->uc_mcontext.cpu.gpr[r];
+      if (rv > 0x100000 && dladdr((void*)rv, &dli) && dli.dli_sname) {
+        n = snprintf(buf, sizeof(buf), "QNX:R%d=0x%x %s:%s+0x%x\n",
+          r, rv, dli.dli_fname ? dli.dli_fname : "?",
+          dli.dli_sname,
+          (unsigned)((char*)rv - (char*)dli.dli_saddr));
+        write(STDERR_FILENO, buf, n);
+      }
+    }
+    // Stack scan: print potential return addresses from stack
+    if (sp > 0x10000) {
+      write(STDERR_FILENO, "QNX:STACK:", 10);
+      unsigned* sptr = (unsigned*)sp;
+      for (int i = 0; i < 80 && (unsigned)(sptr + i) < 0x7fffffff; i++) {
+        unsigned val = sptr[i];
+        if (val > 0x1000000 && val < 0x6000000) {
+          Dl_info sdi;
+          if (dladdr((void*)(val & ~1), &sdi) && sdi.dli_sname) {
+            n = snprintf(buf, sizeof(buf), " [%d]%x:%s+%x",
+              i, val, sdi.dli_sname,
+              (unsigned)((char*)(val & ~1) - (char*)sdi.dli_saddr));
+            write(STDERR_FILENO, buf, n);
+          }
+        }
+      }
+      write(STDERR_FILENO, "\n", 1);
+    }
+  }
+#endif
 
 #if !BUILDFLAG(IS_NACL)
   // Give a registered callback a chance to recover from this signal
@@ -995,6 +1070,9 @@ bool EnableInProcessStackDumping() {
   success &= (sigaction(SIGFPE, &action, nullptr) == 0);
   success &= (sigaction(SIGBUS, &action, nullptr) == 0);
   success &= (sigaction(SIGSEGV, &action, nullptr) == 0);
+#if BUILDFLAG(IS_QNX)
+  success &= (sigaction(SIGTRAP, &action, nullptr) == 0);
+#endif
 // On Linux, SIGSYS is reserved by the kernel for seccomp-bpf sandboxing.
 #if !BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMEOS)
   success &= (sigaction(SIGSYS, &action, nullptr) == 0);

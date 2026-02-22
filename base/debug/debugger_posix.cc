@@ -23,7 +23,7 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 
-#if defined(__GLIBCXX__)
+#if defined(__GLIBCXX__) && !defined(__QNX__)
 #include <cxxabi.h>
 #endif
 
@@ -224,6 +224,14 @@ void VerifyDebugger() {
          "check, define an environment variable CHROMIUM_GDBINIT_SOURCED=1";
 #endif
 }
+
+#elif BUILDFLAG(IS_QNX)
+
+bool BeingDebugged() {
+  return false;
+}
+
+void VerifyDebugger() {}
 
 #else
 

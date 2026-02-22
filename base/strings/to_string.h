@@ -23,8 +23,23 @@ std::string ToString(const Ts&... values);
 
 namespace internal {
 
+#if __cplusplus >= 202002L
 template <typename T>
 concept SupportsToString = requires(const T& t) { t.ToString(); };
+#else
+// C++17 SFINAE fallback for concept SupportsToString.
+template <typename T, typename = void>
+struct SupportsToStringImpl : std::false_type {};
+
+template <typename T>
+struct SupportsToStringImpl<
+    T,
+    std::void_t<decltype(std::declval<const T&>().ToString())>>
+    : std::true_type {};
+
+template <typename T>
+inline constexpr bool SupportsToString = SupportsToStringImpl<T>::value;
+#endif
 
 // I/O manipulators are function pointers, but should be sent directly to the
 // `ostream` instead of being cast to `const void*` like other function

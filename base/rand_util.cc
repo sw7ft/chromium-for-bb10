@@ -75,7 +75,7 @@ double BitsToOpenEndedUnitInterval(uint64_t bits) {
   static_assert(std::numeric_limits<double>::radix == 2,
                 "otherwise use scalbn");
   constexpr int kBits = std::numeric_limits<double>::digits;
-  return ldexp(bits & ((UINT64_C(1) << kBits) - 1u), -kBits);
+  return ldexp(static_cast<double>(bits & ((UINT64_C(1) << kBits) - 1u)), -kBits);
 }
 
 float BitsToOpenEndedUnitIntervalF(uint64_t bits) {

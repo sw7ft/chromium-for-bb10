@@ -62,7 +62,9 @@ base::MadvFreeSupport ProbePlatformMadvFreeSupport() {
   // the MADV_FREE define will not exist and the probe will default to
   // unsupported, regardless of whether the target system actually supports
   // MADV_FREE.
-#if !BUILDFLAG(IS_APPLE) && defined(MADV_FREE)
+#if defined(__QNX__) || BUILDFLAG(IS_APPLE) || !defined(MADV_FREE)
+  return base::MadvFreeSupport::kUnsupported;
+#else
   uint8_t* dummy_page = static_cast<uint8_t*>(AllocatePages(1));
   dummy_page[0] = 1;
 
@@ -79,8 +81,6 @@ base::MadvFreeSupport ProbePlatformMadvFreeSupport() {
   }
   PCHECK(!munmap(dummy_page, base::GetPageSize()));
   return support;
-#else
-  return base::MadvFreeSupport::kUnsupported;
 #endif
 }
 
@@ -149,7 +149,7 @@ void MadvFreeDiscardableMemoryPosix::Unlock() {
     UnlockPage(page_index);
   }
 
-#ifdef MADV_FREE
+#if defined(MADV_FREE) && !defined(__QNX__)
   if (!keep_memory_for_testing_) {
     int retval =
         madvise(data_, allocated_pages_ * base::GetPageSize(), MADV_FREE);
@@ -219,10 +219,12 @@ void MadvFreeDiscardableMemoryPosix::DiscardPage(size_t page_index) {
   DFAKE_SCOPED_LOCK(thread_collision_warner_);
   DCHECK(!is_locked_);
   DCHECK(page_index < allocated_pages_);
+#if !defined(__QNX__)
   int retval =
       madvise(static_cast<uint8_t*>(data_) + base::GetPageSize() * page_index,
               base::GetPageSize(), MADV_DONTNEED);
   DPCHECK(!retval);
+#endif
 }
 
 bool MadvFreeDiscardableMemoryPosix::IsLockedForTesting() const {
@@ -233,9 +235,11 @@ bool MadvFreeDiscardableMemoryPosix::IsLockedForTesting() const {
 void MadvFreeDiscardableMemoryPosix::DiscardForTesting() {
   DFAKE_SCOPED_LOCK(thread_collision_warner_);
   DCHECK(!is_locked_);
+#if !defined(__QNX__)
   int retval =
       madvise(data_, base::GetPageSize() * allocated_pages_, MADV_DONTNEED);
   DPCHECK(!retval);
+#endif
 }
 
 trace_event::MemoryAllocatorDump*
@@ -306,6 +310,10 @@ void MadvFreeDiscardableMemoryPosix::SetKeepMemoryForTesting(bool keep_memory) {
 
 bool MadvFreeDiscardableMemoryPosix::IsResident() const {
   DFAKE_SCOPED_RECURSIVE_LOCK(thread_collision_warner_);
+#if defined(__QNX__)
+  // QNX doesn't have mincore(); assume memory is resident.
+  return true;
+#else
 #if BUILDFLAG(IS_APPLE)
   std::vector<char> vec(allocated_pages_);
 #else
@@ -321,6 +329,7 @@ bool MadvFreeDiscardableMemoryPosix::IsResident() const {
       return false;
   }
   return true;
+#endif  // defined(__QNX__)
 }
 
 bool MadvFreeDiscardableMemoryPosix::IsDiscarded() const {

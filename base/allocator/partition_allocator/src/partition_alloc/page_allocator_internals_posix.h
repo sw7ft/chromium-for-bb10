@@ -417,7 +417,11 @@ void DiscardSystemPagesInternal(uintptr_t address, size_t length) {
   // performance benefits unclear.
   //
   // Therefore, we just do the simple thing: MADV_DONTNEED.
+#if defined(__QNX__)
+  PA_PCHECK(0 == posix_madvise(ptr, length, POSIX_MADV_DONTNEED));
+#else
   PA_PCHECK(0 == madvise(ptr, length, MADV_DONTNEED));
+#endif
 #endif  // BUILDFLAG(IS_APPLE)
 }
 

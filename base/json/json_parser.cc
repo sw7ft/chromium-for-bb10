@@ -806,7 +806,7 @@ absl::optional<Value> JSONParser::ConsumeNumber() {
   if (StringToInt(num_string, &num_int)) {
     // StringToInt will treat `-0` as zero, losing the significance of the
     // negation.
-    if (num_int == 0 && num_string.starts_with('-')) {
+    if (num_int == 0 && !num_string.empty() && num_string[0] == '-') {
       if (base::FeatureList::IsEnabled(features::kJsonNegativeZero)) {
         return Value(-0.0);
       }

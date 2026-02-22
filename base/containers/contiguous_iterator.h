@@ -43,7 +43,9 @@ struct IsStringIter
     : std::conjunction<
           std::disjunction<std::is_same<iter_value_t<T>, char>,
                            std::is_same<iter_value_t<T>, wchar_t>,
+#if defined(__cpp_char8_t)
                            std::is_same<iter_value_t<T>, char8_t>,
+#endif
                            std::is_same<iter_value_t<T>, char16_t>,
                            std::is_same<iter_value_t<T>, char32_t>>,
           IsStringIterImpl<T>> {};

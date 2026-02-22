@@ -8,6 +8,10 @@
 #include <string>
 #include <utility>
 
+#if BUILDFLAG(IS_QNX)
+#include <unistd.h>
+#endif
+
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
@@ -641,6 +645,19 @@ void TaskTracker::RunTaskImpl(Task& task,
                               const TaskTraits& traits,
                               TaskSource* task_source,
                               const SequenceToken& token) {
+#if BUILDFLAG(IS_QNX) && 0 /* disabled - floods with audio_thread_hang_monitor */
+  {
+    const char* fn = task.posted_from.file_name();
+    const char* func = task.posted_from.function_name();
+    write(2, "QNX:TASK from=", 14);
+    if (fn) write(2, fn, strlen(fn));
+    else write(2, "(null)", 6);
+    write(2, ":", 1);
+    if (func) write(2, func, strlen(func));
+    else write(2, "(null)", 6);
+    write(2, "\n", 1);
+  }
+#endif
   task_annotator_.RunTask(
       "ThreadPool_RunTask", task, [&](perfetto::EventContext& ctx) {
         EmitThreadPoolTraceEventMetadata(ctx, traits, task_source, token);

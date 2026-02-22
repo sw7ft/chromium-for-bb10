@@ -286,6 +286,65 @@ bool InitializeICUWithFileDescriptorInternal(
 }
 
 bool InitializeICUFromDataFile() {
+#if BUILDFLAG(IS_QNX)
+  // QNX: MemoryMappedFile and Chromium's File class use flags that QNX
+  // filesystems don't support (mmap returns ENOTSUP, read() can too).
+  // PathService::Get(DIR_ASSETS) also doesn't work reliably on QNX.
+  // Construct path from CHROME_EXE_PATH env var or look next to the binary.
+  std::string icu_path;
+  const char* exe_env = getenv("CHROME_EXE_PATH");
+  if (exe_env && exe_env[0]) {
+    icu_path = exe_env;
+    size_t slash = icu_path.rfind('/');
+    if (slash != std::string::npos)
+      icu_path = icu_path.substr(0, slash + 1);
+    else
+      icu_path = "./";
+    icu_path += kIcuDataFileName;
+  } else {
+    // Fallback: try current working directory
+    icu_path = std::string("./") + kIcuDataFileName;
+  }
+  LOG(WARNING) << "QNX: Loading ICU data from: " << icu_path;
+
+  FILE* f = fopen(icu_path.c_str(), "rb");
+  if (!f) {
+    PLOG(ERROR) << "QNX: fopen failed for " << icu_path;
+    return false;
+  }
+  fseek(f, 0, SEEK_END);
+  long file_size = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  if (file_size <= 0) {
+    LOG(ERROR) << "QNX: ICU data file empty or error, size=" << file_size;
+    fclose(f);
+    return false;
+  }
+  LOG(WARNING) << "QNX: ICU data file size: " << file_size;
+  void* buf = malloc(file_size);
+  if (!buf) {
+    LOG(ERROR) << "QNX: malloc failed for ICU data (" << file_size << " bytes)";
+    fclose(f);
+    return false;
+  }
+  size_t read_total = fread(buf, 1, file_size, f);
+  fclose(f);
+  if (static_cast<long>(read_total) != file_size) {
+    LOG(ERROR) << "QNX: fread got " << read_total << " of " << file_size;
+    free(buf);
+    return false;
+  }
+  LOG(WARNING) << "QNX: ICU data loaded, passing to udata_setCommonData";
+  UErrorCode err = U_ZERO_ERROR;
+  udata_setCommonData(buf, &err);
+  if (U_FAILURE(err)) {
+    LOG(ERROR) << "QNX: udata_setCommonData failed: " << u_errorName(err);
+    free(buf);
+    return false;
+  }
+  udata_setFileAccess(UDATA_ONLY_PACKAGES, &err);
+  return U_SUCCESS(err);
+#else
   // If the ICU data directory is set, ICU won't actually load the data until
   // it is needed.  This can fail if the process is sandboxed at that time.
   // Instead, we map the file in and hand off the data so the sandbox won't
@@ -315,6 +374,7 @@ bool InitializeICUFromDataFile() {
 #endif
 
   return result;
+#endif  // BUILDFLAG(IS_QNX)
 }
 #endif  // (ICU_UTIL_DATA_IMPL == ICU_UTIL_DATA_FILE)
 

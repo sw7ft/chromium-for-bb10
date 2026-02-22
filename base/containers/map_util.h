@@ -7,6 +7,8 @@
 
 #include <memory>
 
+#include "base/cxx20_to_address.h"
+
 namespace base {
 
 namespace internal {
@@ -42,11 +44,11 @@ constexpr internal::MappedType<Map>* FindOrNull(Map& map, const Key& key) {
 template <typename Map,
           typename Key,
           typename MappedElementType =
-              std::pointer_traits<internal::MappedType<Map>>::element_type>
+              typename std::pointer_traits<internal::MappedType<Map>>::element_type>
 constexpr const MappedElementType* FindPtrOrNull(const Map& map,
                                                  const Key& key) {
   auto it = map.find(key);
-  return it != map.end() ? std::to_address(it->second) : nullptr;
+  return it != map.end() ? base::to_address(it->second) : nullptr;
 }
 
 // Returns the pointer value associated with the given key. If none is found,
@@ -58,10 +60,10 @@ constexpr const MappedElementType* FindPtrOrNull(const Map& map,
 template <typename Map,
           typename Key,
           typename MappedElementType =
-              std::pointer_traits<internal::MappedType<Map>>::element_type>
+              typename std::pointer_traits<internal::MappedType<Map>>::element_type>
 constexpr MappedElementType* FindPtrOrNull(Map& map, const Key& key) {
   auto it = map.find(key);
-  return it != map.end() ? std::to_address(it->second) : nullptr;
+  return it != map.end() ? base::to_address(it->second) : nullptr;
 }
 
 }  // namespace base

@@ -6,6 +6,7 @@
 #define BASE_CHECK_OP_H_
 
 #include <cstddef>
+#include <cstring>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -125,6 +126,20 @@ inline std::enable_if_t<!base::internal::SupportsOstreamOperator<const T&> &&
 CheckOpValueStr(const T& v) {
   return CheckOpValueStr(
       static_cast<typename std::underlying_type<T>::type>(v));
+}
+
+// Catch-all for types that aren't streamable, don't have ToString(), aren't
+// enums, and aren't function pointers (e.g. std::unique_ptr in C++17).
+template <typename T>
+inline std::enable_if_t<!base::internal::SupportsOstreamOperator<const T&> &&
+                            !base::internal::SupportsToString<const T&> &&
+                            !std::is_enum_v<T> &&
+                            !std::is_function_v<
+                                typename std::remove_pointer<T>::type> &&
+                            !std::is_scalar_v<T>,
+                        char*>
+CheckOpValueStr(const T& v) {
+  return strdup("[non-printable]");
 }
 
 // Takes ownership of `v1_str` and `v2_str`, destroying them with free(). For

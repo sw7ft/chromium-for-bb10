@@ -155,6 +155,15 @@ class BASE_EXPORT MemoryMappedFile {
   raw_ptr<uint8_t, DanglingUntriaged | AllowPtrArithmetic> data_ = nullptr;
   size_t length_ = 0;
 
+#if BUILDFLAG(IS_QNX)
+  // QNX: File fds from open() don't support read()/mmap(). Store the
+  // original path so MapFileRegionToMemory can fall back to fopen/fread.
+  FilePath qnx_file_path_;
+ public:
+  void SetQNXPath(const FilePath& path) { qnx_file_path_ = path; }
+ private:
+#endif
+
 #if BUILDFLAG(IS_WIN)
   win::ScopedHandle file_mapping_;
 #endif

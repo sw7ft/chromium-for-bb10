@@ -43,7 +43,7 @@ absl::optional<uintptr_t> GetAndroidMainThreadStackBaseAddressImpl() {
 }
 #endif
 
-#if !BUILDFLAG(IS_LINUX)
+#if !BUILDFLAG(IS_LINUX) && !defined(__QNX__)
 uintptr_t GetThreadStackBaseAddressImpl(pthread_t pthread_id) {
   pthread_attr_t attr;
   // pthread_getattr_np will crash on ChromeOS & Linux if we are in the sandbox
@@ -67,17 +67,17 @@ uintptr_t GetThreadStackBaseAddressImpl(pthread_t pthread_id) {
   const uintptr_t base_address = reinterpret_cast<uintptr_t>(address) + size;
   return base_address;
 }
-#endif  // !BUILDFLAG(IS_LINUX)
+#endif  // !BUILDFLAG(IS_LINUX) && !defined(__QNX__)
 
 }  // namespace
 
 absl::optional<uintptr_t> GetThreadStackBaseAddress(PlatformThreadId id,
                                                     pthread_t pthread_id) {
-#if BUILDFLAG(IS_LINUX)
-  // We don't currently support Linux; pthread_getattr_np() fails for the main
-  // thread after zygote forks. https://crbug.com/1394278. Since we don't
-  // support stack profiling at all on Linux, we just return nullopt instead of
-  // trying to work around the problem.
+#if BUILDFLAG(IS_LINUX) || defined(__QNX__)
+  // We don't currently support Linux or QNX; pthread_getattr_np() fails for
+  // the main thread after zygote forks on Linux, and doesn't exist on QNX.
+  // https://crbug.com/1394278. Since we don't support stack profiling on these
+  // platforms, we just return nullopt.
   return absl::nullopt;
 #else
   const bool is_main_thread = id == GetCurrentProcId();
@@ -98,7 +98,7 @@ absl::optional<uintptr_t> GetThreadStackBaseAddress(PlatformThreadId id,
 #endif
   }
   return GetThreadStackBaseAddressImpl(pthread_id);
-#endif  // !BUILDFLAG(IS_LINUX)
+#endif  // !BUILDFLAG(IS_LINUX) && !defined(__QNX__)
 }
 
 }  // namespace base

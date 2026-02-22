@@ -10,6 +10,15 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#if defined(__QNX__)
+// QNX doesn't have struct ucred; define a compatible structure.
+struct ucred {
+  pid_t pid;
+  uid_t uid;
+  gid_t gid;
+};
+#endif
+
 #include <vector>
 
 #include "base/files/scoped_file.h"

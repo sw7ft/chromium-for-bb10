@@ -387,7 +387,12 @@ void Process::Exited(int exit_code) const {
 
 int Process::GetOSPriority() const {
   DCHECK(IsValid());
+#if defined(__QNX__)
+  // QNX does not have getpriority(). Return default (0 = normal).
+  return 0;
+#else
   return getpriority(PRIO_PROCESS, static_cast<id_t>(process_));
+#endif
 }
 
 }  // namespace base

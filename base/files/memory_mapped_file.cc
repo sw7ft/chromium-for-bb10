@@ -70,6 +70,10 @@ bool MemoryMappedFile::Initialize(const FilePath& file_name, Access access) {
     return false;
   }
 
+#if BUILDFLAG(IS_QNX)
+  qnx_file_path_ = file_name;
+#endif
+
   if (!MapFileRegionToMemory(Region::kWholeFile, access)) {
     CloseHandles();
     return false;

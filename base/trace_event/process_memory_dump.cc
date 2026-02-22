@@ -146,6 +146,9 @@ absl::optional<size_t> ProcessMemoryDump::CountResidentBytes(
         !!mincore(reinterpret_cast<void*>(chunk_start), chunk_size, vec.get());
     for (size_t i = 0; i < page_count; i++)
       resident_page_count += vec[i] & MINCORE_INCORE ? 1 : 0;
+#elif defined(__QNX__)
+    // QNX doesn't have mincore(); cannot count resident bytes.
+    failure = true;
 #elif BUILDFLAG(IS_POSIX)
     int error_counter = 0;
     int result = 0;

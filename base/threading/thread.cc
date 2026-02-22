@@ -8,6 +8,17 @@
 #include <type_traits>
 #include <utility>
 
+#if BUILDFLAG(IS_QNX)
+#include <pthread.h>
+#include <unistd.h>
+#include <cstdio>
+#define QNX_TM(msg) do { write(2, msg, sizeof(msg) - 1); } while(0)
+#define QNX_TMF(...) do { char _b[128]; int _n = snprintf(_b, sizeof(_b), __VA_ARGS__); if (_n > 0) write(2, _b, _n); } while(0)
+#else
+#define QNX_TM(msg) ((void)0)
+#define QNX_TMF(...) ((void)0)
+#endif
+
 #include "base/dcheck_is_on.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
@@ -354,6 +365,8 @@ bool Thread::GetThreadWasQuitProperly() {
 }
 
 void Thread::ThreadMain() {
+  QNX_TMF("QNX:TM:0 tid=%x\n", (unsigned)pthread_self());
+  QNX_TMF("QNX:TM:0b name=%s\n", name_.empty() ? "(empty)" : name_.c_str());
   // First, make GetThreadId() available to avoid deadlocks. It could be called
   // any place in the following thread initialization code.
   DCHECK(!id_event_.IsSignaled());
@@ -364,15 +377,18 @@ void Thread::ThreadMain() {
   id_ = PlatformThread::CurrentId();
   DCHECK_NE(kInvalidThreadId, id_);
   id_event_.Signal();
+  QNX_TM("QNX:TM:1 id\n");
 
   // Complete the initialization of our Thread object.
   PlatformThread::SetName(name_.c_str());
   ANNOTATE_THREAD_NAME(name_.c_str());  // Tell the name to race detector.
+  QNX_TM("QNX:TM:2 name\n");
 
   // Lazily initialize the |message_loop| so that it can run on this thread.
   DCHECK(delegate_);
   // This binds CurrentThread and SingleThreadTaskRunner::CurrentDefaultHandle.
   delegate_->BindToCurrentThread();
+  QNX_TM("QNX:TM:3 bind\n");
   DCHECK(CurrentThread::Get());
   DCHECK(SingleThreadTaskRunner::HasCurrentDefault());
 #if (BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_NACL)) || BUILDFLAG(IS_FUCHSIA)
@@ -383,6 +399,7 @@ void Thread::ThreadMain() {
         delegate_->GetDefaultTaskRunner());
   }
 #endif  // (BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_NACL)) || BUILDFLAG(IS_FUCHSIA)
+  QNX_TM("QNX:TM:4 fdw\n");
 
 #if BUILDFLAG(IS_WIN)
   std::unique_ptr<win::ScopedCOMInitializer> com_initializer;
@@ -395,7 +412,9 @@ void Thread::ThreadMain() {
 #endif
 
   // Let the thread do extra initialization.
+  QNX_TM("QNX:TM:5 preInit\n");
   Init();
+  QNX_TM("QNX:TM:6 postInit\n");
 
   {
     AutoLock lock(running_lock_);
@@ -403,10 +422,12 @@ void Thread::ThreadMain() {
   }
 
   start_event_.Signal();
+  QNX_TM("QNX:TM:7 preRun\n");
 
   RunLoop run_loop;
   run_loop_ = &run_loop;
   Run(run_loop_);
+  QNX_TM("QNX:TM:8 postRun\n");
 
   {
     AutoLock lock(running_lock_);

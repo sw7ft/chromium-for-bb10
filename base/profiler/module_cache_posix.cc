@@ -136,7 +136,7 @@ PosixModule::PosixModule(uintptr_t base_address,
 std::unique_ptr<const ModuleCache::Module> ModuleCache::CreateModuleForAddress(
     uintptr_t address) {
   Dl_info info;
-  if (!dladdr(reinterpret_cast<const void*>(address), &info)) {
+  if (!dladdr(reinterpret_cast<void*>(address), &info)) {
 #if BUILDFLAG(IS_ANDROID)
     // dladdr doesn't know about the Chrome module in Android targets using the
     // crazy linker. Explicitly check against the module's extents in that case.

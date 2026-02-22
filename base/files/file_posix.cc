@@ -58,7 +58,13 @@ int CallFtruncate(PlatformFile file, int64_t length) {
 }
 
 int CallFutimes(PlatformFile file, const struct timeval times[2]) {
-#ifdef __USE_XOPEN2K8
+#if defined(__QNX__)
+  // QNX has neither futimes nor futimens.
+  // Use /proc/self/fd/<fd> path with utimes as a workaround.
+  char fd_path[64];
+  snprintf(fd_path, sizeof(fd_path), "/proc/self/fd/%d", file);
+  return utimes(fd_path, times);
+#elif defined(__USE_XOPEN2K8)
   // futimens should be available, but futimes might not be
   // http://pubs.opengroup.org/onlinepubs/9699919799/
 

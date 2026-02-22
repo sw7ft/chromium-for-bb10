@@ -604,22 +604,26 @@ config("compiler") {
 
     # TODO(hans): Remove this once Clang generates better optimized debug info
     # by default. https://crbug.com/765793
-    cflags += [
-      "-mllvm",
-      "-instcombine-lower-dbg-declare=0",
-    ]
-    if (!is_debug && use_thin_lto && is_a_target_toolchain) {
-      if (is_win) {
-        ldflags += [ "-mllvm:-instcombine-lower-dbg-declare=0" ]
-      } else {
-        ldflags += [ "-Wl,-mllvm,-instcombine-lower-dbg-declare=0" ]
+    # Disabled: Clang 17 doesn't support this option.
+    if (false) {
+      cflags += [
+        "-mllvm",
+        "-instcombine-lower-dbg-declare=0",
+      ]
+      if (!is_debug && use_thin_lto && is_a_target_toolchain) {
+        if (is_win) {
+          ldflags += [ "-mllvm:-instcombine-lower-dbg-declare=0" ]
+        } else {
+          ldflags += [ "-Wl,-mllvm,-instcombine-lower-dbg-declare=0" ]
+        }
       }
     }
 
     # TODO(crbug.com/1488374): This causes binary size growth and potentially
     # other problems.
     # TODO(crbug.com/1491036): This isn't supported by Cronet's mainline llvm version.
-    if (default_toolchain != "//build/toolchain/cros:target" &&
+    # Disabled: Clang 17 doesn't support this option.
+    if (false && default_toolchain != "//build/toolchain/cros:target" &&
         !llvm_android_mainline) {
       cflags += [
         "-mllvm",
@@ -644,7 +648,7 @@ config("compiler") {
 
   # C11/C++11 compiler flags setup.
   # ---------------------------
-  if (is_linux || is_chromeos || is_android || (is_nacl && is_clang) ||
+  if (is_linux || is_chromeos || is_android || is_qnx || (is_nacl && is_clang) ||
       current_os == "aix") {
     if (is_clang) {
       standard_prefix = "c"
@@ -678,7 +682,7 @@ config("compiler") {
         cflags_cc += [ "-fno-trigraphs" ]
       }
     } else if (is_clang) {
-      if (defined(use_cxx17) && use_cxx17) {
+      if (is_qnx || (defined(use_cxx17) && use_cxx17)) {
         cflags_cc += [ "-std=${standard_prefix}++17" ]
       } else {
         cflags_cc += [ "-std=${standard_prefix}++20" ]
@@ -1173,10 +1177,15 @@ config("compiler_cpu_abi") {
         ]
       }
     } else if (current_cpu == "arm") {
-      if (is_clang && !is_android && !is_nacl &&
+      if (is_clang && !is_android && !is_nacl && !is_qnx &&
           !(is_chromeos_lacros && is_chromeos_device)) {
         cflags += [ "--target=arm-linux-gnueabihf" ]
         ldflags += [ "--target=arm-linux-gnueabihf" ]
+      }
+      if (is_qnx && is_clang) {
+        cflags += [ "--target=armv7-unknown-nto-qnx8.0.0eabi" ]
+        # Don't add --target to ldflags: the QNX GCC linker doesn't
+        # understand Clang target triples.
       }
       if (!is_nacl) {
         cflags += [

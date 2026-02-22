@@ -469,10 +469,19 @@ void MessagePumpLibevent::OnWakeup(int socket, short flags, void* context) {
   MessagePumpLibevent* that = static_cast<MessagePumpLibevent*>(context);
   DCHECK(that->wakeup_pipe_out_ == socket);
 
-  // Remove and discard the wakeup byte.
+  // Remove and discard the wakeup byte(s).
+#if defined(__QNX__) || defined(__QNXNTO__)
+  // On QNX, drain all pending bytes to prevent poll() from missing
+  // readability transitions when the pipe has accumulated data.
+  {
+    char drain[64];
+    while (HANDLE_EINTR(read(socket, drain, sizeof(drain))) > 0) {}
+  }
+#else
   char buf;
   long nread = HANDLE_EINTR(read(socket, &buf, 1));
   DCHECK_EQ(nread, 1);
+#endif
   that->processed_io_events_ = true;
   // Tell libevent to break out of inner loop.
   event_base_loopbreak(that->event_base_.get());

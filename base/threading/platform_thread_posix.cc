@@ -14,6 +14,15 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#if BUILDFLAG(IS_QNX)
+#include <cstdio>
+#define QNX_TF(msg) write(2, msg, sizeof(msg) - 1)
+#define QNX_TFF(...) do { char _b[160]; int _n = snprintf(_b, sizeof(_b), __VA_ARGS__); if (_n > 0) write(2, _b, _n); } while(0)
+#else
+#define QNX_TF(msg) ((void)0)
+#define QNX_TFF(...) ((void)0)
+#endif
+
 #include <memory>
 #include <tuple>
 
@@ -73,6 +82,9 @@ void* ThreadFunc(void* params) {
         static_cast<ThreadParams*>(params));
 
     delegate = thread_params->delegate;
+    QNX_TFF("QNX:TF:0 del=%x tid=%x\n",
+            (unsigned)reinterpret_cast<uintptr_t>(delegate),
+            (unsigned)pthread_self());
     if (!thread_params->joinable)
       base::DisallowSingleton();
 
@@ -90,14 +102,22 @@ void* ThreadFunc(void* params) {
     // Threads on linux/android may inherit their priority from the thread
     // where they were created. This explicitly sets the priority of all new
     // threads.
+    QNX_TF("QNX:TF:1 SetType\n");
     PlatformThread::SetCurrentThreadType(thread_params->thread_type);
+    QNX_TF("QNX:TF:2 TypeDone\n");
 #endif  //  !BUILDFLAG(IS_NACL)
   }
 
+  QNX_TF("QNX:TF:3 RegThread\n");
   ThreadIdNameManager::GetInstance()->RegisterThread(
       PlatformThread::CurrentHandle().platform_handle(),
       PlatformThread::CurrentId());
 
+  QNX_TFF("QNX:TF:4 del=%x vtbl=%x tid=%x\n",
+          (unsigned)reinterpret_cast<uintptr_t>(delegate),
+          (delegate && reinterpret_cast<uintptr_t>(delegate) > 0x1000)
+              ? (unsigned)*reinterpret_cast<uintptr_t*>(delegate) : 0u,
+          (unsigned)pthread_self());
   delegate->ThreadMain();
 
   ThreadIdNameManager::GetInstance()->RemoveName(
@@ -372,7 +392,7 @@ namespace internal {
 
 void SetCurrentThreadTypeImpl(ThreadType thread_type,
                               MessagePumpType pump_type_hint) {
-#if BUILDFLAG(IS_NACL)
+#if BUILDFLAG(IS_NACL) || BUILDFLAG(IS_QNX)
   NOTIMPLEMENTED();
 #else
   if (internal::SetCurrentThreadTypeForPlatform(thread_type, pump_type_hint))
