@@ -2345,7 +2345,7 @@ std::unique_ptr<Xkb::GetMapReply> detail::ReadReply<Xkb::GetMapReply>(
   // map
   auto map_expr = present;
   if (CaseAnd(map_expr, Xkb::MapPart::KeyTypes)) {
-    map.types_rtrn.emplace();
+    map.types_rtrn = decltype(map.types_rtrn)::value_type{};
     auto& types_rtrn = *map.types_rtrn;
     size_t types_rtrn_len = types_rtrn.size();
 
@@ -2458,7 +2458,7 @@ std::unique_ptr<Xkb::GetMapReply> detail::ReadReply<Xkb::GetMapReply>(
     }
   }
   if (CaseAnd(map_expr, Xkb::MapPart::KeySyms)) {
-    map.syms_rtrn.emplace();
+    map.syms_rtrn = decltype(map.syms_rtrn)::value_type{};
     auto& syms_rtrn = *map.syms_rtrn;
     size_t syms_rtrn_len = syms_rtrn.size();
 
@@ -2500,8 +2500,8 @@ std::unique_ptr<Xkb::GetMapReply> detail::ReadReply<Xkb::GetMapReply>(
     }
   }
   if (CaseAnd(map_expr, Xkb::MapPart::KeyActions)) {
-    map.acts_rtrn_count.emplace();
-    map.acts_rtrn_acts.emplace();
+    map.acts_rtrn_count = decltype(map.acts_rtrn_count)::value_type{};
+    map.acts_rtrn_acts = decltype(map.acts_rtrn_acts)::value_type{};
     auto& acts_rtrn_count = *map.acts_rtrn_count;
     size_t acts_rtrn_count_len = acts_rtrn_count.size();
     auto& acts_rtrn_acts = *map.acts_rtrn_acts;
@@ -2525,7 +2525,7 @@ std::unique_ptr<Xkb::GetMapReply> detail::ReadReply<Xkb::GetMapReply>(
     }
   }
   if (CaseAnd(map_expr, Xkb::MapPart::KeyBehaviors)) {
-    map.behaviors_rtrn.emplace();
+    map.behaviors_rtrn = decltype(map.behaviors_rtrn)::value_type{};
     auto& behaviors_rtrn = *map.behaviors_rtrn;
     size_t behaviors_rtrn_len = behaviors_rtrn.size();
 
@@ -2549,7 +2549,7 @@ std::unique_ptr<Xkb::GetMapReply> detail::ReadReply<Xkb::GetMapReply>(
     }
   }
   if (CaseAnd(map_expr, Xkb::MapPart::VirtualMods)) {
-    map.vmods_rtrn.emplace();
+    map.vmods_rtrn = decltype(map.vmods_rtrn)::value_type{};
     auto& vmods_rtrn = *map.vmods_rtrn;
     size_t vmods_rtrn_len = vmods_rtrn.size();
 
@@ -2566,7 +2566,7 @@ std::unique_ptr<Xkb::GetMapReply> detail::ReadReply<Xkb::GetMapReply>(
     Align(&buf, 4);
   }
   if (CaseAnd(map_expr, Xkb::MapPart::ExplicitComponents)) {
-    map.explicit_rtrn.emplace();
+    map.explicit_rtrn = decltype(map.explicit_rtrn)::value_type{};
     auto& explicit_rtrn = *map.explicit_rtrn;
     size_t explicit_rtrn_len = explicit_rtrn.size();
 
@@ -2592,7 +2592,7 @@ std::unique_ptr<Xkb::GetMapReply> detail::ReadReply<Xkb::GetMapReply>(
     Align(&buf, 4);
   }
   if (CaseAnd(map_expr, Xkb::MapPart::ModifierMap)) {
-    map.modmap_rtrn.emplace();
+    map.modmap_rtrn = decltype(map.modmap_rtrn)::value_type{};
     auto& modmap_rtrn = *map.modmap_rtrn;
     size_t modmap_rtrn_len = modmap_rtrn.size();
 
@@ -2618,7 +2618,7 @@ std::unique_ptr<Xkb::GetMapReply> detail::ReadReply<Xkb::GetMapReply>(
     Align(&buf, 4);
   }
   if (CaseAnd(map_expr, Xkb::MapPart::VirtualModMap)) {
-    map.vmodmap_rtrn.emplace();
+    map.vmodmap_rtrn = decltype(map.vmodmap_rtrn)::value_type{};
     auto& vmodmap_rtrn = *map.vmodmap_rtrn;
     size_t vmodmap_rtrn_len = vmodmap_rtrn.size();
 
@@ -4226,49 +4226,49 @@ std::unique_ptr<Xkb::GetNamesReply> detail::ReadReply<Xkb::GetNamesReply>(
   // valueList
   auto valueList_expr = which;
   if (CaseAnd(valueList_expr, Xkb::NameDetail::Keycodes)) {
-    valueList.keycodesName.emplace();
+    valueList.keycodesName = decltype(valueList.keycodesName)::value_type{};
     auto& keycodesName = *valueList.keycodesName;
 
     // keycodesName
     Read(&keycodesName, &buf);
   }
   if (CaseAnd(valueList_expr, Xkb::NameDetail::Geometry)) {
-    valueList.geometryName.emplace();
+    valueList.geometryName = decltype(valueList.geometryName)::value_type{};
     auto& geometryName = *valueList.geometryName;
 
     // geometryName
     Read(&geometryName, &buf);
   }
   if (CaseAnd(valueList_expr, Xkb::NameDetail::Symbols)) {
-    valueList.symbolsName.emplace();
+    valueList.symbolsName = decltype(valueList.symbolsName)::value_type{};
     auto& symbolsName = *valueList.symbolsName;
 
     // symbolsName
     Read(&symbolsName, &buf);
   }
   if (CaseAnd(valueList_expr, Xkb::NameDetail::PhysSymbols)) {
-    valueList.physSymbolsName.emplace();
+    valueList.physSymbolsName = decltype(valueList.physSymbolsName)::value_type{};
     auto& physSymbolsName = *valueList.physSymbolsName;
 
     // physSymbolsName
     Read(&physSymbolsName, &buf);
   }
   if (CaseAnd(valueList_expr, Xkb::NameDetail::Types)) {
-    valueList.typesName.emplace();
+    valueList.typesName = decltype(valueList.typesName)::value_type{};
     auto& typesName = *valueList.typesName;
 
     // typesName
     Read(&typesName, &buf);
   }
   if (CaseAnd(valueList_expr, Xkb::NameDetail::Compat)) {
-    valueList.compatName.emplace();
+    valueList.compatName = decltype(valueList.compatName)::value_type{};
     auto& compatName = *valueList.compatName;
 
     // compatName
     Read(&compatName, &buf);
   }
   if (CaseAnd(valueList_expr, Xkb::NameDetail::KeyTypeNames)) {
-    valueList.typeNames.emplace();
+    valueList.typeNames = decltype(valueList.typeNames)::value_type{};
     auto& typeNames = *valueList.typeNames;
     size_t typeNames_len = typeNames.size();
 
@@ -4280,8 +4280,8 @@ std::unique_ptr<Xkb::GetNamesReply> detail::ReadReply<Xkb::GetNamesReply>(
     }
   }
   if (CaseAnd(valueList_expr, Xkb::NameDetail::KTLevelNames)) {
-    valueList.nLevelsPerType.emplace();
-    valueList.ktLevelNames.emplace();
+    valueList.nLevelsPerType = decltype(valueList.nLevelsPerType)::value_type{};
+    valueList.ktLevelNames = decltype(valueList.ktLevelNames)::value_type{};
     auto& nLevelsPerType = *valueList.nLevelsPerType;
     size_t nLevelsPerType_len = nLevelsPerType.size();
     auto& ktLevelNames = *valueList.ktLevelNames;
@@ -4307,7 +4307,7 @@ std::unique_ptr<Xkb::GetNamesReply> detail::ReadReply<Xkb::GetNamesReply>(
     }
   }
   if (CaseAnd(valueList_expr, Xkb::NameDetail::IndicatorNames)) {
-    valueList.indicatorNames.emplace();
+    valueList.indicatorNames = decltype(valueList.indicatorNames)::value_type{};
     auto& indicatorNames = *valueList.indicatorNames;
     size_t indicatorNames_len = indicatorNames.size();
 
@@ -4319,7 +4319,7 @@ std::unique_ptr<Xkb::GetNamesReply> detail::ReadReply<Xkb::GetNamesReply>(
     }
   }
   if (CaseAnd(valueList_expr, Xkb::NameDetail::VirtualModNames)) {
-    valueList.virtualModNames.emplace();
+    valueList.virtualModNames = decltype(valueList.virtualModNames)::value_type{};
     auto& virtualModNames = *valueList.virtualModNames;
     size_t virtualModNames_len = virtualModNames.size();
 
@@ -4331,7 +4331,7 @@ std::unique_ptr<Xkb::GetNamesReply> detail::ReadReply<Xkb::GetNamesReply>(
     }
   }
   if (CaseAnd(valueList_expr, Xkb::NameDetail::GroupNames)) {
-    valueList.groups.emplace();
+    valueList.groups = decltype(valueList.groups)::value_type{};
     auto& groups = *valueList.groups;
     size_t groups_len = groups.size();
 
@@ -4343,7 +4343,7 @@ std::unique_ptr<Xkb::GetNamesReply> detail::ReadReply<Xkb::GetNamesReply>(
     }
   }
   if (CaseAnd(valueList_expr, Xkb::NameDetail::KeyNames)) {
-    valueList.keyNames.emplace();
+    valueList.keyNames = decltype(valueList.keyNames)::value_type{};
     auto& keyNames = *valueList.keyNames;
     size_t keyNames_len = keyNames.size();
 
@@ -4364,7 +4364,7 @@ std::unique_ptr<Xkb::GetNamesReply> detail::ReadReply<Xkb::GetNamesReply>(
     }
   }
   if (CaseAnd(valueList_expr, Xkb::NameDetail::KeyAliases)) {
-    valueList.keyAliases.emplace();
+    valueList.keyAliases = decltype(valueList.keyAliases)::value_type{};
     auto& keyAliases = *valueList.keyAliases;
     size_t keyAliases_len = keyAliases.size();
 
@@ -4393,7 +4393,7 @@ std::unique_ptr<Xkb::GetNamesReply> detail::ReadReply<Xkb::GetNamesReply>(
     }
   }
   if (CaseAnd(valueList_expr, Xkb::NameDetail::RGNames)) {
-    valueList.radioGroupNames.emplace();
+    valueList.radioGroupNames = decltype(valueList.radioGroupNames)::value_type{};
     auto& radioGroupNames = *valueList.radioGroupNames;
     size_t radioGroupNames_len = radioGroupNames.size();
 
@@ -5284,7 +5284,7 @@ std::unique_ptr<Xkb::GetKbdByNameReply> detail::ReadReply<
   if (CaseAnd(replies_expr, Xkb::GBNDetail::Types) ||
       CaseAnd(replies_expr, Xkb::GBNDetail::ClientSymbols) ||
       CaseAnd(replies_expr, Xkb::GBNDetail::ServerSymbols)) {
-    replies.types.emplace();
+    replies.types = decltype(replies.types)::value_type{};
     auto& getmap_type = (*replies.types).getmap_type;
     auto& typeDeviceID = (*replies.types).typeDeviceID;
     auto& getmap_sequence = (*replies.types).getmap_sequence;
@@ -5416,7 +5416,7 @@ std::unique_ptr<Xkb::GetKbdByNameReply> detail::ReadReply<
     // map
     auto map_expr = present;
     if (CaseAnd(map_expr, Xkb::MapPart::KeyTypes)) {
-      map.types_rtrn.emplace();
+      map.types_rtrn = decltype(map.types_rtrn)::value_type{};
       auto& types_rtrn = *map.types_rtrn;
       size_t types_rtrn_len = types_rtrn.size();
 
@@ -5529,7 +5529,7 @@ std::unique_ptr<Xkb::GetKbdByNameReply> detail::ReadReply<
       }
     }
     if (CaseAnd(map_expr, Xkb::MapPart::KeySyms)) {
-      map.syms_rtrn.emplace();
+      map.syms_rtrn = decltype(map.syms_rtrn)::value_type{};
       auto& syms_rtrn = *map.syms_rtrn;
       size_t syms_rtrn_len = syms_rtrn.size();
 
@@ -5571,8 +5571,8 @@ std::unique_ptr<Xkb::GetKbdByNameReply> detail::ReadReply<
       }
     }
     if (CaseAnd(map_expr, Xkb::MapPart::KeyActions)) {
-      map.acts_rtrn_count.emplace();
-      map.acts_rtrn_acts.emplace();
+      map.acts_rtrn_count = decltype(map.acts_rtrn_count)::value_type{};
+      map.acts_rtrn_acts = decltype(map.acts_rtrn_acts)::value_type{};
       auto& acts_rtrn_count = *map.acts_rtrn_count;
       size_t acts_rtrn_count_len = acts_rtrn_count.size();
       auto& acts_rtrn_acts = *map.acts_rtrn_acts;
@@ -5596,7 +5596,7 @@ std::unique_ptr<Xkb::GetKbdByNameReply> detail::ReadReply<
       }
     }
     if (CaseAnd(map_expr, Xkb::MapPart::KeyBehaviors)) {
-      map.behaviors_rtrn.emplace();
+      map.behaviors_rtrn = decltype(map.behaviors_rtrn)::value_type{};
       auto& behaviors_rtrn = *map.behaviors_rtrn;
       size_t behaviors_rtrn_len = behaviors_rtrn.size();
 
@@ -5620,7 +5620,7 @@ std::unique_ptr<Xkb::GetKbdByNameReply> detail::ReadReply<
       }
     }
     if (CaseAnd(map_expr, Xkb::MapPart::VirtualMods)) {
-      map.vmods_rtrn.emplace();
+      map.vmods_rtrn = decltype(map.vmods_rtrn)::value_type{};
       auto& vmods_rtrn = *map.vmods_rtrn;
       size_t vmods_rtrn_len = vmods_rtrn.size();
 
@@ -5637,7 +5637,7 @@ std::unique_ptr<Xkb::GetKbdByNameReply> detail::ReadReply<
       Align(&buf, 4);
     }
     if (CaseAnd(map_expr, Xkb::MapPart::ExplicitComponents)) {
-      map.explicit_rtrn.emplace();
+      map.explicit_rtrn = decltype(map.explicit_rtrn)::value_type{};
       auto& explicit_rtrn = *map.explicit_rtrn;
       size_t explicit_rtrn_len = explicit_rtrn.size();
 
@@ -5663,7 +5663,7 @@ std::unique_ptr<Xkb::GetKbdByNameReply> detail::ReadReply<
       Align(&buf, 4);
     }
     if (CaseAnd(map_expr, Xkb::MapPart::ModifierMap)) {
-      map.modmap_rtrn.emplace();
+      map.modmap_rtrn = decltype(map.modmap_rtrn)::value_type{};
       auto& modmap_rtrn = *map.modmap_rtrn;
       size_t modmap_rtrn_len = modmap_rtrn.size();
 
@@ -5689,7 +5689,7 @@ std::unique_ptr<Xkb::GetKbdByNameReply> detail::ReadReply<
       Align(&buf, 4);
     }
     if (CaseAnd(map_expr, Xkb::MapPart::VirtualModMap)) {
-      map.vmodmap_rtrn.emplace();
+      map.vmodmap_rtrn = decltype(map.vmodmap_rtrn)::value_type{};
       auto& vmodmap_rtrn = *map.vmodmap_rtrn;
       size_t vmodmap_rtrn_len = vmodmap_rtrn.size();
 
@@ -5716,7 +5716,7 @@ std::unique_ptr<Xkb::GetKbdByNameReply> detail::ReadReply<
     }
   }
   if (CaseAnd(replies_expr, Xkb::GBNDetail::CompatMap)) {
-    replies.compat_map.emplace();
+    replies.compat_map = decltype(replies.compat_map)::value_type{};
     auto& compatmap_type = (*replies.compat_map).compatmap_type;
     auto& compatDeviceID = (*replies.compat_map).compatDeviceID;
     auto& compatmap_sequence = (*replies.compat_map).compatmap_sequence;
@@ -5840,7 +5840,7 @@ std::unique_ptr<Xkb::GetKbdByNameReply> detail::ReadReply<
     }
   }
   if (CaseAnd(replies_expr, Xkb::GBNDetail::IndicatorMaps)) {
-    replies.indicator_maps.emplace();
+    replies.indicator_maps = decltype(replies.indicator_maps)::value_type{};
     auto& indicatormap_type = (*replies.indicator_maps).indicatormap_type;
     auto& indicatorDeviceID = (*replies.indicator_maps).indicatorDeviceID;
     auto& indicatormap_sequence =
@@ -5934,7 +5934,7 @@ std::unique_ptr<Xkb::GetKbdByNameReply> detail::ReadReply<
   }
   if (CaseAnd(replies_expr, Xkb::GBNDetail::KeyNames) ||
       CaseAnd(replies_expr, Xkb::GBNDetail::OtherNames)) {
-    replies.key_names.emplace();
+    replies.key_names = decltype(replies.key_names)::value_type{};
     auto& keyname_type = (*replies.key_names).keyname_type;
     auto& keyDeviceID = (*replies.key_names).keyDeviceID;
     auto& keyname_sequence = (*replies.key_names).keyname_sequence;
@@ -6013,49 +6013,49 @@ std::unique_ptr<Xkb::GetKbdByNameReply> detail::ReadReply<
     // valueList
     auto valueList_expr = which;
     if (CaseAnd(valueList_expr, Xkb::NameDetail::Keycodes)) {
-      valueList.keycodesName.emplace();
+      valueList.keycodesName = decltype(valueList.keycodesName)::value_type{};
       auto& keycodesName = *valueList.keycodesName;
 
       // keycodesName
       Read(&keycodesName, &buf);
     }
     if (CaseAnd(valueList_expr, Xkb::NameDetail::Geometry)) {
-      valueList.geometryName.emplace();
+      valueList.geometryName = decltype(valueList.geometryName)::value_type{};
       auto& geometryName = *valueList.geometryName;
 
       // geometryName
       Read(&geometryName, &buf);
     }
     if (CaseAnd(valueList_expr, Xkb::NameDetail::Symbols)) {
-      valueList.symbolsName.emplace();
+      valueList.symbolsName = decltype(valueList.symbolsName)::value_type{};
       auto& symbolsName = *valueList.symbolsName;
 
       // symbolsName
       Read(&symbolsName, &buf);
     }
     if (CaseAnd(valueList_expr, Xkb::NameDetail::PhysSymbols)) {
-      valueList.physSymbolsName.emplace();
+      valueList.physSymbolsName = decltype(valueList.physSymbolsName)::value_type{};
       auto& physSymbolsName = *valueList.physSymbolsName;
 
       // physSymbolsName
       Read(&physSymbolsName, &buf);
     }
     if (CaseAnd(valueList_expr, Xkb::NameDetail::Types)) {
-      valueList.typesName.emplace();
+      valueList.typesName = decltype(valueList.typesName)::value_type{};
       auto& typesName = *valueList.typesName;
 
       // typesName
       Read(&typesName, &buf);
     }
     if (CaseAnd(valueList_expr, Xkb::NameDetail::Compat)) {
-      valueList.compatName.emplace();
+      valueList.compatName = decltype(valueList.compatName)::value_type{};
       auto& compatName = *valueList.compatName;
 
       // compatName
       Read(&compatName, &buf);
     }
     if (CaseAnd(valueList_expr, Xkb::NameDetail::KeyTypeNames)) {
-      valueList.typeNames.emplace();
+      valueList.typeNames = decltype(valueList.typeNames)::value_type{};
       auto& typeNames = *valueList.typeNames;
       size_t typeNames_len = typeNames.size();
 
@@ -6067,8 +6067,8 @@ std::unique_ptr<Xkb::GetKbdByNameReply> detail::ReadReply<
       }
     }
     if (CaseAnd(valueList_expr, Xkb::NameDetail::KTLevelNames)) {
-      valueList.nLevelsPerType.emplace();
-      valueList.ktLevelNames.emplace();
+      valueList.nLevelsPerType = decltype(valueList.nLevelsPerType)::value_type{};
+      valueList.ktLevelNames = decltype(valueList.ktLevelNames)::value_type{};
       auto& nLevelsPerType = *valueList.nLevelsPerType;
       size_t nLevelsPerType_len = nLevelsPerType.size();
       auto& ktLevelNames = *valueList.ktLevelNames;
@@ -6094,7 +6094,7 @@ std::unique_ptr<Xkb::GetKbdByNameReply> detail::ReadReply<
       }
     }
     if (CaseAnd(valueList_expr, Xkb::NameDetail::IndicatorNames)) {
-      valueList.indicatorNames.emplace();
+      valueList.indicatorNames = decltype(valueList.indicatorNames)::value_type{};
       auto& indicatorNames = *valueList.indicatorNames;
       size_t indicatorNames_len = indicatorNames.size();
 
@@ -6106,7 +6106,7 @@ std::unique_ptr<Xkb::GetKbdByNameReply> detail::ReadReply<
       }
     }
     if (CaseAnd(valueList_expr, Xkb::NameDetail::VirtualModNames)) {
-      valueList.virtualModNames.emplace();
+      valueList.virtualModNames = decltype(valueList.virtualModNames)::value_type{};
       auto& virtualModNames = *valueList.virtualModNames;
       size_t virtualModNames_len = virtualModNames.size();
 
@@ -6118,7 +6118,7 @@ std::unique_ptr<Xkb::GetKbdByNameReply> detail::ReadReply<
       }
     }
     if (CaseAnd(valueList_expr, Xkb::NameDetail::GroupNames)) {
-      valueList.groups.emplace();
+      valueList.groups = decltype(valueList.groups)::value_type{};
       auto& groups = *valueList.groups;
       size_t groups_len = groups.size();
 
@@ -6130,7 +6130,7 @@ std::unique_ptr<Xkb::GetKbdByNameReply> detail::ReadReply<
       }
     }
     if (CaseAnd(valueList_expr, Xkb::NameDetail::KeyNames)) {
-      valueList.keyNames.emplace();
+      valueList.keyNames = decltype(valueList.keyNames)::value_type{};
       auto& keyNames = *valueList.keyNames;
       size_t keyNames_len = keyNames.size();
 
@@ -6151,7 +6151,7 @@ std::unique_ptr<Xkb::GetKbdByNameReply> detail::ReadReply<
       }
     }
     if (CaseAnd(valueList_expr, Xkb::NameDetail::KeyAliases)) {
-      valueList.keyAliases.emplace();
+      valueList.keyAliases = decltype(valueList.keyAliases)::value_type{};
       auto& keyAliases = *valueList.keyAliases;
       size_t keyAliases_len = keyAliases.size();
 
@@ -6180,7 +6180,7 @@ std::unique_ptr<Xkb::GetKbdByNameReply> detail::ReadReply<
       }
     }
     if (CaseAnd(valueList_expr, Xkb::NameDetail::RGNames)) {
-      valueList.radioGroupNames.emplace();
+      valueList.radioGroupNames = decltype(valueList.radioGroupNames)::value_type{};
       auto& radioGroupNames = *valueList.radioGroupNames;
       size_t radioGroupNames_len = radioGroupNames.size();
 
@@ -6193,7 +6193,7 @@ std::unique_ptr<Xkb::GetKbdByNameReply> detail::ReadReply<
     }
   }
   if (CaseAnd(replies_expr, Xkb::GBNDetail::Geometry)) {
-    replies.geometry.emplace();
+    replies.geometry = decltype(replies.geometry)::value_type{};
     auto& geometry_type = (*replies.geometry).geometry_type;
     auto& geometryDeviceID = (*replies.geometry).geometryDeviceID;
     auto& geometry_sequence = (*replies.geometry).geometry_sequence;

@@ -20,7 +20,7 @@ uint32_t NoisyMetricsRecorder::GetNoisyMetric(float flip_probability,
   DCHECK_GE(flip_probability, 0.0f);
 
   // |original_metric| should fit within least significant |count_bits|.
-  DCHECK_LE(original_metric, std::pow(2, count_bits) - 1);
+  DCHECK_LE(original_metric, std::pow(2.0, static_cast<double>(count_bits)) - 1);
 
   uint32_t flipped_value = 0u;
 

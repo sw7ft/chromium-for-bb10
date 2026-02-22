@@ -87,7 +87,7 @@ export class CrA11yAnnouncerElement extends PolymerElement {
 
     this.currentTimeout_ = setTimeout(() => {
       const messagesDiv = this.shadowRoot!.querySelector('#messages')!;
-      messagesDiv.innerHTML = window.trustedTypes!.emptyHTML;
+      messagesDiv.innerHTML = window.trustedTypes!.emptyHTML as unknown as string;
 
       // <if expr="is_macosx">
       // VoiceOver on Mac does not seem to consistently read out the contents of

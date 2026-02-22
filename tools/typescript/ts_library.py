@@ -234,7 +234,8 @@ def main(argv):
   try:
     node.RunNode([
         node_modules.PathToTypescript(), '--project',
-        os.path.join(args.gen_dir, tsconfig_file)
+        os.path.join(args.gen_dir, tsconfig_file),
+        '--skipLibCheck',
     ])
   finally:
     if args.composite:

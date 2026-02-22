@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <memory>
 #include <utility>
@@ -101,24 +102,22 @@ IsolateHolder::IsolateHolder(
   v8::ArrayBuffer::Allocator* allocator = params->array_buffer_allocator;
   DCHECK(allocator);
 
+  { const char m[] = "QNX:IH:1 Alloc\n"; write(2, m, sizeof(m)-1); }
   isolate_ = v8::Isolate::Allocate();
+  { const char m[] = "QNX:IH:2 PerIso\n"; write(2, m, sizeof(m)-1); }
   isolate_data_ = std::make_unique<PerIsolateData>(
       isolate_, allocator, access_mode_, task_runner,
       std::move(low_priority_task_runner));
-  //  TODO(https://crbug.com/1347092): Refactor such that caller need not
-  //  provide params when creating a snapshot.
+  { const char m[] = "QNX:IH:3 Init\n"; write(2, m, sizeof(m)-1); }
   if (isolate_creation_mode == IsolateCreationMode::kCreateSnapshot) {
-    // This branch is called when creating a V8 snapshot for Blink.
-    // Note SnapshotCreator calls isolate->Enter() in its construction.
     snapshot_creator_ =
         std::make_unique<v8::SnapshotCreator>(isolate_, g_reference_table);
     DCHECK_EQ(isolate_, snapshot_creator_->GetIsolate());
   } else {
     v8::Isolate::Initialize(isolate_, *params);
   }
+  { const char m[] = "QNX:IH:4 InitDone\n"; write(2, m, sizeof(m)-1); }
 
-  // This will attempt register the shared memory dump provider for every
-  // IsolateHolder, but only the first registration will have any effect.
   gin::V8SharedMemoryDumpProvider::Register();
 
   isolate_memory_dump_provider_ =

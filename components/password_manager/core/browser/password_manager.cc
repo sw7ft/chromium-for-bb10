@@ -630,7 +630,7 @@ void PasswordManager::OnUserModifiedNonPasswordField(
   // |driver| might be empty on iOS or in tests.
   int driver_id = driver ? driver->GetId() : 0;
   possible_usernames_.Put(
-      PossibleUsernameFieldIdentifier(driver_id, renderer_id),
+      PossibleUsernameFieldIdentifier{driver_id, renderer_id},
       PossibleUsernameData(GetSignonRealm(driver->GetLastCommittedURL()),
                            renderer_id, value, base::Time::Now(), driver_id,
                            autocomplete_attribute_has_username, is_likely_otp));

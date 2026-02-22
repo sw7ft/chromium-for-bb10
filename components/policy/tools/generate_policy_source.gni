@@ -32,6 +32,12 @@ template("generate_policy_source") {
     generate_app_restrictions = true
   }
 
+  if (target_os == "qnx") {
+    target_platform = "linux"
+  } else {
+    target_platform = target_os
+  }
+
   action(target_name) {
     # This protobuf is equivalent to chrome_settings.proto but shares messages
     # for policies of the same type, so that less classes have to be generated
@@ -63,7 +69,7 @@ template("generate_policy_source") {
       "--chrome-version-file=" + chrome_version_path,
       "--policy-templates-file=" +
           rebase_path(policy_templates_generated_json_path, root_build_dir),
-      "--target-platform=" + target_os,
+      "--target-platform=" + target_platform,
     ]
     if (!chunking) {
       args += [ "--no-chunking" ]

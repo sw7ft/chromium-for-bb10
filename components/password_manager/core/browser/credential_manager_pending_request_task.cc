@@ -108,7 +108,7 @@ void FilterIrrelevantForms(std::vector<std::unique_ptr<PasswordForm>>& forms,
 
     // Ensure that the form we're looking at matches federation filters
     // provided.
-    return !federations.contains(form->federation_origin.Serialize());
+    return federations.count(form->federation_origin.Serialize()) == 0;
   });
 }
 

@@ -330,8 +330,9 @@ void WatchTimeRecorder::RecordUkmPlaybackData() {
     clamped_duration_ms = duration_.InMilliseconds();
     if (duration_ > base::Seconds(1)) {
       // Turns 54321 => 10000.
-      const uint64_t base =
-          std::pow(10, static_cast<uint64_t>(std::log10(*clamped_duration_ms)));
+      const uint64_t base = std::pow(
+          10.0, static_cast<double>(static_cast<uint64_t>(
+                     std::log10(static_cast<double>(*clamped_duration_ms)))));
       // Turns 54321 => 4321.
       const uint64_t modulus = *clamped_duration_ms % base;
       // Turns 54321 => 50000 and 55321 => 60000

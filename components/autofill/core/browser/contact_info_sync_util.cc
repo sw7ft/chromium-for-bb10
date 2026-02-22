@@ -197,9 +197,10 @@ class ContactInfoProfileSetter {
       CHECK(observations.empty());
       for (const sync_pb::ContactInfoSpecifics::Observation& proto_observation :
            metadata.observations()) {
-        observations.emplace_back(proto_observation.type(),
-                                  ProfileTokenQuality::FormSignatureHash(
-                                      proto_observation.form_hash()));
+        observations.push_back(
+            {static_cast<std::underlying_type_t<ProfileTokenQuality::ObservationType>>(proto_observation.type()),
+             ProfileTokenQuality::FormSignatureHash(
+                 proto_observation.form_hash())});
       }
     }
   }

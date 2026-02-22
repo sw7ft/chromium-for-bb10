@@ -3,6 +3,9 @@
 // found in the LICENSE file.
 
 #include "content/test/mock_background_sync_controller.h"
+
+#include <cmath>
+
 #include "base/containers/contains.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/strings/string_number_conversions.h"
@@ -108,7 +111,8 @@ base::TimeDelta MockBackgroundSyncController::GetNextEventDelay(
   // After a sync event has been fired.
   DCHECK_LT(num_attempts, parameters->max_sync_attempts);
   return parameters->initial_retry_delay *
-         pow(parameters->retry_delay_factor, num_attempts - 1);
+         std::pow(static_cast<double>(parameters->retry_delay_factor),
+                  static_cast<double>(num_attempts - 1));
 }
 
 std::unique_ptr<BackgroundSyncController::BackgroundSyncEventKeepAlive>

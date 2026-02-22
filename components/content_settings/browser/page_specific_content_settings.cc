@@ -963,7 +963,7 @@ void PageSpecificContentSettings::OnTwoSitePermissionChanged(
   switch (content_setting) {
     case CONTENT_SETTING_ASK:
     case CONTENT_SETTING_DEFAULT:
-      if (site_map.contains(requesting_site)) {
+      if (site_map.count(requesting_site) > 0) {
         site_map.erase(requesting_site);
         access_changed = true;
       }
@@ -971,7 +971,7 @@ void PageSpecificContentSettings::OnTwoSitePermissionChanged(
     case CONTENT_SETTING_ALLOW:
     case CONTENT_SETTING_BLOCK: {
       bool is_allowed = content_setting == CONTENT_SETTING_ALLOW;
-      if (!site_map.contains(requesting_site) ||
+      if (site_map.count(requesting_site) == 0 ||
           site_map[requesting_site] != is_allowed) {
         site_map[requesting_site] = is_allowed;
         access_changed = true;
@@ -1435,8 +1435,8 @@ void PageSpecificContentSettings::OnContentSettingChanged(
       }
       // Only forward updates for sites which we are already tracking.
       net::SchemefulSite requesting_site(requesting_url);
-      if (!content_settings_two_site_requests_[content_type].contains(
-              requesting_site)) {
+      if (content_settings_two_site_requests_[content_type].count(
+              requesting_site) == 0) {
         return;
       }
 
@@ -1550,7 +1550,7 @@ void PageSpecificContentSettings::OnCapturingStateChanged(
 
   // If `is_capturing` is true, we should not hide an indicator. Erasing an
   // entry from `indicators_hiding_delay_timer_` will stop a dedicated timer.
-  if (indicators_hiding_delay_timer_.contains(type) && is_capturing) {
+  if (indicators_hiding_delay_timer_.count(type) > 0 && is_capturing) {
     indicators_hiding_delay_timer_.erase(type);
   }
 
@@ -1642,10 +1642,10 @@ const base::Time PageSpecificContentSettings::GetLastUsedTime(
 
 void PageSpecificContentSettings::OnActivityIndicatorBubbleOpened(
     ContentSettingsType type) {
-  if (indicators_hiding_delay_timer_.contains(type) &&
+  if (indicators_hiding_delay_timer_.count(type) > 0 &&
       indicators_hiding_delay_timer_[type].IsRunning()) {
     indicators_hiding_delay_timer_[type].Stop();
-  } else if (media_blocked_indicator_timer_.contains(type) &&
+  } else if (media_blocked_indicator_timer_.count(type) > 0 &&
              media_blocked_indicator_timer_[type].IsRunning()) {
     media_blocked_indicator_timer_[type].Stop();
   }
@@ -1653,14 +1653,14 @@ void PageSpecificContentSettings::OnActivityIndicatorBubbleOpened(
 
 void PageSpecificContentSettings::OnActivityIndicatorBubbleClosed(
     ContentSettingsType type) {
-  if (indicators_hiding_delay_timer_.contains(type)) {
+  if (indicators_hiding_delay_timer_.count(type) > 0) {
     // In use indicator timer was stopped, relaunch.
     indicators_hiding_delay_timer_[type].Start(
         FROM_HERE, kMediaIndicatorHoldAfterUseDuration,
         base::BindOnce(
             &PageSpecificContentSettings::OnCapturingStateChangedInternal,
             weak_factory_.GetWeakPtr(), type, /*is_capturing=*/false));
-  } else if (media_blocked_indicator_timer_.contains(type)) {
+  } else if (media_blocked_indicator_timer_.count(type) > 0) {
     // Blocked indicator timer was stopped, relaunch.
     OnMediaBlockedIndicatorsShown(type);
   }

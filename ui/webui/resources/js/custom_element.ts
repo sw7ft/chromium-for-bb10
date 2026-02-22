@@ -25,7 +25,8 @@ export class CustomElement extends HTMLElement {
     this.attachShadow({mode: 'open'});
     const template = document.createElement('template');
     template.innerHTML =
-        (this.constructor as typeof CustomElement).template || emptyHTML();
+        ((this.constructor as typeof CustomElement).template || emptyHTML()) as
+            unknown as string;
     this.shadowRoot!.appendChild(template.content.cloneNode(true));
   }
 

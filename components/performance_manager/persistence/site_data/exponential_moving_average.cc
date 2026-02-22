@@ -33,7 +33,8 @@ void ExponentialMovingAverage::PrependDatum(float datum) {
   } else {
     // Back the previous first datum out of the value.
     float beta = 1.0 - alpha_;
-    float betan = std::pow(1.0 - alpha_, num_datums_ - 1);
+    float betan = std::pow(static_cast<double>(1.0 - alpha_),
+                          static_cast<double>(num_datums_ - 1));
     float first_datum_contrib = first_datum_ * betan;
     float other_datums_contrib = value_ - first_datum_contrib;
     first_datum_ = datum;

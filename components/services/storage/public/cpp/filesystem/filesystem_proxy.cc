@@ -304,9 +304,10 @@ base::FileErrorOr<std::unique_ptr<FilesystemProxy::FileLock>>
 FilesystemProxy::LockFile(const base::FilePath& path) {
   if (!remote_directory_) {
     base::FilePath full_path = MaybeMakeAbsolute(path);
+    base::FilePath path_locked;
     ASSIGN_OR_RETURN(base::File result,
-                     FilesystemImpl::LockFileLocal(full_path));
-    return std::make_unique<LocalFileLockImpl>(std::move(full_path),
+                     FilesystemImpl::LockFileLocal(full_path, &path_locked));
+    return std::make_unique<LocalFileLockImpl>(std::move(path_locked),
                                                std::move(result));
   }
 

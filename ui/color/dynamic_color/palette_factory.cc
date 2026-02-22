@@ -184,15 +184,12 @@ std::unique_ptr<Palette> GeneratePalette(SkColor seed_color,
                 Chroma(8.0)};
       break;
     case SchemeVariant::kVibrant: {
-      const auto hues =
-          std::to_array<double>({0, 41, 61, 101, 131, 181, 251, 301, 360});
-      const auto secondary_rotations =
-          std::to_array<double>({18, 15, 10, 12, 15, 18, 15, 12, 12});
+      const std::array<double, 9> hues = {0, 41, 61, 101, 131, 181, 251, 301, 360};
+      const std::array<double, 9> secondary_rotations = {18, 15, 10, 12, 15, 18, 15, 12, 12};
       const base::flat_map<double, double> secondary_hues_to_rotations =
           Zip(hues, secondary_rotations);
 
-      const auto tertiary_rotations =
-          std::to_array<double>({35, 30, 20, 25, 30, 35, 30, 25, 25});
+      const std::array<double, 9> tertiary_rotations = {35, 30, 20, 25, 30, 35, 30, 25, 25};
       const base::flat_map<double, double> tertiary_hues_to_rotations =
           Zip(hues, tertiary_rotations);
 
@@ -203,8 +200,8 @@ std::unique_ptr<Palette> GeneratePalette(SkColor seed_color,
       break;
     }
     case SchemeVariant::kNeutral: {
-      const auto hues = std::to_array<double>({0, 260, 315, 360});
-      const auto chromas = std::to_array<double>({12.0, 12.0, 20.0, 12.0});
+      const std::array<double, 4> hues = {0, 260, 315, 360};
+      const std::array<double, 4> chromas = {12.0, 12.0, 20.0, 12.0};
       const base::flat_map<double, double> chroma_transforms =
           Zip(hues, chromas);
       config = {Transform(std::move(chroma_transforms)), Chroma(8.0),
@@ -212,15 +209,12 @@ std::unique_ptr<Palette> GeneratePalette(SkColor seed_color,
       break;
     }
     case SchemeVariant::kExpressive: {
-      const auto hues =
-          std::to_array<double>({0, 21, 51, 121, 151, 191, 271, 321, 360});
-      const auto secondary_rotations =
-          std::to_array<double>({45, 95, 45, 20, 45, 90, 45, 45, 45});
+      const std::array<double, 9> hues = {0, 21, 51, 121, 151, 191, 271, 321, 360};
+      const std::array<double, 9> secondary_rotations = {45, 95, 45, 20, 45, 90, 45, 45, 45};
       const base::flat_map<double, double> secondary_hues_to_rotations =
           Zip(hues, secondary_rotations);
 
-      const auto tertiary_rotations =
-          std::to_array<double>({120, 120, 20, 45, 20, 15, 20, 120, 120});
+      const std::array<double, 9> tertiary_rotations = {120, 120, 20, 45, 20, 15, 20, 120, 120};
       const base::flat_map<double, double> tertiary_hues_to_rotations =
           Zip(hues, tertiary_rotations);
       config = {Transform(-90, 40.0),

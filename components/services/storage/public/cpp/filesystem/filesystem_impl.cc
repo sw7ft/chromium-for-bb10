@@ -22,6 +22,8 @@
 
 #if BUILDFLAG(IS_WIN)
 #include <windows.h>
+#elif BUILDFLAG(IS_QNX)
+#include <unistd.h>
 #endif
 
 namespace storage {
@@ -260,14 +262,17 @@ void FilesystemImpl::RenameFile(const base::FilePath& old_path,
 
 void FilesystemImpl::LockFile(const base::FilePath& path,
                               LockFileCallback callback) {
-  ASSIGN_OR_RETURN(base::File result, LockFileLocal(MakeAbsolute(path)),
+  base::FilePath absolute_path = MakeAbsolute(path);
+  base::FilePath path_locked;
+  ASSIGN_OR_RETURN(base::File result,
+                   LockFileLocal(absolute_path, &path_locked),
                    [&](base::File::Error error) {
                      std::move(callback).Run(error, mojo::NullRemote());
                    });
 
   mojo::PendingRemote<mojom::FileLock> lock;
   mojo::MakeSelfOwnedReceiver(
-      std::make_unique<FileLockImpl>(MakeAbsolute(path), std::move(result)),
+      std::make_unique<FileLockImpl>(path_locked, std::move(result)),
       lock.InitWithNewPipeAndPassReceiver());
   std::move(callback).Run(base::File::FILE_OK, std::move(lock));
 }
@@ -281,22 +286,45 @@ void FilesystemImpl::SetOpenedFileLength(base::File file,
 
 // static
 base::FileErrorOr<base::File> FilesystemImpl::LockFileLocal(
-    const base::FilePath& path) {
+    const base::FilePath& path,
+    base::FilePath* path_locked_out) {
   DCHECK(path.IsAbsolute());
-  base::File file(path, base::File::FLAG_OPEN_ALWAYS | base::File::FLAG_READ |
-                            base::File::FLAG_WRITE);
-  if (!file.IsValid())
-    return base::unexpected(file.error_details());
-
-  if (!GetLockTable().AddLock(path))
+  base::FilePath path_to_use = path;
+  if (!GetLockTable().AddLock(path)) {
+#if BUILDFLAG(IS_QNX)
+    // Single-process mode: multiple components may lock the same profile.
+    // Try alternate paths with increasing suffixes.
+    bool alt_locked = false;
+    for (int i = 0; i < 16; ++i) {
+      path_to_use = path.AddExtension(
+          ".qnx_alt" + (i == 0 ? std::string() : std::to_string(i)));
+      if (GetLockTable().AddLock(path_to_use)) {
+        alt_locked = true;
+        break;
+      }
+    }
+    if (!alt_locked) {
+      return base::unexpected(base::File::FILE_ERROR_IN_USE);
+    }
+#else
     return base::unexpected(base::File::FILE_ERROR_IN_USE);
-
+#endif
+  }
+  base::File file(path_to_use, base::File::FLAG_OPEN_ALWAYS | base::File::FLAG_READ |
+                                  base::File::FLAG_WRITE);
+  if (!file.IsValid()) {
+    GetLockTable().RemoveLock(path_to_use);
+    return base::unexpected(file.error_details());
+  }
 #if !BUILDFLAG(IS_FUCHSIA)
   base::File::Error error = file.Lock(base::File::LockMode::kExclusive);
-  if (error != base::File::FILE_OK)
+  if (error != base::File::FILE_OK) {
+    GetLockTable().RemoveLock(path_to_use);
     return base::unexpected(error);
+  }
 #endif
-
+  if (path_locked_out)
+    *path_locked_out = path_to_use;
   return file;
 }
 

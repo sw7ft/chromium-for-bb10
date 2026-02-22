@@ -36,6 +36,9 @@ namespace {
 #elif BUILDFLAG(IS_FUCHSIA)
 #define DOM_CODE(usb, evdev, xkb, win, mac, code, id) \
   { usb, usb, code }
+#elif BUILDFLAG(IS_QNX)
+#define DOM_CODE(usb, evdev, xkb, win, mac, code, id) \
+  { usb, evdev, code }
 #else
 #error Unsupported platform
 #endif

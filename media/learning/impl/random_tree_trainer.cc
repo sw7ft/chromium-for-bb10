@@ -228,7 +228,7 @@ std::unique_ptr<Model> RandomTreeTrainer::Build(
   FeatureSet feature_candidates = new_unused_set;
   // TODO(liberato): Let our caller override this.
   const size_t features_per_split =
-      std::max(static_cast<int>(sqrt(feature_candidates.size())), 3);
+      std::max(static_cast<int>(sqrt((double)feature_candidates.size())), 3);
   // Note that it's okay if there are fewer features left; we'll select all of
   // them instead.
   while (feature_candidates.size() > features_per_split) {

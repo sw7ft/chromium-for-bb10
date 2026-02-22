@@ -4,6 +4,7 @@
 
 #include "content/public/app/content_main.h"
 
+#include <unistd.h>
 #include "base/allocator/partition_alloc_support.h"
 #include "base/allocator/partition_allocator/src/partition_alloc/partition_alloc_buildflags.h"
 #include "base/at_exit.h"
@@ -247,7 +248,15 @@ RunContentProcess(ContentMainParams params,
     SetProcessTitleFromCommandLine(argv);
 #endif  // !BUILDFLAG(IS_ANDROID)
 
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX: CommandLine init done\n", 26);
+#endif
+
     InitTimeTicksAtUnixEpoch();
+
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX: TimeTicksAtUnixEpoch done\n", 31);
+#endif
 
 // On Android setlocale() is not supported, and we don't override the signal
 // handlers so we can get a stack trace when crashing.
@@ -300,7 +309,13 @@ RunContentProcess(ContentMainParams params,
     base::subtle::EnableFDOwnershipEnforcement(true);
 #endif
 
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX: pre-RegisterPathProvider\n", 30);
+#endif
     ui::RegisterPathProvider();
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX: pre-Initialize\n", 20);
+#endif
     exit_code = content_main_runner->Initialize(std::move(params));
 
     if (exit_code >= 0) {

@@ -144,8 +144,10 @@ bool ActionsParser::Parse() {
         if (pointer_action_list[index].pointer_action_type() ==
             PointerActionType::IDLE) {
           size_t num_pause_frame = static_cast<size_t>(std::ceil(
-              pointer_action_list[index].duration().InMilliseconds() /
-              viz::BeginFrameArgs::DefaultInterval().InMilliseconds()));
+              static_cast<double>(
+                  pointer_action_list[index].duration().InMilliseconds()) /
+              static_cast<double>(
+                  viz::BeginFrameArgs::DefaultInterval().InMilliseconds())));
           longest_pause_frame = std::max(longest_pause_frame, num_pause_frame);
         }
       }

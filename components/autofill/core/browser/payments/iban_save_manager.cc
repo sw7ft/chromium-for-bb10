@@ -123,7 +123,7 @@ bool IbanSaveManager::ShouldOfferUploadSave(
 
   // Offer server save for this IBAN if it doesn't already match an existing
   // server IBAN.
-  return std::ranges::none_of(
+  return base::ranges::none_of(
       personal_data_manager_->GetServerIbans(),
       [&iban_import_candidate](const auto& iban) {
         return iban->MatchesPrefixSuffixAndLength(iban_import_candidate);

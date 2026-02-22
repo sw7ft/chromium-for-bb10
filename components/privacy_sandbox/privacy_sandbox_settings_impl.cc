@@ -347,12 +347,12 @@ bool PrivacySandboxSettingsImpl::IsTopicPrioritized(
     const CanonicalTopic& topic) {
   const std::set<browsing_topics::Topic>& prioritized_topics =
       GetFinchPrioritizedTopics();
-  if (prioritized_topics.contains(topic.topic_id())) {
+  if (prioritized_topics.count(topic.topic_id()) > 0) {
     return true;
   }
   for (const browsing_topics::Topic& ancestor_topic :
        browsing_topics::SemanticTree().GetAncestorTopics(topic.topic_id())) {
-    if (prioritized_topics.contains(ancestor_topic)) {
+    if (prioritized_topics.count(ancestor_topic) > 0) {
       return true;
     }
   }

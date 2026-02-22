@@ -91,6 +91,10 @@ class Bitset {
     return lhs.words_ == rhs.words_;
   }
 
+  friend constexpr bool operator!=(const Bitset& lhs, const Bitset& rhs) {
+    return !(lhs == rhs);
+  }
+
   constexpr base::span<const Word, kNumWords> data() const { return words_; }
 
  private:
@@ -139,6 +143,10 @@ class Bitset<Word, kNumWords, std::enable_if_t<kNumWords == 1>> {
 
   friend constexpr bool operator==(Bitset lhs, Bitset rhs) {
     return lhs.word_ == rhs.word_;
+  }
+
+  friend constexpr bool operator!=(Bitset lhs, Bitset rhs) {
+    return !(lhs == rhs);
   }
 
   constexpr base::span<const Word, 1> data() const {
@@ -388,7 +396,10 @@ class DenseSet {
   // Capacity.
 
   // Returns true if the set is empty, otherwise false.
-  constexpr bool empty() const { return bitset_ == Bitset{}; }
+  constexpr bool empty() const {
+    Bitset zero{};
+    return bitset_ == zero;
+  }
 
   // Returns the number of elements the set has.
   constexpr size_t size() const { return bitset_.num_set_bits(); }
@@ -459,12 +470,14 @@ class DenseSet {
 
   // Returns true if some element of |xs| is an element, else |false|.
   bool contains_none(const DenseSet& xs) const {
-    return (bitset_ & xs.bitset_) == Bitset{};
+    Bitset zero{};
+    return (bitset_ & xs.bitset_) == zero;
   }
 
   // Returns true if some element of |xs| is an element, else |false|.
   bool contains_any(const DenseSet& xs) const {
-    return (bitset_ & xs.bitset_) != Bitset{};
+    Bitset zero{};
+    return (bitset_ & xs.bitset_) != zero;
   }
 
   // Returns true if every elements of |xs| is an element, else |false|.

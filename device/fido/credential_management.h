@@ -189,7 +189,7 @@ struct EnumerateCredentialsResponse {
   EnumerateCredentialsResponse(EnumerateCredentialsResponse&&);
   EnumerateCredentialsResponse& operator=(EnumerateCredentialsResponse&&);
   EnumerateCredentialsResponse(const EnumerateCredentialsResponse&) = delete;
-  EnumerateCredentialsResponse& operator=(EnumerateCredentialsResponse&) =
+  EnumerateCredentialsResponse& operator=(const EnumerateCredentialsResponse&) =
       delete;
   ~EnumerateCredentialsResponse();
 

@@ -80,7 +80,8 @@ double GetFrecencyScore(int visit_count,
   const double recency_decayed =
       kRecencyDecayUnitSec /
       (base::TimeDelta(now - visit_time) + kRecencyDecayUnitSec);
-  const double frequency_powered = pow(visit_count, kFrequencyExponent);
+  const double frequency_powered =
+      pow(static_cast<double>(visit_count), kFrequencyExponent);
   return frequency_powered * recency_decayed;
 }
 

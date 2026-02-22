@@ -565,7 +565,7 @@ class GenXproto(FileWriter):
             for case_field in fields:
                 name = safe_name(case_field.field_name)
                 if case_field.visible and self.is_read:
-                    self.write('%s.%s.emplace();' % (switch_name, name))
+                    self.write('%s.%s = decltype(%s.%s)::value_type{};' % (switch_name, name, switch_name, name))
             with ScopedFields(self, obj, case.type.fields):
                 for case_field in case.type.fields:
                     self.copy_field(case_field)

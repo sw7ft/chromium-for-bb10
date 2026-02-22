@@ -599,7 +599,7 @@ component("base") {
   }
 
   if (is_chromeos_ash || (use_aura && (is_linux || is_chromeos_lacros)) ||
-      is_fuchsia) {
+      is_fuchsia || is_qnx) {
     sources += [
       "dragdrop/os_exchange_data_provider_non_backed.cc",
       "dragdrop/os_exchange_data_provider_non_backed.h",

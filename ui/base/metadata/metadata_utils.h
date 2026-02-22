@@ -7,6 +7,7 @@
 
 #include <type_traits>
 
+#include "base/template_util.h"
 #include "ui/base/metadata/metadata_types.h"
 
 namespace ui::metadata {
@@ -17,10 +18,10 @@ template <typename T>
 static constexpr bool kHasClassMetadata<
     T,
     std::void_t<
-        typename std::remove_cvref_t<std::remove_pointer_t<T>>::kMetadataTag>> =
+        typename base::remove_cvref_t<std::remove_pointer_t<T>>::kMetadataTag>> =
     std::is_same_v<
-        typename std::remove_cvref_t<std::remove_pointer_t<T>>::kMetadataTag,
-        typename std::remove_cvref_t<std::remove_pointer_t<T>>>;
+        typename base::remove_cvref_t<std::remove_pointer_t<T>>::kMetadataTag,
+        typename base::remove_cvref_t<std::remove_pointer_t<T>>>;
 
 template <typename V, typename B>
 bool IsClass(const B* instance) {

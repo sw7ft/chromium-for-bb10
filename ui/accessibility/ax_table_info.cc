@@ -733,7 +733,9 @@ std::string AXTableInfo::ToString() const {
   for (size_t r = 0; r < row_count; r++) {
     for (size_t c = 0; c < col_count; c++) {
       // Extract the length of the id for padding purposes.
-      padding = std::max(padding, static_cast<int>(log10(cell_ids[r][c])));
+      padding = std::max(padding,
+                         static_cast<int>(std::log10(static_cast<double>(
+                             cell_ids[r][c]))));
     }
   }
 
@@ -745,7 +747,8 @@ std::string AXTableInfo::ToString() const {
       result += base::NumberToString(cell_id);
       int cell_padding = padding;
       if (cell_id != 0) {
-        cell_padding = padding - static_cast<int>(log10(cell_id));
+        cell_padding =
+            padding - static_cast<int>(std::log10(static_cast<double>(cell_id)));
       }
       result += std::string(cell_padding, ' ') + '|';
     }

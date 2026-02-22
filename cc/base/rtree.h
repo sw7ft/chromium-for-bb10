@@ -207,9 +207,9 @@ void RTree<T>::Build(size_t item_count,
     // don't have enough nodes. That can happen for at most kMinChildren nodes
     // (since otherwise, we'd create a new node).
     size_t branch_count = kMaxChildren;
-    double depth = log(branches.size()) / log(branch_count);
+    double depth = log((double)branches.size()) / log((double)branch_count);
     size_t node_count =
-        static_cast<size_t>((std::pow(branch_count, depth) - 1) /
+        static_cast<size_t>((std::pow((double)branch_count, depth) - 1) /
                             (branch_count - 1)) +
         kMinChildren;
     nodes_.reserve(node_count);

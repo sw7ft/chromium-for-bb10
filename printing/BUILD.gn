@@ -18,7 +18,7 @@ if (is_android) {
 if (enable_printing_unittests) {
   import("//build/config/ios/bundle_data_from_filelist.gni")
 } else {
-  assert(enable_printing)
+  assert(enable_printing || is_qnx)
 }
 
 if (is_win || enable_print_preview) {

@@ -132,24 +132,24 @@ float FilterOperations::MaximumPixelMovement() const {
         continue;
       case FilterOperation::DROP_SHADOW:
         // |op.amount| here is the blur radius.
-        max_movement = fmax(max_movement, fmax(std::abs(op.offset().x()),
-                                               std::abs(op.offset().y())) +
+        max_movement = fmax((double)max_movement, fmax((double)std::abs(op.offset().x()),
+                                               (double)std::abs(op.offset().y())) +
                                               op.amount() * 3.f);
         continue;
       case FilterOperation::ZOOM:
-        max_movement = fmax(max_movement, op.zoom_inset());
+        max_movement = fmax((double)max_movement, (double)op.zoom_inset());
         continue;
       case FilterOperation::REFERENCE:
         // TODO(hendrikw): SkImageFilter needs a function that tells us how far
         // the filter can move pixels. See crbug.com/523538 (sort of).
-        max_movement = fmax(max_movement, 100);
+        max_movement = fmax((double)max_movement, 100.0);
         continue;
       case FilterOperation::OFFSET:
         // TODO(crbug/1379125): Work out how to correctly set maximum pixel
         // movement when an offset filter may be combined with other pixel
         // moving filters.
         max_movement =
-            fmax(std::abs(op.offset().x()), std::abs(op.offset().y()));
+            fmax((double)std::abs(op.offset().x()), (double)std::abs(op.offset().y()));
         continue;
       case FilterOperation::OPACITY:
       case FilterOperation::COLOR_MATRIX:

@@ -83,7 +83,7 @@ FormAutofillHistory::GetLastFillingOperationForField(
     FieldGlobalId field_id) const {
   return FillOperation(base::ranges::find_if(
       history_, [&field_id](const FormFillingEntry& operation) {
-        return operation.contains(field_id);
+        return operation.count(field_id) > 0;
       }));
 }
 

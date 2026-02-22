@@ -17,10 +17,10 @@ double DecodeHalfPrecisionFloat(uint16_t value) {
 
   if (exp == 0) {
     // Handle denormalized case
-    val = std::ldexp(mant, -24);
+    val = std::ldexp((double)mant, -24);
   } else if (exp != 31) {
     // Handle normal case
-    val = std::ldexp(mant + 1024, exp - 25);
+    val = std::ldexp((double)(mant + 1024), exp - 25);
   } else {
     // Handle special cases.
     if (mant == 0) {
@@ -73,7 +73,7 @@ uint16_t EncodeHalfPrecisionFloat(double input) {
     }
   }
   uint16_t result = exp << 10 | mantissa;
-  if (std::copysign(1, input) < 0) {
+  if (std::copysign(1.0, input) < 0) {
     result |= 0x8000;
   }
   return result;

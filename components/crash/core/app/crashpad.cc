@@ -4,6 +4,32 @@
 
 #include "components/crash/core/app/crashpad.h"
 
+#include "build/build_config.h"
+
+#if BUILDFLAG(IS_QNX)
+// QNX: crashpad is not available. Provide minimal stubs.
+#include <string>
+#include <vector>
+#include "base/files/file_path.h"
+#include "base/time/time.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+namespace crash_reporter {
+bool InitializeCrashpad(bool initial_client, const std::string& process_type) { return false; }
+void DumpWithoutCrashing() {}
+void GetReports(std::vector<Report>* reports) {}
+void RequestSingleCrashUpload(const std::string& local_id) {}
+absl::optional<base::FilePath> GetCrashpadDatabasePath() { return absl::nullopt; }
+void ClearReportsBetween(base::Time begin, base::Time end) {}
+namespace internal {
+bool PlatformCrashpadInitialization(
+    bool initial_client, bool browser_process, bool embedded_handler,
+    const std::string& user_data_dir, const base::FilePath& exe_path,
+    const std::vector<std::string>& initial_arguments,
+    base::FilePath* database_path) { return false; }
+}  // namespace internal
+}  // namespace crash_reporter
+#else  // !IS_QNX
+
 #include <stddef.h>
 #include <string.h>
 
@@ -24,7 +50,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/system/sys_info.h"
 #include "base/time/time.h"
-#include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "components/crash/core/app/crash_reporter_client.h"
 #include "components/crash/core/common/crash_key.h"
@@ -98,7 +123,7 @@ bool InitializeCrashpadImpl(bool initial_client,
     DCHECK(browser_process || process_type == "Chrome Installer" ||
            process_type == "notification-helper" ||
            process_type == "GCPW Installer" || process_type == "GCPW DLL");
-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
+#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_QNX)
     DCHECK(browser_process);
 #else
 #error Port.
@@ -178,7 +203,7 @@ bool InitializeCrashpadImpl(bool initial_client,
   // other "main, first process" to initialize things. There is no "relauncher"
   // on Windows, so this is synonymous with initial_client.
   const bool should_initialize_database_and_set_upload_policy = initial_client;
-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
+#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_QNX)
   const bool should_initialize_database_and_set_upload_policy = browser_process;
 #endif
   if (should_initialize_database_and_set_upload_policy) {
@@ -257,7 +282,7 @@ void SetUploadConsent(bool consent) {
 
 #endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 
-#if !BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) && !defined(__QNX__)
 void DumpWithoutCrashing() {
   CRASHPAD_SIMULATE_CRASH();
 }
@@ -450,3 +475,5 @@ void SetCrashReportDatabaseForTesting(  // IN-TEST
 }  // namespace internal
 
 }  // namespace crash_reporter
+
+#endif  // !BUILDFLAG(IS_QNX)

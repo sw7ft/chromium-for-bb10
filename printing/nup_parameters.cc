@@ -56,8 +56,8 @@ void NupParameters::SetParameters(int pages_per_sheet,
     case 4:
     case 9:
     case 16:
-      num_pages_on_x_axis_ = std::sqrt(pages_per_sheet);
-      num_pages_on_y_axis_ = std::sqrt(pages_per_sheet);
+      num_pages_on_x_axis_ = std::sqrt(static_cast<double>(pages_per_sheet));
+      num_pages_on_y_axis_ = std::sqrt(static_cast<double>(pages_per_sheet));
       if (is_source_landscape)
         landscape_ = true;
       break;

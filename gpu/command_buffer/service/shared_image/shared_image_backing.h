@@ -339,6 +339,8 @@ class GPU_GLES2_EXPORT SharedImageBacking {
   class ScopedWriteUMA {
    public:
     ScopedWriteUMA() = default;
+    ScopedWriteUMA(ScopedWriteUMA&&) = default;
+    ScopedWriteUMA& operator=(ScopedWriteUMA&&) = default;
 
     ScopedWriteUMA(const ScopedWriteUMA&) = delete;
     ScopedWriteUMA& operator=(const ScopedWriteUMA&) = delete;

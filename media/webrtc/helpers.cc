@@ -100,6 +100,17 @@ void ConfigAutomaticGainControl(const AudioProcessingSettings& settings,
   apm_config.gain_controller2.fixed_digital.gain_db = 6.0f;
   apm_config.gain_controller2.adaptive_digital.enabled = false;
   return;
+#elif BUILDFLAG(IS_QNX)
+  // Configure AGC for QNX (similar to desktop Linux).
+  apm_config.gain_controller1.enabled = true;
+  apm_config.gain_controller1.mode = Agc1Mode::kAdaptiveAnalog;
+  apm_config.gain_controller1.analog_gain_controller.enabled = true;
+  apm_config.gain_controller1.analog_gain_controller.clipping_predictor
+      .enabled = true;
+  apm_config.gain_controller1.analog_gain_controller.enable_digital_adaptive =
+      true;
+  apm_config.gain_controller2.enabled = false;
+  return;
 #else
 #error Undefined AGC configuration. Add a case above for the current platform.
 #endif

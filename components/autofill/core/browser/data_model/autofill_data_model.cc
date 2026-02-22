@@ -27,7 +27,7 @@ int AutofillDataModel::GetDaysSinceLastUse(base::Time current_time) const {
 
 double AutofillDataModel::GetRankingScore(base::Time current_time) const {
   return -log(static_cast<double>(GetDaysSinceLastUse(current_time)) + 2) /
-         log(use_count_ + 1);
+         log(static_cast<double>(use_count_ + 1));
 }
 
 bool AutofillDataModel::UseDateEqualsInSeconds(

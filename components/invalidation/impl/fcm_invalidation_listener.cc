@@ -111,7 +111,7 @@ void FCMInvalidationListener::DispatchInvalidation(
   Upsert(unacked_invalidations_map_, invalidation);
 
   // Emit invalidation to registered handlers (if any).
-  if (interested_topics_.contains(invalidation.topic())) {
+  if (interested_topics_.count(invalidation.topic()) > 0) {
     EmitSavedInvalidation(invalidation);
   }
 }
@@ -161,7 +161,7 @@ void FCMInvalidationListener::DoSubscriptionUpdate() {
   // already dispatched but not acknowledged yet.
   // TODO(melandory): remove unacked invalidations for unregistered topics.
   for (const auto& [topic, invalidation] : unacked_invalidations_map_) {
-    if (!interested_topics_.contains(topic)) {
+    if (interested_topics_.count(topic) == 0) {
       continue;
     }
 

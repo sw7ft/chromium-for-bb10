@@ -23,7 +23,7 @@ void PaymentInstrument::AddPaymentRail(PaymentRail payment_rail) {
 }
 
 bool PaymentInstrument::IsSupported(PaymentRail payment_rail) const {
-  return supported_rails_.contains(payment_rail);
+  return supported_rails_.count(payment_rail) > 0;
 }
 
 }  // namespace autofill

@@ -359,7 +359,8 @@ void VpxVideoEncoder::Initialize(VideoCodecProfile profile,
     // tile columns (in Log2 unit) as the parameter.
     // The minimum width of a tile column is 256 pixels, the maximum is 4096.
     int log2_tile_columns =
-        static_cast<int>(std::log2(codec_config_.g_w / 256));
+        static_cast<int>(std::log2(static_cast<double>(codec_config_.g_w) /
+                                  256.0));
     vpx_codec_control(codec.get(), VP9E_SET_TILE_COLUMNS, log2_tile_columns);
 
     // Turn on row level multi-threading.
@@ -578,7 +579,8 @@ void VpxVideoEncoder::Encode(scoped_refptr<VideoFrame> frame,
   if (encode_options.quantizer.has_value()) {
     DCHECK_EQ(options_.bitrate->mode(), Bitrate::Mode::kExternal);
     // Convert double quantizer to an integer within codec's supported range.
-    int qp = static_cast<int>(std::lround(encode_options.quantizer.value()));
+    int qp = static_cast<int>(
+        std::lround(static_cast<double>(encode_options.quantizer.value())));
     qp = std::clamp(qp, static_cast<int>(codec_config_.rc_min_quantizer),
                     static_cast<int>(codec_config_.rc_max_quantizer));
     vpx_codec_control(codec_.get(), VP9E_SET_QUANTIZER_ONE_PASS, qp);

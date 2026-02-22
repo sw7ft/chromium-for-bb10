@@ -343,7 +343,7 @@ void SharedImageBacking::OnReadSucceeded() {
 
 void SharedImageBacking::OnWriteSucceeded() {
   AutoLock auto_lock(this);
-  scoped_write_uma_.emplace();
+  scoped_write_uma_ = ScopedWriteUMA();
 }
 
 size_t SharedImageBacking::GetEstimatedSize() const {

@@ -6,6 +6,7 @@
 
 #include "base/check.h"
 #include "build/build_config.h"
+#include "content/public/common/zygote/zygote_buildflags.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_client.h"
 #include "content/public/gpu/content_gpu_client.h"
@@ -29,12 +30,12 @@ absl::variant<int, MainFunctionParams> ContentMainDelegate::RunProcess(
   return std::move(main_function_params);
 }
 
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(USE_ZYGOTE)
 
 void ContentMainDelegate::ZygoteStarting(
     std::vector<std::unique_ptr<ZygoteForkDelegate>>* delegates) {}
 
-#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(USE_ZYGOTE)
 
 int ContentMainDelegate::TerminateForFatalInitializationError() {
   CHECK(false);

@@ -50,6 +50,11 @@
 #elif BUILDFLAG(IS_MAC)
 #include "base/apple/foundation_util.h"
 #endif
+#if BUILDFLAG(IS_QNX)
+#include <cstdlib>
+#include <unistd.h>
+#include "base/logging.h"
+#endif
 #endif  // V8_USE_EXTERNAL_STARTUP_DATA
 
 namespace gin {
@@ -58,6 +63,13 @@ namespace {
 
 // This global is never freed nor closed.
 base::MemoryMappedFile* g_mapped_snapshot = nullptr;
+
+#if BUILDFLAG(IS_QNX)
+// QNX: Chromium's File class creates fds that don't support read()/mmap().
+// fopen() works via QNX's resource manager protocol.
+void* g_qnx_snapshot_buf = nullptr;
+size_t g_qnx_snapshot_size = 0;
+#endif
 
 #if defined(V8_USE_EXTERNAL_STARTUP_DATA)
 absl::optional<gin::V8SnapshotFileType> g_snapshot_file_type;
@@ -126,6 +138,23 @@ void GetV8FilePath(const char* file_name, base::FilePath* path_out) {
       base::FilePath(FILE_PATH_LITERAL("assets")).AppendASCII(file_name);
 #elif BUILDFLAG(IS_MAC)
   *path_out = base::apple::PathForFrameworkBundleResource(file_name);
+#elif BUILDFLAG(IS_QNX)
+  // PathService::Get(DIR_ASSETS) + AppendASCII is broken on QNX.
+  // Construct path from CHROME_EXE_PATH env var instead.
+  std::string dir;
+  const char* exe_env = getenv("CHROME_EXE_PATH");
+  if (exe_env && exe_env[0]) {
+    dir = exe_env;
+    size_t slash = dir.rfind('/');
+    if (slash != std::string::npos)
+      dir = dir.substr(0, slash + 1);
+    else
+      dir = "./";
+  } else {
+    dir = "./";
+  }
+  *path_out = base::FilePath(dir + file_name);
+  LOG(WARNING) << "QNX: V8 file path: " << path_out->value();
 #else
   base::FilePath data_path;
   bool r = base::PathService::Get(base::DIR_ASSETS, &data_path);
@@ -447,17 +476,28 @@ void V8Initializer::Initialize(IsolateHolder::ScriptMode mode,
   // See https://crbug.com/v8/11043
   SetFlags(mode, js_command_line_flags);
 
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:V8I:1 Platform\n"; write(2, m, sizeof(m)-1); }
+#endif
   v8::V8::InitializePlatform(V8Platform::Get());
 
-  // Set this as early as possible in order to ensure OOM errors are reported
-  // correctly.
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:V8I:2 PlatDone\n"; write(2, m, sizeof(m)-1); }
+#endif
   v8::V8::SetFatalMemoryErrorCallback(oom_error_callback);
-
-  // Set this early on as some initialization steps, such as the initialization
-  // of the virtual memory cage, already use V8's random number generator.
   v8::V8::SetEntropySource(&GenerateEntropy);
 
 #if defined(V8_USE_EXTERNAL_STARTUP_DATA)
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:V8I:3 Snapshot\n"; write(2, m, sizeof(m)-1); }
+  if (g_qnx_snapshot_buf) {
+    v8::StartupData snapshot;
+    snapshot.data = reinterpret_cast<const char*>(g_qnx_snapshot_buf);
+    snapshot.raw_size = static_cast<int>(g_qnx_snapshot_size);
+    v8::V8::SetSnapshotDataBlob(&snapshot);
+    { const char m[] = "QNX:V8I:3a SnapSet\n"; write(2, m, sizeof(m)-1); }
+  } else
+#endif
   if (g_mapped_snapshot) {
     v8::StartupData snapshot;
     GetMappedFileData(g_mapped_snapshot, &snapshot);
@@ -465,8 +505,14 @@ void V8Initializer::Initialize(IsolateHolder::ScriptMode mode,
   }
 #endif  // V8_USE_EXTERNAL_STARTUP_DATA
 
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:V8I:4 V8Init\n"; write(2, m, sizeof(m)-1); }
+#endif
   v8::V8::Initialize();
 
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:V8I:5 V8Done\n"; write(2, m, sizeof(m)-1); }
+#endif
   v8_is_initialized = true;
 
 #if defined(V8_ENABLE_SANDBOX)
@@ -533,6 +579,13 @@ void V8Initializer::Initialize(IsolateHolder::ScriptMode mode,
 
 // static
 void V8Initializer::GetV8ExternalSnapshotData(v8::StartupData* snapshot) {
+#if BUILDFLAG(IS_QNX)
+  if (g_qnx_snapshot_buf) {
+    snapshot->data = reinterpret_cast<const char*>(g_qnx_snapshot_buf);
+    snapshot->raw_size = static_cast<int>(g_qnx_snapshot_size);
+    return;
+  }
+#endif
   GetMappedFileData(g_mapped_snapshot, snapshot);
 }
 
@@ -555,10 +608,62 @@ void V8Initializer::LoadV8Snapshot(V8SnapshotFileType snapshot_file_type) {
     return;
   }
 
+#if BUILDFLAG(IS_QNX)
+  if (!g_qnx_snapshot_buf) {
+    base::FilePath path;
+    GetV8FilePath(GetSnapshotFileName(snapshot_file_type), &path);
+    FILE* f = fopen(path.value().c_str(), "rb");
+    if (!f) {
+      LOG(FATAL) << "QNX: fopen failed for V8 snapshot: " << path.value();
+      return;
+    }
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (file_size <= 0) {
+      LOG(FATAL) << "QNX: V8 snapshot empty, size=" << file_size;
+      fclose(f);
+      return;
+    }
+    LOG(WARNING) << "QNX: V8 snapshot size: " << file_size;
+    // Use 64-byte aligned allocation - V8 deserialization may require alignment.
+    {
+      size_t size = static_cast<size_t>(file_size);
+      size_t align = 64;
+      if (size % align)
+        size = (size / align + 1) * align;
+      void* p = nullptr;
+      if (posix_memalign(&p, align, size) == 0) {
+        g_qnx_snapshot_buf = p;
+      } else {
+        g_qnx_snapshot_buf = malloc(file_size);
+      }
+    }
+    if (!g_qnx_snapshot_buf) {
+      LOG(FATAL) << "QNX: malloc failed for V8 snapshot";
+      fclose(f);
+      return;
+    }
+    size_t nread = fread(g_qnx_snapshot_buf, 1, file_size, f);
+    fclose(f);
+    if (static_cast<long>(nread) != file_size) {
+      LOG(FATAL) << "QNX: V8 snapshot fread got " << nread << " of " << file_size;
+      free(g_qnx_snapshot_buf);
+      g_qnx_snapshot_buf = nullptr;
+      return;
+    }
+    g_qnx_snapshot_size = file_size;
+    g_snapshot_file_type = snapshot_file_type;
+    LOG(WARNING) << "QNX: V8 snapshot loaded OK (" << file_size << " bytes)";
+  }
+  // V8 data will be set in Initialize() via GetV8ExternalSnapshotData
+  return;
+#else
   base::MemoryMappedFile::Region file_region;
   base::File file =
       OpenV8File(GetSnapshotFileName(snapshot_file_type), &file_region);
   LoadV8SnapshotFromFile(std::move(file), &file_region, snapshot_file_type);
+#endif
 }
 
 // static

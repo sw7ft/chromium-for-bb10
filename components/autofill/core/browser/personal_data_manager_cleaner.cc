@@ -199,7 +199,7 @@ bool PersonalDataManagerCleaner::ApplyDedupingRoutine() {
   for (const auto& profile : new_profiles) {
     // If the profile was set to be deleted, remove it from the database,
     // otherwise update it.
-    if (profiles_to_delete.contains(profile->guid())) {
+    if (profiles_to_delete.count(profile->guid()) > 0) {
       personal_data_manager_->RemoveProfileFromDB(profile->guid());
     } else {
       personal_data_manager_->UpdateProfileInDB(*profile);
@@ -245,7 +245,7 @@ void PersonalDataManagerCleaner::DedupeProfiles(
 
     // If the profile was set to be deleted, skip it. This can happen because
     // the loop below reassigns `profile_to_merge` to (effectively) `j->get()`.
-    if (profiles_to_delete->contains(profile_to_merge->guid())) {
+    if (profiles_to_delete->count(profile_to_merge->guid()) > 0) {
       continue;
     }
 
@@ -260,7 +260,7 @@ void PersonalDataManagerCleaner::DedupeProfiles(
 
       // Don't try to merge a profile that was already set for deletion or that
       // cannot be merged.
-      if (profiles_to_delete->contains(existing_profile.guid()) ||
+      if (profiles_to_delete->count(existing_profile.guid()) > 0 ||
           !comparator.AreMergeable(existing_profile, *profile_to_merge)) {
         continue;
       }

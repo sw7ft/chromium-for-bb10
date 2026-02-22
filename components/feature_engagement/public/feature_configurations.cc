@@ -1440,7 +1440,8 @@ absl::optional<FeatureConfig> GetClientSideFeatureConfig(
 #endif  // BUILDFLAG(IS_ANDROID)
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_LINUX) || \
-    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA)
+    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA) || \
+    BUILDFLAG(IS_QNX)
 
   if (kIPHAutofillExternalAccountProfileSuggestionFeature.name ==
       feature->name) {
@@ -1566,7 +1567,7 @@ absl::optional<FeatureConfig> GetClientSideFeatureConfig(
   }
 #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_LINUX) ||
         // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) ||
-        // BUILDFLAG(IS_FUCHSIA)
+        // BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_QNX)
 
 #if BUILDFLAG(IS_IOS)
   if (kIPHDefaultSiteViewFeature.name == feature->name) {

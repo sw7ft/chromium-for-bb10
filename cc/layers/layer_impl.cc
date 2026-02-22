@@ -974,7 +974,7 @@ int LayerImpl::CalculateJitter() {
           // The square root of the area is used instead of the area to match
           // the dimensions of both terms on the rhs.
           jitter += translation_from_last_commit *
-                    sqrt(visible_layer_rect().size().GetArea());
+                    sqrt(static_cast<double>(visible_layer_rect().size().GetArea()));
         }
       } else {
         performance_properties().num_fixed_point_hits = 0;

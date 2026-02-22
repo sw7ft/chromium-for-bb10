@@ -13,13 +13,13 @@ namespace {
 // Return the "size" of the bucket based on the allowed percent_error.
 double CalcBucketIncrement() {
   double percent_error = 10;
-  return log10(1 + percent_error / 100);
+  return log10(static_cast<double>(1) + percent_error / 100);
 }
 }  // namespace
 
 int DownloadUkmHelper::CalcExponentialBucket(int value) {
   return base::saturated_cast<int>(
-      floor(log10(value + 1) / CalcBucketIncrement()));
+      floor(log10(static_cast<double>(value + 1)) / CalcBucketIncrement()));
 }
 
 int DownloadUkmHelper::CalcNearestKB(int num_bytes) {

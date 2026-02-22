@@ -34,15 +34,15 @@ double Tween::CalculateValue(Tween::Type type, double state) {
 
   switch (type) {
     case EASE_IN:
-      return pow(state, 2);
+      return pow(state, 2.0);
 
     case EASE_IN_2:
-      return pow(state, 4);
+      return pow(state, 4.0);
 
     case EASE_IN_OUT:
       if (state < 0.5)
-        return pow(state * 2, 2) / 2.0;
-      return 1.0 - (pow((state - 1.0) * 2, 2) / 2.0);
+        return pow(state * 2, 2.0) / 2.0;
+      return 1.0 - (pow((state - 1.0) * 2, 2.0) / 2.0);
 
     case EASE_IN_OUT_2:
       return gfx::CubicBezier(0.33, 0, 0.67, 1).Solve(state);
@@ -57,7 +57,7 @@ double Tween::CalculateValue(Tween::Type type, double state) {
       return state;
 
     case EASE_OUT:
-      return 1.0 - pow(1.0 - state, 2);
+      return 1.0 - pow(1.0 - state, 2.0);
 
     case EASE_OUT_2:
       return gfx::CubicBezier(0.4, 0, 0, 1).Solve(state);
@@ -243,7 +243,7 @@ int Tween::IntValueBetween(double value, int start, int target) {
 #if BUILDFLAG(IS_WIN)
   return start + static_cast<int>(value * _nextafter(delta, 0));
 #else
-  return start + static_cast<int>(value * nextafter(delta, 0));
+  return start + static_cast<int>(value * nextafter((double)delta, 0.0));
 #endif
 }
 

@@ -96,7 +96,7 @@ void PlusAddressService::SavePlusAddress(url::Origin origin,
 
 bool PlusAddressService::IsPlusAddress(std::string potential_plus_address) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  return plus_addresses_.contains(potential_plus_address);
+  return plus_addresses_.count(potential_plus_address) > 0;
 }
 
 void PlusAddressService::OfferPlusAddressCreation(

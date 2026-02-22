@@ -90,6 +90,11 @@ class COMPONENT_EXPORT(ATTRIBUTION_REPORTING) SuitableOrigin {
     return origin_;
   }
 
+  friend bool operator==(const SuitableOrigin& a, const SuitableOrigin& b);
+  friend bool operator!=(const SuitableOrigin& a, const SuitableOrigin& b) {
+    return !(a == b);
+  }
+
   // Allows this type to be used as a key in a set or map.
   bool operator<(const SuitableOrigin&) const;
 

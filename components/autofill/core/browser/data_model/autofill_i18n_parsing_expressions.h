@@ -93,7 +93,7 @@ constexpr char kRegularExpression_68[] = "(?m)(?i:(?P<ADDRESS_HOME_STREET_ADDRES
 
 
 // Section for singular decomposition(s).
-constexpr Decomposition kDecompositionList[] = {
+const Decomposition kDecompositionList[] = {
     Decomposition(kRegularExpression_26, true, true),
     Decomposition(kRegularExpression_29, true, true),
     Decomposition(kRegularExpression_27, true, true),
@@ -114,7 +114,7 @@ constexpr Decomposition kDecompositionList[] = {
 };
 
 // Section for singular extract part(s).
-constexpr ExtractPart kExtractPartList[]{
+const ExtractPart kExtractPartList[]{
     ExtractPart("", kRegularExpression_38),
     ExtractPart("", kRegularExpression_39),
     ExtractPart("", kRegularExpression_40),
@@ -128,48 +128,48 @@ constexpr ExtractPart kExtractPartList[]{
 };
 
 // Section for decomposition cascades and their alternatives.
-constexpr AutofillParsingProcess const* kDecompositionCascade_0_Alternatives[]{ &kDecompositionList[0], &kDecompositionList[1], &kDecompositionList[2], &kDecompositionList[3]};
-constexpr DecompositionCascade kDecompositionCascade_0 = DecompositionCascade(kRegularExpression_14, kDecompositionCascade_0_Alternatives);
-constexpr AutofillParsingProcess const* kDecompositionCascade_1_Alternatives[]{ &kDecompositionList[4]};
-constexpr DecompositionCascade kDecompositionCascade_1 = DecompositionCascade(kRegularExpression_13, kDecompositionCascade_1_Alternatives);
-constexpr AutofillParsingProcess const* kDecompositionCascade_2_Alternatives[]{ &kDecompositionList[5], &kDecompositionList[6], &kDecompositionList[7]};
-constexpr DecompositionCascade kDecompositionCascade_2 = DecompositionCascade("", kDecompositionCascade_2_Alternatives);
-constexpr AutofillParsingProcess const* kDecompositionCascade_3_Alternatives[]{ &kDecompositionCascade_0, &kDecompositionCascade_1, &kDecompositionCascade_2};
-constexpr DecompositionCascade kDecompositionCascade_3 = DecompositionCascade("", kDecompositionCascade_3_Alternatives);
-constexpr AutofillParsingProcess const* kDecompositionCascade_4_Alternatives[]{ &kDecompositionList[0], &kDecompositionList[1], &kDecompositionList[2], &kDecompositionList[3]};
-constexpr DecompositionCascade kDecompositionCascade_4 = DecompositionCascade(kRegularExpression_14, kDecompositionCascade_4_Alternatives);
-constexpr AutofillParsingProcess const* kDecompositionCascade_5_Alternatives[]{ &kDecompositionList[10]};
-constexpr DecompositionCascade kDecompositionCascade_5 = DecompositionCascade(kRegularExpression_13, kDecompositionCascade_5_Alternatives);
-constexpr AutofillParsingProcess const* kDecompositionCascade_6_Alternatives[]{ &kDecompositionList[5], &kDecompositionList[11], &kDecompositionList[12]};
-constexpr DecompositionCascade kDecompositionCascade_6 = DecompositionCascade("", kDecompositionCascade_6_Alternatives);
-constexpr AutofillParsingProcess const* kDecompositionCascade_7_Alternatives[]{ &kDecompositionCascade_4, &kDecompositionCascade_5, &kDecompositionCascade_6};
-constexpr DecompositionCascade kDecompositionCascade_7 = DecompositionCascade("", kDecompositionCascade_7_Alternatives);
-constexpr AutofillParsingProcess const* kDecompositionCascade_8_Alternatives[]{ &kDecompositionList[0], &kDecompositionList[1], &kDecompositionList[2], &kDecompositionList[3]};
-constexpr DecompositionCascade kDecompositionCascade_8 = DecompositionCascade(kRegularExpression_14, kDecompositionCascade_8_Alternatives);
-constexpr AutofillParsingProcess const* kDecompositionCascade_9_Alternatives[]{ &kDecompositionList[10]};
-constexpr DecompositionCascade kDecompositionCascade_9 = DecompositionCascade(kRegularExpression_13, kDecompositionCascade_9_Alternatives);
-constexpr AutofillParsingProcess const* kDecompositionCascade_10_Alternatives[]{ &kDecompositionList[5], &kDecompositionList[6], &kDecompositionList[7]};
-constexpr DecompositionCascade kDecompositionCascade_10 = DecompositionCascade("", kDecompositionCascade_10_Alternatives);
-constexpr AutofillParsingProcess const* kDecompositionCascade_11_Alternatives[]{ &kDecompositionCascade_8, &kDecompositionCascade_9, &kDecompositionCascade_10};
-constexpr DecompositionCascade kDecompositionCascade_11 = DecompositionCascade("", kDecompositionCascade_11_Alternatives);
+const AutofillParsingProcess const* kDecompositionCascade_0_Alternatives[]{ &kDecompositionList[0], &kDecompositionList[1], &kDecompositionList[2], &kDecompositionList[3]};
+const DecompositionCascade kDecompositionCascade_0 = DecompositionCascade(kRegularExpression_14, kDecompositionCascade_0_Alternatives);
+const AutofillParsingProcess const* kDecompositionCascade_1_Alternatives[]{ &kDecompositionList[4]};
+const DecompositionCascade kDecompositionCascade_1 = DecompositionCascade(kRegularExpression_13, kDecompositionCascade_1_Alternatives);
+const AutofillParsingProcess const* kDecompositionCascade_2_Alternatives[]{ &kDecompositionList[5], &kDecompositionList[6], &kDecompositionList[7]};
+const DecompositionCascade kDecompositionCascade_2 = DecompositionCascade("", kDecompositionCascade_2_Alternatives);
+const AutofillParsingProcess const* kDecompositionCascade_3_Alternatives[]{ &kDecompositionCascade_0, &kDecompositionCascade_1, &kDecompositionCascade_2};
+const DecompositionCascade kDecompositionCascade_3 = DecompositionCascade("", kDecompositionCascade_3_Alternatives);
+const AutofillParsingProcess const* kDecompositionCascade_4_Alternatives[]{ &kDecompositionList[0], &kDecompositionList[1], &kDecompositionList[2], &kDecompositionList[3]};
+const DecompositionCascade kDecompositionCascade_4 = DecompositionCascade(kRegularExpression_14, kDecompositionCascade_4_Alternatives);
+const AutofillParsingProcess const* kDecompositionCascade_5_Alternatives[]{ &kDecompositionList[10]};
+const DecompositionCascade kDecompositionCascade_5 = DecompositionCascade(kRegularExpression_13, kDecompositionCascade_5_Alternatives);
+const AutofillParsingProcess const* kDecompositionCascade_6_Alternatives[]{ &kDecompositionList[5], &kDecompositionList[11], &kDecompositionList[12]};
+const DecompositionCascade kDecompositionCascade_6 = DecompositionCascade("", kDecompositionCascade_6_Alternatives);
+const AutofillParsingProcess const* kDecompositionCascade_7_Alternatives[]{ &kDecompositionCascade_4, &kDecompositionCascade_5, &kDecompositionCascade_6};
+const DecompositionCascade kDecompositionCascade_7 = DecompositionCascade("", kDecompositionCascade_7_Alternatives);
+const AutofillParsingProcess const* kDecompositionCascade_8_Alternatives[]{ &kDecompositionList[0], &kDecompositionList[1], &kDecompositionList[2], &kDecompositionList[3]};
+const DecompositionCascade kDecompositionCascade_8 = DecompositionCascade(kRegularExpression_14, kDecompositionCascade_8_Alternatives);
+const AutofillParsingProcess const* kDecompositionCascade_9_Alternatives[]{ &kDecompositionList[10]};
+const DecompositionCascade kDecompositionCascade_9 = DecompositionCascade(kRegularExpression_13, kDecompositionCascade_9_Alternatives);
+const AutofillParsingProcess const* kDecompositionCascade_10_Alternatives[]{ &kDecompositionList[5], &kDecompositionList[6], &kDecompositionList[7]};
+const DecompositionCascade kDecompositionCascade_10 = DecompositionCascade("", kDecompositionCascade_10_Alternatives);
+const AutofillParsingProcess const* kDecompositionCascade_11_Alternatives[]{ &kDecompositionCascade_8, &kDecompositionCascade_9, &kDecompositionCascade_10};
+const DecompositionCascade kDecompositionCascade_11 = DecompositionCascade("", kDecompositionCascade_11_Alternatives);
 
 // Section for extract parts and their pieces.
-constexpr ExtractPart const* kExtractParts_0_Pieces[]{&kExtractPartList[0],&kExtractPartList[1],&kExtractPartList[2]};
-constexpr ExtractParts kExtractParts_0 = ExtractParts("", kExtractParts_0_Pieces);
-constexpr ExtractPart const* kExtractParts_1_Pieces[]{&kExtractPartList[0],&kExtractPartList[1],&kExtractPartList[2]};
-constexpr ExtractParts kExtractParts_1 = ExtractParts("", kExtractParts_1_Pieces);
-constexpr ExtractPart const* kExtractParts_2_Pieces[]{&kExtractPartList[0],&kExtractPartList[1],&kExtractPartList[2],&kExtractPartList[3]};
-constexpr ExtractParts kExtractParts_2 = ExtractParts("", kExtractParts_2_Pieces);
-constexpr ExtractPart const* kExtractParts_3_Pieces[]{&kExtractPartList[4],&kExtractPartList[0],&kExtractPartList[1],&kExtractPartList[2],&kExtractPartList[3]};
-constexpr ExtractParts kExtractParts_3 = ExtractParts("", kExtractParts_3_Pieces);
-constexpr ExtractPart const* kExtractParts_4_Pieces[]{&kExtractPartList[5],&kExtractPartList[6]};
-constexpr ExtractParts kExtractParts_4 = ExtractParts("", kExtractParts_4_Pieces);
-constexpr ExtractPart const* kExtractParts_5_Pieces[]{&kExtractPartList[7],&kExtractPartList[8]};
-constexpr ExtractParts kExtractParts_5 = ExtractParts("", kExtractParts_5_Pieces);
-constexpr ExtractPart const* kExtractParts_6_Pieces[]{&kExtractPartList[7],&kExtractPartList[8]};
-constexpr ExtractParts kExtractParts_6 = ExtractParts("", kExtractParts_6_Pieces);
-constexpr ExtractPart const* kExtractParts_7_Pieces[]{&kExtractPartList[9],&kExtractPartList[5],&kExtractPartList[6],&kExtractPartList[7],&kExtractPartList[8]};
-constexpr ExtractParts kExtractParts_7 = ExtractParts("", kExtractParts_7_Pieces);
+const ExtractPart const* kExtractParts_0_Pieces[]{&kExtractPartList[0],&kExtractPartList[1],&kExtractPartList[2]};
+const ExtractParts kExtractParts_0 = ExtractParts("", kExtractParts_0_Pieces);
+const ExtractPart const* kExtractParts_1_Pieces[]{&kExtractPartList[0],&kExtractPartList[1],&kExtractPartList[2]};
+const ExtractParts kExtractParts_1 = ExtractParts("", kExtractParts_1_Pieces);
+const ExtractPart const* kExtractParts_2_Pieces[]{&kExtractPartList[0],&kExtractPartList[1],&kExtractPartList[2],&kExtractPartList[3]};
+const ExtractParts kExtractParts_2 = ExtractParts("", kExtractParts_2_Pieces);
+const ExtractPart const* kExtractParts_3_Pieces[]{&kExtractPartList[4],&kExtractPartList[0],&kExtractPartList[1],&kExtractPartList[2],&kExtractPartList[3]};
+const ExtractParts kExtractParts_3 = ExtractParts("", kExtractParts_3_Pieces);
+const ExtractPart const* kExtractParts_4_Pieces[]{&kExtractPartList[5],&kExtractPartList[6]};
+const ExtractParts kExtractParts_4 = ExtractParts("", kExtractParts_4_Pieces);
+const ExtractPart const* kExtractParts_5_Pieces[]{&kExtractPartList[7],&kExtractPartList[8]};
+const ExtractParts kExtractParts_5 = ExtractParts("", kExtractParts_5_Pieces);
+const ExtractPart const* kExtractParts_6_Pieces[]{&kExtractPartList[7],&kExtractPartList[8]};
+const ExtractParts kExtractParts_6 = ExtractParts("", kExtractParts_6_Pieces);
+const ExtractPart const* kExtractParts_7_Pieces[]{&kExtractPartList[9],&kExtractPartList[5],&kExtractPartList[6],&kExtractPartList[7],&kExtractPartList[8]};
+const ExtractParts kExtractParts_7 = ExtractParts("", kExtractParts_7_Pieces);
 }  // namespace
 
 // A lookup map for parsing expressions for countries and field types.

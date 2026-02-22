@@ -359,7 +359,7 @@ DomainsVisitedResult HistoryDatabase::GetUniqueDomainsVisited(
       continue;
     }
 
-    if (!all_visited_domains_set.contains(domain)) {
+    if (all_visited_domains_set.count(domain) == 0) {
       all_visited_domains_set.insert(domain);
       result.all_visited_domains.push_back(domain);
     }
@@ -367,7 +367,7 @@ DomainsVisitedResult HistoryDatabase::GetUniqueDomainsVisited(
     bool is_local = url_sql.ColumnString(1).empty() &&
                     url_sql.ColumnInt(2) == VisitSource::SOURCE_BROWSED;
 
-    if (is_local && !locally_visited_domains_set.contains(domain)) {
+    if (is_local && locally_visited_domains_set.count(domain) == 0) {
       locally_visited_domains_set.insert(domain);
       result.locally_visited_domains.push_back(domain);
     }

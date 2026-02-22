@@ -213,6 +213,12 @@ class ProfileTokenQuality {
     std::underlying_type_t<ObservationType> type;
     FormSignatureHash form_hash = FormSignatureHash(0);
 
+    Observation() = default;
+    Observation(const Observation&) = default;
+    Observation(Observation&&) = default;
+    Observation& operator=(const Observation&) = default;
+    Observation& operator=(Observation&&) = default;
+
     bool operator==(const Observation& other) const;
     bool operator!=(const Observation& other) const;
   };

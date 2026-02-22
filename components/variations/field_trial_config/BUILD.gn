@@ -31,6 +31,8 @@ action("field_trial_testing_config_action") {
     platform = "windows"
   } else if (is_chromeos_lacros) {
     platform = "chromeos_lacros"
+  } else if (current_os == "qnx") {
+    platform = "linux"
   } else {
     platform = current_os
   }

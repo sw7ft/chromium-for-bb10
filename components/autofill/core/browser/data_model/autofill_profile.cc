@@ -407,8 +407,8 @@ double AutofillProfile::GetRankingScore(base::Time current_time) const {
           features::kAutofillEnableRankingFormulaAddressProfiles)) {
     // Exponentially decay the use count by the days since the data model was
     // last used.
-    return log10(use_count() + 1) *
-           exp(-GetDaysSinceLastUse(current_time) /
+    return log10(static_cast<double>(use_count() + 1)) *
+           exp(static_cast<double>(-GetDaysSinceLastUse(current_time)) /
                features::kAutofillRankingFormulaAddressProfilesUsageHalfLife
                    .Get());
   }

@@ -469,7 +469,7 @@ class PageSpecificContentSettings
 
   // Returns true if a page is currently using a feature gated behind `type`
   // permission. Returns false otherwise.
-  bool IsInUse(ContentSettingsType type) { return in_use_.contains(type); }
+  bool IsInUse(ContentSettingsType type) { return in_use_.count(type) > 0; }
 
   // Returns a time of last usage of a feature gated behind `type` permission.
   // Returns base::Time() if `type` was not used in the last 24 hours.

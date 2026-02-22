@@ -141,8 +141,8 @@ class GL_EXPORT ScopedPixelStore {
  public:
   ScopedPixelStore(unsigned int name, int value);
   ~ScopedPixelStore();
-  ScopedPixelStore(ScopedPixelStore&) = delete;
-  ScopedPixelStore& operator=(ScopedPixelStore&) = delete;
+  ScopedPixelStore(const ScopedPixelStore&) = delete;
+  ScopedPixelStore& operator=(const ScopedPixelStore&) = delete;
 
  private:
   const unsigned int name_;

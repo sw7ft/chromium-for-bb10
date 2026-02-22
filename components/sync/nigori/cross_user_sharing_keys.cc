@@ -81,7 +81,7 @@ size_t CrossUserSharingKeys::size() const {
 }
 
 bool CrossUserSharingKeys::HasKeyPair(uint32_t key_pair_version) const {
-  return key_pairs_map_.contains(key_pair_version);
+  return key_pairs_map_.count(key_pair_version) > 0;
 }
 
 void CrossUserSharingKeys::AddAllUnknownKeysFrom(

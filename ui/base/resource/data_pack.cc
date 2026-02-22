@@ -200,6 +200,9 @@ std::unique_ptr<DataPack::DataSource> DataPack::LoadFromPathInternal(
                 << data_file.error_details();
     return nullptr;
   }
+#if BUILDFLAG(IS_QNX)
+  mmap->SetQNXPath(path);
+#endif
   if (!mmap->Initialize(std::move(data_file))) {
     DLOG(ERROR) << "Failed to mmap datapack";
     return nullptr;

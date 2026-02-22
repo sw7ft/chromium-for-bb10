@@ -91,8 +91,11 @@ class COMPONENT_EXPORT(STORAGE_SERVICE_FILESYSTEM_SUPPORT) FilesystemImpl
 
   // Helper used by LockFile() and FilesystemProxy::LockFile() for in
   // unrestricted mode.
+  // On QNX, if |path| is already locked, uses |path|.qnx_alt to allow
+  // single-process mode where multiple components lock the same profile.
   static base::FileErrorOr<base::File> LockFileLocal(
-      const base::FilePath& path);
+      const base::FilePath& path,
+      base::FilePath* path_locked_out = nullptr);
   static void UnlockFileLocal(const base::FilePath& path);
 
   // Helper used by GetPathAccess() and FilesystemProxy::GetPathAccess.

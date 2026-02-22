@@ -192,6 +192,9 @@ uint32_t GetPlatformSpecificTextureTarget() {
 #elif BUILDFLAG(IS_NACL)
   NOTREACHED();
   return 0;
+#elif BUILDFLAG(IS_QNX)
+  // QNX: no GPU texture target support; return 0.
+  return 0;
 #else
 #error Unsupported OS
 #endif

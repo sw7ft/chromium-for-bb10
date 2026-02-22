@@ -440,7 +440,7 @@ std::tuple<float, float, float> HSLToSRGB(float h, float s, float l) {
   }
 
   auto f = [&h, &l, &s](float n) {
-    float k = fmod(n + h / 30.0f, 12.0);
+    float k = fmod(n + h / 30.0f, 12.0f);
     float a = s * std::min(l, 1.0f - l);
     return l - a * std::max(-1.0f, std::min({k - 3.0f, 9.0f - k, 1.0f}));
   };

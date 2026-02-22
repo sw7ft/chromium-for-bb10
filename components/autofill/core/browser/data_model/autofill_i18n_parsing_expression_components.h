@@ -39,7 +39,7 @@ class AutofillParsingProcess {
   AutofillParsingProcess(const AutofillParsingProcess& other) = delete;
   AutofillParsingProcess& operator=(const AutofillParsingProcess& right) =
       delete;
-  virtual constexpr ~AutofillParsingProcess() = default;
+  virtual ~AutofillParsingProcess() = default;
 
   // Parses `value` and returns the extracted field type matches.
   virtual ValueParsingResults Parse(std::string_view value) const = 0;
@@ -60,7 +60,7 @@ class Decomposition : public AutofillParsingProcess {
         anchor_end_(anchor_end) {}
   Decomposition(const Decomposition&) = delete;
   Decomposition& operator=(const Decomposition&) = delete;
-  constexpr ~Decomposition() override;
+  ~Decomposition() override;
 
   ValueParsingResults Parse(std::string_view value) const override;
 
@@ -70,7 +70,7 @@ class Decomposition : public AutofillParsingProcess {
   const bool anchor_end_ = true;
 };
 
-constexpr Decomposition::~Decomposition() = default;
+inline Decomposition::~Decomposition() = default;
 
 // A DecompositionCascade enables us to try one Decomposition after the next
 // until we have found a match. It can be fitted with a condition to only use it
@@ -86,7 +86,7 @@ class DecompositionCascade : public AutofillParsingProcess {
       : condition_regex_(condition_regex), alternatives_(alternatives) {}
   DecompositionCascade(const DecompositionCascade&) = delete;
   DecompositionCascade& operator=(const DecompositionCascade&) = delete;
-  constexpr ~DecompositionCascade() override;
+  ~DecompositionCascade() override;
 
   ValueParsingResults Parse(std::string_view value) const override;
 
@@ -95,7 +95,7 @@ class DecompositionCascade : public AutofillParsingProcess {
   const base::span<const AutofillParsingProcess* const> alternatives_;
 };
 
-constexpr DecompositionCascade::~DecompositionCascade() = default;
+inline DecompositionCascade::~DecompositionCascade() = default;
 
 // An ExtractPart parsing process attempts to match a string to a
 // parsing expression, and then extracts the captured field type values. It can
@@ -114,7 +114,7 @@ class ExtractPart : public AutofillParsingProcess {
 
   ExtractPart(const ExtractPart&) = delete;
   ExtractPart& operator=(const ExtractPart&) = delete;
-  constexpr ~ExtractPart() override;
+  ~ExtractPart() override;
 
   ValueParsingResults Parse(std::string_view value) const override;
 
@@ -123,7 +123,7 @@ class ExtractPart : public AutofillParsingProcess {
   const std::string_view parsing_regex_;
 };
 
-constexpr ExtractPart::~ExtractPart() = default;
+inline ExtractPart::~ExtractPart() = default;
 
 // Unlike for a DecompositionCascade, ExtractParts does not follow the "the
 // first match wins" principle but applies all matching attempts in sequence so
@@ -140,7 +140,7 @@ class ExtractParts : public AutofillParsingProcess {
       : condition_regex_(condition_regex), pieces_(pieces) {}
   ExtractParts(const ExtractParts&) = delete;
   ExtractParts& operator=(const ExtractParts&) = delete;
-  constexpr ~ExtractParts() override;
+  ~ExtractParts() override;
 
   ValueParsingResults Parse(std::string_view value) const override;
 
@@ -149,7 +149,7 @@ class ExtractParts : public AutofillParsingProcess {
   const base::span<const ExtractPart* const> pieces_;
 };
 
-constexpr ExtractParts::~ExtractParts() = default;
+inline ExtractParts::~ExtractParts() = default;
 
 }  // namespace autofill::i18n_model_definition
 

@@ -15,8 +15,8 @@ namespace autofill::i18n_model_definition {
 // Country code that represents autofill's legacy address hierarchy model as
 // stored `kAutofillModelRules`. As a workaround for GCC we declare the
 // std::string constexpr first.
-constexpr inline std::string kLegacyHierarchyCountryCodeString{"XX"};
-constexpr AddressCountryCode kLegacyHierarchyCountryCode =
+const inline std::string kLegacyHierarchyCountryCodeString{"XX"};
+const AddressCountryCode kLegacyHierarchyCountryCode =
     AddressCountryCode(kLegacyHierarchyCountryCodeString);
 
 // Creates an instance of the address hierarchy model corresponding to the

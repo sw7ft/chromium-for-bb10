@@ -98,7 +98,7 @@ export class LocalizedLinkElement extends PolymerElement {
   private getAriaLabelledContent_(localizedString: string, linkUrl: string):
       string {
     const tempEl = document.createElement('div');
-    tempEl.innerHTML = sanitizeInnerHtml(localizedString, {attrs: ['id']});
+    tempEl.innerHTML = sanitizeInnerHtml(localizedString, {attrs: ['id']}) as unknown as string;
 
     const ariaLabelledByIds: string[] = [];
     tempEl.childNodes.forEach((node, index) => {
@@ -145,7 +145,7 @@ export class LocalizedLinkElement extends PolymerElement {
       anchorTag.target = '_blank';
     }
 
-    return tempEl.innerHTML;
+    return tempEl.innerHTML as unknown as string;
   }
 
   private setContainerInnerHtml_() {
@@ -156,7 +156,7 @@ export class LocalizedLinkElement extends PolymerElement {
         'id',
         'tabindex',
       ],
-    });
+    }) as unknown as string;
     const anchorTag = this.shadowRoot!.querySelector('a');
     if (anchorTag) {
       anchorTag.addEventListener(

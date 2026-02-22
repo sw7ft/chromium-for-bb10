@@ -246,8 +246,8 @@ class StandaloneTrustedVaultBackend
   // execution gets deferred until SetPrimaryAccount() is invoked.
   struct PendingTrustedRecoveryMethod {
     PendingTrustedRecoveryMethod();
-    PendingTrustedRecoveryMethod(PendingTrustedRecoveryMethod&) = delete;
-    PendingTrustedRecoveryMethod& operator=(PendingTrustedRecoveryMethod&) =
+    PendingTrustedRecoveryMethod(const PendingTrustedRecoveryMethod&) = delete;
+    PendingTrustedRecoveryMethod& operator=(const PendingTrustedRecoveryMethod&) =
         delete;
     PendingTrustedRecoveryMethod(PendingTrustedRecoveryMethod&&);
     PendingTrustedRecoveryMethod& operator=(PendingTrustedRecoveryMethod&&);
@@ -304,10 +304,10 @@ class StandaloneTrustedVaultBackend
   // GetIsRecoverabilityDegraded() could be invoked before that.
   struct PendingGetIsRecoverabilityDegraded {
     PendingGetIsRecoverabilityDegraded();
-    PendingGetIsRecoverabilityDegraded(PendingGetIsRecoverabilityDegraded&) =
+    PendingGetIsRecoverabilityDegraded(const PendingGetIsRecoverabilityDegraded&) =
         delete;
     PendingGetIsRecoverabilityDegraded& operator=(
-        PendingGetIsRecoverabilityDegraded&) = delete;
+        const PendingGetIsRecoverabilityDegraded&) = delete;
     PendingGetIsRecoverabilityDegraded(PendingGetIsRecoverabilityDegraded&&);
     PendingGetIsRecoverabilityDegraded& operator=(
         PendingGetIsRecoverabilityDegraded&&);

@@ -974,9 +974,9 @@ InteractiveTestApi::MultiStep InteractiveTestApi::WaitForState(
     StateIdentifier<O> id,
     V&& value) {
   using T = typename O::ValueType;
-  using U = internal::MatcherTypeFor<V>;
+  using MatcherType = internal::MatcherTypeFor<V>;
   auto wait_callback = base::BindOnce(
-      [](ElementIdentifier id, U value, InteractionSequence* seq,
+      [](ElementIdentifier id, MatcherType value, InteractionSequence* seq,
          TrackedElement* el) {
         auto* const typed = internal::StateObserverElementT<T>::LookupElement(
             id, el->context(), seq->IsCurrentStepInAnyContextForTesting());
@@ -987,21 +987,21 @@ InteractiveTestApi::MultiStep InteractiveTestApi::WaitForState(
           seq->FailForTesting();
           return;
         }
-        if constexpr (internal::IsReferenceWrapper<U>) {
+        if constexpr (internal::IsReferenceWrapper<MatcherType>) {
           typed->SetTarget(testing::Matcher<T>(T(value.get())));
-        } else if constexpr (std::is_base_of_v<testing::Matcher<T>, U>) {
+        } else if constexpr (std::is_base_of_v<testing::Matcher<T>, MatcherType>) {
           // Note that a Matcher<T> is actually a wrapper around a "matcher"
           // object, not a matcher itself.
           typed->SetTarget(value);
-        } else if constexpr (internal::IsMatcher<U>) {
+        } else if constexpr (internal::IsMatcher<MatcherType>) {
           // Need to wrap the "matcher" in a Matcher<T> for it to be used.
           typed->SetTarget(testing::Matcher<T>(value));
         } else {
           typed->SetTarget(
-              testing::Matcher<T>(T(INTERACTIVE_TEST_UNWRAP_IMPL(value, U))));
+              testing::Matcher<T>(T(INTERACTIVE_TEST_UNWRAP_IMPL(value, MatcherType))));
         }
       },
-      id.identifier(), U(std::forward<V>(value)));
+      id.identifier(), MatcherType(std::forward<V>(value)));
   auto result = Steps(WithElement(internal::kInteractiveTestPivotElementId,
                                   std::move(wait_callback)),
                       WaitForShow(id.identifier()));

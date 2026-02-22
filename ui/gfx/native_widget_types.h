@@ -201,6 +201,11 @@ using NativeCursor = void*;
 using NativeView = ui::ViewAndroid*;
 using NativeWindow = ui::WindowAndroid*;
 using NativeEvent = base::android::ScopedJavaGlobalRef<jobject>;
+#elif BUILDFLAG(IS_QNX)
+using NativeCursor = void*;
+using NativeView = void*;
+using NativeWindow = void*;
+using NativeEvent = void*;
 #else
 #error Unknown build environment.
 #endif
@@ -252,6 +257,9 @@ constexpr AcceleratedWidget kNullAcceleratedWidget = 0;
 using AcceleratedWidget = ANativeWindow*;
 constexpr AcceleratedWidget kNullAcceleratedWidget = nullptr;
 #elif BUILDFLAG(IS_OZONE)
+using AcceleratedWidget = uint32_t;
+constexpr AcceleratedWidget kNullAcceleratedWidget = 0;
+#elif BUILDFLAG(IS_QNX)
 using AcceleratedWidget = uint32_t;
 constexpr AcceleratedWidget kNullAcceleratedWidget = 0;
 #else

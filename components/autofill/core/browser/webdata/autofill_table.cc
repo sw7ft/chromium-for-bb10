@@ -1744,6 +1744,12 @@ std::unique_ptr<AutofillProfile> AutofillTable::GetAutofillProfile(
     int status;
     // Serialized observations for the stored type.
     std::vector<uint8_t> serialized_data;
+
+    FieldTypeData(ServerFieldType t,
+                  const std::u16string& v,
+                  int s,
+                  std::vector<uint8_t> serialized)
+        : type(t), value(v), status(s), serialized_data(std::move(serialized)) {}
   };
 
   std::vector<FieldTypeData> field_type_values;

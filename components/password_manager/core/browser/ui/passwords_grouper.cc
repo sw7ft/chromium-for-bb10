@@ -334,7 +334,7 @@ void PasswordsGrouper::GroupPasswordsImpl(
     }
     std::string facet_uri = GetFacetRepresentation(form);
 
-    DCHECK(map_facet_to_group_id.contains(facet_uri));
+    DCHECK(map_facet_to_group_id.count(facet_uri) > 0);
     GroupId group_id = map_facet_to_group_id[facet_uri];
 
     // Store group id for sign-on realm.

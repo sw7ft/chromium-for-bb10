@@ -368,7 +368,7 @@ void PacmanFramePainter::DrawGradientSquares(base::TimeDelta elapsed_time,
                                 {0, height - side},
                                 {width - side, height - side}};
   const float start =
-      fmod(65536 * elapsed_time.InSecondsF() * kGradientFrequency, 65536);
+      static_cast<float>(std::fmod(65536.0 * static_cast<double>(elapsed_time.InSecondsF()) * static_cast<double>(kGradientFrequency), 65536.0));
   const float color_step = 65535 / static_cast<float>(width + height);
   for (const auto& corner : squares) {
     for (int y = corner.y(); y < corner.y() + side; ++y) {
@@ -463,8 +463,10 @@ void PacmanFramePainter::DrawPacman(base::TimeDelta elapsed_time,
   }
 
   // Draw a sweeping circle to show an animation.
-  const float end_angle =
-      fmod(kPacmanAngularVelocity * elapsed_time.InSecondsF(), 361);
+  const float end_angle = static_cast<float>(
+      std::fmod(static_cast<double>(kPacmanAngularVelocity) *
+                    static_cast<double>(elapsed_time.InSecondsF()),
+                361.0));
   const int radius = std::min(width, height) / 4;
   const SkRect rect = SkRect::MakeXYWH(width / 2 - radius, height / 2 - radius,
                                        2 * radius, 2 * radius);

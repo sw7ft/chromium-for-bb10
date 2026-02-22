@@ -264,7 +264,7 @@ void Av1VideoEncoder::Initialize(VideoCodecProfile profile,
   }
 
   // Keep in mind that AV1E_SET_TILE_[COLUMNS|ROWS] uses log2 units.
-  int log2_threads = std::log2(config_.g_threads);
+  int log2_threads = std::log2(static_cast<double>(config_.g_threads));
   int tile_columns_log2 = 0;
   int tile_rows_log2 = 0;
   switch (log2_threads) {
@@ -434,7 +434,8 @@ void Av1VideoEncoder::Encode(scoped_refptr<VideoFrame> frame,
   if (encode_options.quantizer.has_value()) {
     DCHECK_EQ(options_.bitrate->mode(), Bitrate::Mode::kExternal);
     // Convert double quantizer to an integer within codec's supported range.
-    int qp = static_cast<int>(std::lround(encode_options.quantizer.value()));
+    int qp = static_cast<int>(
+        std::lround(static_cast<double>(encode_options.quantizer.value())));
     qp = std::clamp(qp, static_cast<int>(config_.rc_min_quantizer),
                     static_cast<int>(config_.rc_max_quantizer));
     aom_codec_control(codec_.get(), AV1E_SET_QUANTIZER_ONE_PASS, qp);

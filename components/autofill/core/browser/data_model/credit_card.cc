@@ -503,14 +503,14 @@ double CreditCard::GetRankingScore(base::Time current_time) const {
         virtual_card_enrollment_state_ != VirtualCardEnrollmentState::kEnrolled
             ? 0
             : features::kAutofillRankingFormulaVirtualCardBoost.Get() *
-                  exp(-GetDaysSinceLastUse(current_time) /
+                  exp(static_cast<double>(-GetDaysSinceLastUse(current_time)) /
                       features::kAutofillRankingFormulaVirtualCardBoostHalfLife
                           .Get());
 
     // Exponentially decay the use count by the days since the data model was
     // last used. Add a virtual card boost if the model is a virtual card.
-    return (log10(use_count() + 1) *
-            exp(-GetDaysSinceLastUse(current_time) /
+    return (log10(static_cast<double>(use_count() + 1)) *
+            exp(static_cast<double>(-GetDaysSinceLastUse(current_time)) /
                 features::kAutofillRankingFormulaCreditCardsUsageHalfLife
                     .Get())) +
            virtual_card_boost;

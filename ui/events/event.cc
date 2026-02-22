@@ -769,15 +769,15 @@ void TouchEvent::UpdateForRootTransform(
     if (IsNearZero(inverted_root_transform.rc(0, 1)) &&
         IsNearZero(inverted_root_transform.rc(1, 0))) {
       pointer_details_.tilt_x *=
-          std::copysign(1, inverted_root_transform.rc(0, 0));
+          std::copysign(1.0, inverted_root_transform.rc(0, 0));
       pointer_details_.tilt_y *=
-          std::copysign(1, inverted_root_transform.rc(1, 1));
+          std::copysign(1.0, inverted_root_transform.rc(1, 1));
     } else if (IsNearZero(inverted_root_transform.rc(0, 0)) &&
                IsNearZero(inverted_root_transform.rc(1, 1))) {
       double new_tilt_x = pointer_details_.tilt_y *
-                          std::copysign(1, inverted_root_transform.rc(0, 1));
+                          std::copysign(1.0, inverted_root_transform.rc(0, 1));
       double new_tilt_y = pointer_details_.tilt_x *
-                          std::copysign(1, inverted_root_transform.rc(1, 0));
+                          std::copysign(1.0, inverted_root_transform.rc(1, 0));
       pointer_details_.tilt_x = new_tilt_x;
       pointer_details_.tilt_y = new_tilt_y;
     }

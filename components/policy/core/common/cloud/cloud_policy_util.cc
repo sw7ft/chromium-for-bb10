@@ -20,7 +20,7 @@
 #endif
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS) || \
-    BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_FUCHSIA)
+    BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_QNX)
 #include <pwd.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -135,6 +135,11 @@ std::string GetMachineName() {
   return std::string();
 #elif BUILDFLAG(IS_CHROMEOS)
   NOTREACHED();
+  return std::string();
+#elif BUILDFLAG(IS_QNX)
+  char hostname[256];
+  if (gethostname(hostname, sizeof(hostname)) == 0)
+    return hostname;
   return std::string();
 #else
 #error Unsupported platform

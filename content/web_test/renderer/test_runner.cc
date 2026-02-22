@@ -1734,7 +1734,7 @@ void TestRunnerBindings::SetBackingScaleFactor(
   // GLES2DecoderImpl::TexStorageImpl fails with "dimensions out of range"; GL
   // ERROR :GL_OUT_OF_MEMORY. See https://crbug.com/899482 or
   // https://crbug.com/900271
-  double limited_value = fmin(15, value);
+  double limited_value = std::fmin(15.0, static_cast<double>(value));
 
   frame_->GetLocalRootWebFrameWidget()->SetDeviceScaleFactorForTesting(
       limited_value);

@@ -701,7 +701,7 @@ void VotesUploader::MaybeSendSingleUsernameVotes() {
       forgot_password_vote_data_.size() > 0) {
     availability = SingleUsernameVoteDataAvailability::kBothNoOverlap;
     for (auto vote_data : single_username_votes_data_) {
-      if (forgot_password_vote_data_.contains(vote_data.renderer_id)) {
+      if (forgot_password_vote_data_.count(vote_data.renderer_id) > 0) {
         availability = SingleUsernameVoteDataAvailability::kBothWithOverlap;
         break;
       }

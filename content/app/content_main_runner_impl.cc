@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <memory>
 #include <string>
@@ -699,11 +700,17 @@ int RunBrowserProcessMain(MainFunctionParams main_function_params,
   if (delegate->ShouldHandleConsoleControlEvents())
     InstallConsoleControlHandler(/*is_browser_process=*/true);
 #endif
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:BM:1 RunProcess\n", 20);
+#endif
   auto exit_code = delegate->RunProcess("", std::move(main_function_params));
   if (absl::holds_alternative<int>(exit_code)) {
     DCHECK_GE(absl::get<int>(exit_code), 0);
     return absl::get<int>(exit_code);
   }
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:BM:2 BrowserMain\n", 21);
+#endif
   return BrowserMain(std::move(absl::get<MainFunctionParams>(exit_code)));
 }
 
@@ -869,16 +876,25 @@ int ContentMainRunnerImpl::Initialize(ContentMainParams params) {
 
   if (!GetContentClient())
     ContentClientCreator::Create(delegate_);
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:I:1 BasicStartup\n", 21);
+#endif
   absl::optional<int> basic_startup_exit_code =
       delegate_->BasicStartupComplete();
   if (basic_startup_exit_code.has_value())
     return basic_startup_exit_code.value();
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:I:2 CmdLine\n", 17);
+#endif
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
   std::string process_type =
       command_line.GetSwitchValueASCII(switches::kProcessType);
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:I:3 PartAlloc\n", 18);
+#endif
   base::allocator::PartitionAllocSupport::Get()->ReconfigureEarlyish(
       process_type);
 
@@ -897,9 +913,18 @@ int ContentMainRunnerImpl::Initialize(ContentMainParams params) {
     base::win::AllowDarkModeForApp(true);
 #endif
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:I:4 RegSchemes\n", 19);
+#endif
   RegisterContentSchemes(delegate_->ShouldLockSchemeRegistry());
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:I:5 ClientInit\n", 19);
+#endif
   ContentClientInitializer::Set(process_type, delegate_);
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:I:6 Tracing\n", 17);
+#endif
 #if !BUILDFLAG(IS_ANDROID)
   // Enable startup tracing asap to avoid early TRACE_EVENT calls being
   // ignored. For Android, startup tracing is enabled in an even earlier place
@@ -925,6 +950,9 @@ int ContentMainRunnerImpl::Initialize(ContentMainParams params) {
     needs_startup_tracing_after_mojo_init_ = true;
   }
 #endif  // BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_MAC)
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:I:7 TracingEnable\n", 22);
+#endif
   if (enable_startup_tracing)
     tracing::EnableStartupTracingIfNeeded();
 
@@ -932,18 +960,29 @@ int ContentMainRunnerImpl::Initialize(ContentMainParams params) {
   base::trace_event::TraceEventETWExport::EnableETWExport();
 #endif  // BUILDFLAG(IS_WIN)
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:I:8 TraceEvent\n", 19);
+#endif
   // Android tracing started at the beginning of the method.
   // Other OSes have to wait till we get here in order for all the memory
   // management setup to be completed.
+#if !BUILDFLAG(IS_QNX)
   TRACE_EVENT0("startup,benchmark,rail", "ContentMainRunnerImpl::Initialize");
+#endif
 #endif  // !BUILDFLAG(IS_ANDROID)
 
   // If we are on a platform where the default allocator is overridden (e.g.
   // with PartitionAlloc on most platforms) smoke-tests that the overriding
   // logic is working correctly. If not causes a hard crash, as its unexpected
   // absence has security implications.
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX: pre-allocator-check\n", 25);
+#endif
   CHECK(base::allocator::IsAllocatorInitialized());
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX: pre-POSIX-block\n", 21);
+#endif
 #if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
   if (!process_type.empty()) {
     // When you hit Ctrl-C in a terminal running the browser
@@ -962,8 +1001,14 @@ int ContentMainRunnerImpl::Initialize(ContentMainParams params) {
   }
 #endif
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX: pre-content-RegisterPathProvider\n", 38);
+#endif
   RegisterPathProvider();
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX: pre-InitializeICU\n", 23);
+#endif
 // On Android, InitializeICU() is called from content_jni_onload.cc
 // so that it is available before Content::main() is called.
 // https://crbug.com/1418738
@@ -972,8 +1017,14 @@ int ContentMainRunnerImpl::Initialize(ContentMainParams params) {
     return TerminateForFatalInitializationError();
 #endif  // BUILDFLAG(IS_ANDROID) && (ICU_UTIL_DATA_IMPL == ICU_UTIL_DATA_FILE)
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX: pre-LoadV8Snapshot\n", 24);
+#endif
   LoadV8SnapshotIfNeeded(command_line, process_type);
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:I:9 TrialToken\n", 19);
+#endif
   blink::TrialTokenValidator::SetOriginTrialPolicyGetter(
       base::BindRepeating([]() -> blink::OriginTrialPolicy* {
         if (auto* client = GetContentClient())
@@ -987,6 +1038,9 @@ int ContentMainRunnerImpl::Initialize(ContentMainParams params) {
 #else
   bool should_enable_stack_dump = true;
 #endif
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:I:10 StackDump\n", 19);
+#endif
   // Print stack traces to stderr when crashes occur. This opens up security
   // holes so it should never be enabled for official builds. This needs to
   // happen before crash reporting is initialized (which for chrome happens in
@@ -997,11 +1051,20 @@ int ContentMainRunnerImpl::Initialize(ContentMainParams params) {
     base::debug::EnableInProcessStackDumping();
   }
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:I:11 VerifyDbg\n", 19);
+#endif
   base::debug::VerifyDebugger();
 #endif  // !defined(OFFICIAL_BUILD)
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:I:12 PreSandbox\n", 20);
+#endif
   delegate_->PreSandboxStartup();
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:I:13 SandboxInit\n", 21);
+#endif
 #if BUILDFLAG(ENABLE_THREAD_ISOLATION)
   // instantiate the ThreadIsolatedAllocator before we spawn threads
   if (process_type == switches::kRendererProcess ||
@@ -1035,8 +1098,14 @@ int ContentMainRunnerImpl::Initialize(ContentMainParams params) {
   }
 #endif
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:I:14 SboxDone\n", 18);
+#endif
   delegate_->SandboxInitialized(process_type);
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:I:15 InitDone\n", 18);
+#endif
 #if BUILDFLAG(USE_ZYGOTE)
   if (process_type.empty()) {
     // The sandbox host needs to be initialized before forking a thread to
@@ -1136,8 +1205,14 @@ int NO_STACK_PROTECTOR ContentMainRunnerImpl::Run() {
   // RunBrowser/RunOtherNamedProcessTypeMain below.
   content_main_params_.reset();
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:R:1 RegFactory\n", 19);
+#endif
   RegisterMainThreadFactories();
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:R:2 RunBrowser\n", 19);
+#endif
   if (process_type.empty())
     return RunBrowser(std::move(main_params), start_minimal_browser);
 
@@ -1158,6 +1233,9 @@ int ContentMainRunnerImpl::RunBrowser(MainFunctionParams main_params,
   }
 
   if (!mojo_ipc_support_) {
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:B:1 FeatureList\n", 20);
+#endif
     const ContentMainDelegate::InvokedInBrowserProcess invoked_in_browser{
         .is_running_test = !main_params.ui_task.is_null()};
     if (delegate_->ShouldCreateFeatureList(invoked_in_browser)) {
@@ -1169,15 +1247,24 @@ int ContentMainRunnerImpl::RunBrowser(MainFunctionParams main_params,
       std::ignore = leaked_field_trial_list;
     }
 
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:B:2 MojoInit\n", 17);
+#endif
     if (delegate_->ShouldInitializeMojo(invoked_in_browser)) {
       InitializeMojoCore();
     }
 
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:B:3 ThreadPool\n", 19);
+#endif
     // Create and start the ThreadPool early to allow the rest of the startup
     // code to use the thread_pool.h API.
     const bool has_thread_pool =
         GetContentClient()->browser()->CreateThreadPool("Browser");
 
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:B:4 PreBrowser\n", 19);
+#endif
     absl::optional<int> pre_browser_main_exit_code =
         delegate_->PreBrowserMain();
     if (pre_browser_main_exit_code.has_value())
@@ -1192,23 +1279,35 @@ int ContentMainRunnerImpl::RunBrowser(MainFunctionParams main_params,
     }
 #endif
 
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:B:5 TaskExec\n", 17);
+#endif
     // Register the TaskExecutor for posting task to the BrowserThreads. It is
     // incorrect to post to a BrowserThread before this point. This instantiates
     // and binds the MessageLoopForUI on the main thread (but it's only labeled
     // as BrowserThread::UI in BrowserMainLoop::CreateMainMessageLoop).
     BrowserTaskExecutor::Create();
 
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:B:6 Variations\n", 19);
+#endif
     auto* provider = delegate_->CreateVariationsIdsProvider();
     if (!provider) {
       variations::VariationsIdsProvider::Create(
           variations::VariationsIdsProvider::Mode::kUseSignedInState);
     }
 
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:B:7 PostEarly\n", 18);
+#endif
     absl::optional<int> post_early_initialization_exit_code =
         delegate_->PostEarlyInitialization(invoked_in_browser);
     if (post_early_initialization_exit_code.has_value())
       return post_early_initialization_exit_code.value();
 
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:B:8 HangWatch\n", 18);
+#endif
     // The hang watcher needs to be started once the feature list is available
     // but before the IO thread is started.
     if (base::HangWatcher::IsEnabled()) {
@@ -1225,23 +1324,38 @@ int ContentMainRunnerImpl::RunBrowser(MainFunctionParams main_params,
       base::HangWatcher::GetInstance()->Start();
     }
 
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:B:9 StartPool\n", 18);
+#endif
     if (has_thread_pool) {
       // The FeatureList needs to create before starting the ThreadPool.
       StartBrowserThreadPool();
     }
 
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:B:10 PostFeat\n", 18);
+#endif
     BrowserTaskExecutor::PostFeatureListSetup();
 
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:B:11 Tracing\n", 17);
+#endif
     tracing::PerfettoTracedProcess::Get()
         ->SetAllowSystemTracingConsumerCallback(
             base::BindRepeating(&ShouldAllowSystemTracingConsumer));
     tracing::InitTracingPostThreadPoolStartAndFeatureList(
         /* enable_consumer */ true);
 
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:B:12 PowerMon\n", 18);
+#endif
     // PowerMonitor is needed in reduced mode. BrowserMainLoop will safely skip
     // initializing it again if it has already been initialized.
     base::PowerMonitor::Initialize(MakePowerMonitorDeviceSource());
 
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:B:13 VisTrk\n", 17);
+#endif
     // Ensure the visibility tracker is created on the main thread.
     ProcessVisibilityTracker::GetInstance();
 
@@ -1261,12 +1375,21 @@ int ContentMainRunnerImpl::RunBrowser(MainFunctionParams main_params,
           base::FilePath(), LocalSetDeclaration());
     }
 
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:B:14 DiscMem\n", 17);
+#endif
     discardable_shared_memory_manager_ =
         std::make_unique<discardable_memory::DiscardableSharedMemoryManager>();
 
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:B:15 MojoIPC\n", 17);
+#endif
     mojo_ipc_support_ =
         std::make_unique<MojoIpcSupport>(BrowserTaskExecutor::CreateIOThread());
 
+#if BUILDFLAG(IS_QNX)
+    write(2, "QNX:B:16 BindCtrl\n", 18);
+#endif
     GetContentClient()->browser()->BindBrowserControlInterface(
         MaybeAcceptMojoInvitation());
 
@@ -1282,11 +1405,17 @@ int ContentMainRunnerImpl::RunBrowser(MainFunctionParams main_params,
 #endif
   }
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:B:17 PA-Reconfig\n", 21);
+#endif
   // No specified process type means this is the Browser process.
   base::allocator::PartitionAllocSupport::Get()
       ->ReconfigureAfterFeatureListInit("");
   base::allocator::PartitionAllocSupport::Get()->ReconfigureAfterTaskRunnerInit(
       "");
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:B:18 PADone\n", 16);
+#endif
 
   if (start_minimal_browser) {
     DVLOG(0) << "Chrome is running in minimal browser mode.";
@@ -1294,7 +1423,13 @@ int ContentMainRunnerImpl::RunBrowser(MainFunctionParams main_params,
   }
 
   is_browser_main_loop_started_ = true;
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:B:19 StartupData\n", 21);
+#endif
   main_params.startup_data = mojo_ipc_support_->CreateBrowserStartupData();
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:B:20 RunBrowserMain\n", 23);
+#endif
   return RunBrowserProcessMain(std::move(main_params), delegate_);
 }
 

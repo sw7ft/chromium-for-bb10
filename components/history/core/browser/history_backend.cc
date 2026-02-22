@@ -2327,8 +2327,8 @@ std::vector<ClusterVisit> HistoryBackend::ToClusterVisits(
   if (include_duplicates && !seen_duplicate_ids.empty()) {
     // Prune out top-level visits that are duplicates elsewhere.
     base::EraseIf(cluster_visits, [&](const auto& cluster_visit) {
-      return seen_duplicate_ids.contains(
-          cluster_visit.annotated_visit.visit_row.visit_id);
+      return seen_duplicate_ids.count(
+          cluster_visit.annotated_visit.visit_row.visit_id) > 0;
     });
   }
   return cluster_visits;

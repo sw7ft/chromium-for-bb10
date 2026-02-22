@@ -10,6 +10,7 @@
 #include <type_traits>
 
 #include "base/containers/contains.h"
+#include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 #include "url/origin.h"
@@ -514,6 +515,7 @@ TYPED_TEST_P(AbstractOriginTest, CustomSchemes_TupleOrigins) {
   }
 }
 
+#if !BUILDFLAG(IS_QNX)
 REGISTER_TYPED_TEST_SUITE_P(AbstractOriginTest,
                             NonStandardSchemeWithAndroidWebViewHack,
                             OpaqueOriginsFromValidUrls,
@@ -521,6 +523,7 @@ REGISTER_TYPED_TEST_SUITE_P(AbstractOriginTest,
                             TupleOrigins,
                             CustomSchemes_OpaqueOrigins,
                             CustomSchemes_TupleOrigins);
+#endif
 
 }  // namespace url
 

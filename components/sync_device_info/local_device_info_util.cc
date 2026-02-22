@@ -119,6 +119,8 @@ DeviceInfo::OsType GetLocalDeviceOSType() {
   return DeviceInfo::OsType::kWindows;
 #elif BUILDFLAG(IS_FUCHSIA)
   return DeviceInfo::OsType::kFuchsia;
+#elif BUILDFLAG(IS_QNX)
+  return DeviceInfo::OsType::kLinux;
 #else
 #error Please handle your new device OS here.
 #endif
@@ -134,6 +136,8 @@ DeviceInfo::FormFactor GetLocalDeviceFormFactor() {
              : DeviceInfo::FormFactor::kPhone;
 #elif BUILDFLAG(IS_FUCHSIA)
   return DeviceInfo::FormFactor::kUnknown;
+#elif BUILDFLAG(IS_QNX)
+  return DeviceInfo::FormFactor::kDesktop;
 #else
 #error Please handle your new device OS here.
 #endif

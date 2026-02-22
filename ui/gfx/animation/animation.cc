@@ -113,7 +113,7 @@ bool Animation::ShouldRenderRichAnimation() {
 }
 
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_IOS) || \
-    BUILDFLAG(IS_FUCHSIA)
+    BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_QNX)
 // static
 bool Animation::ShouldRenderRichAnimationImpl() {
   return true;
@@ -138,7 +138,7 @@ void Animation::UpdatePrefersReducedMotion() {
 }
 #endif  // !BUILDFLAG(IS_ANDROID)
 #endif  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS) ||
-        // BUILDFLAG(IS_IOS) || BUILDFLAG(IS_FUCHSIA)
+        // BUILDFLAG(IS_IOS) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_QNX)
 
 // static
 bool Animation::PrefersReducedMotion() {

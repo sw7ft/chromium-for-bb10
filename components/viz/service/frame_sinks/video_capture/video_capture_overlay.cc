@@ -84,12 +84,18 @@ namespace {
 // given |span|, snapping all coordinates to even numbers.
 gfx::Rect ToAbsoluteBoundsForI420(const gfx::RectF& relative,
                                   const gfx::Rect& span) {
-  const float absolute_left = std::fma(relative.x(), span.width(), span.x());
-  const float absolute_top = std::fma(relative.y(), span.height(), span.y());
-  const float absolute_right =
-      std::fma(relative.right(), span.width(), span.x());
-  const float absolute_bottom =
-      std::fma(relative.bottom(), span.height(), span.y());
+  const float absolute_left = static_cast<float>(std::fma(
+      static_cast<double>(relative.x()), static_cast<double>(span.width()),
+      static_cast<double>(span.x())));
+  const float absolute_top = static_cast<float>(std::fma(
+      static_cast<double>(relative.y()), static_cast<double>(span.height()),
+      static_cast<double>(span.y())));
+  const float absolute_right = static_cast<float>(std::fma(
+      static_cast<double>(relative.right()), static_cast<double>(span.width()),
+      static_cast<double>(span.x())));
+  const float absolute_bottom = static_cast<float>(std::fma(
+      static_cast<double>(relative.bottom()),
+      static_cast<double>(span.height()), static_cast<double>(span.y())));
 
   // Compute the largest I420-friendly Rect that is fully-enclosed by the
   // absolute rect. Use saturated_cast<> to restrict all extreme results [and

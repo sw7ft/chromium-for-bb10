@@ -81,7 +81,8 @@ int GetFpsBucket(double raw_fps) {
   // Find the first bucket that is strictly > than |rounded_fps|.
   const int* upper_bound =
       std::upper_bound(std::begin(kFrameRateBuckets),
-                       std::end(kFrameRateBuckets), std::round(rounded_fps));
+                       std::end(kFrameRateBuckets),
+                       std::round(static_cast<double>(rounded_fps)));
 
   // If no bucket is larger than |rounded_fps|, just used the last bucket;
   if (upper_bound == std::end(kFrameRateBuckets))

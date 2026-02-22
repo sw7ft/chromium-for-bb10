@@ -747,6 +747,8 @@ unsigned short FlagsState::GetCurrentPlatform() {
   return kOsAndroid;
 #elif BUILDFLAG(IS_FUCHSIA)
   return kOsFuchsia;
+#elif BUILDFLAG(IS_QNX)
+  return kOsLinux;
 #else
 #error Unknown platform
 #endif

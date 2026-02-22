@@ -11,6 +11,7 @@
 #include <type_traits>
 
 #include "base/callback_list.h"
+#include "base/template_util.h"
 #include "base/containers/contains.h"
 #include "base/functional/callback_helpers.h"
 #include "base/functional/invoke.h"
@@ -489,7 +490,7 @@ struct ArgsExtractor<R(Args...)> {
 };
 
 template <typename F>
-using ReturnTypeOf = MaybeBindTypeHelper<F>::ReturnType;
+using ReturnTypeOf = typename MaybeBindTypeHelper<F>::ReturnType;
 
 template <size_t N, typename F>
 using NthArgumentOf = std::tuple_element_t<
@@ -601,13 +602,15 @@ struct MatcherTypeHelper<char16_t[N]> {
 // (e.g. `const char*`) as the corresponding `Matcher` should match a
 // `std::string` or `std::u16string`.
 template <typename T>
-using MatcherTypeFor = MatcherTypeHelper<std::remove_cvref_t<T>>::ActualType;
+using MatcherTypeFor =
+    typename MatcherTypeHelper<base::remove_cvref_t<T>>::ActualType;
 
 // Determines if `T` is a valid type to be used in a matcher. This precludes
 // string-like types (const char*, constexpr char16_t[], etc.) in favor of
 // `std::string` and `std::u16string`.
 template <typename T>
-constexpr bool IsValidMatcherType = std::is_same_v<T, MatcherTypeFor<T>>;
+constexpr bool IsValidMatcherType =
+    std::is_same_v<T, MatcherTypeFor<T>>;
 template <typename T>
 using RequireValidMatcherType = std::enable_if_t<IsValidMatcherType<T>>;
 

@@ -703,21 +703,21 @@ void EdidParser::ParseEdid(const std::vector<uint8_t>& edid) {
             break;
           const uint8_t desired_content_max_luminance = edid[data_offset + 4];
           hdr_static_metadata_->max =
-              50.0 * pow(2, desired_content_max_luminance / 32.0);
+              50.0 * pow(2.0, desired_content_max_luminance / 32.0);
 
           if (length_of_data_block <= 4)
             break;
           const uint8_t desired_content_max_frame_average_luminance =
               edid[data_offset + 5];
           hdr_static_metadata_->max_avg =
-              50.0 * pow(2, desired_content_max_frame_average_luminance / 32.0);
+              50.0 * pow(2.0, desired_content_max_frame_average_luminance / 32.0);
 
           if (length_of_data_block <= 5)
             break;
           const uint8_t desired_content_min_luminance = edid[data_offset + 6];
           hdr_static_metadata_->min =
               hdr_static_metadata_->max *
-              pow(desired_content_min_luminance / 255.0, 2) / 100.0;
+              pow(desired_content_min_luminance / 255.0, 2.0) / 100.0;
           break;
         }
         default:
