@@ -243,7 +243,7 @@ void DetectFrameworkVersions(Document& document,
     return value;
   };
 
-  if (result.detected_versions.contains(JavaScriptFramework::kNext)) {
+  if (result.detected_versions.count(JavaScriptFramework::kNext) > 0) {
     static constexpr char kNext[] = "next";
     static constexpr char kVersion[] = "version";
     int64_t version = kNoFrameworkVersionDetected;
@@ -264,7 +264,7 @@ void DetectFrameworkVersions(Document& document,
             .FromMaybe(v8::String::Empty(isolate)));
   }
 
-  if (result.detected_versions.contains(JavaScriptFramework::kVue)) {
+  if (result.detected_versions.count(JavaScriptFramework::kVue) > 0) {
     static constexpr char kVue2[] = "Vue";
     static constexpr char kVersion[] = "version";
     if (global->HasRealNamedProperty(context, V8AtomicString(isolate, kVue2))

@@ -385,7 +385,9 @@ unsigned PeriodicWaveImpl::NumberOfPartialsForRange(
   float cents_to_cull = range_index * cents_per_range_;
 
   // A value from 0 -> 1 representing what fraction of the partials to keep.
-  float culling_scale = pow(2, -cents_to_cull / 1200);
+  float culling_scale =
+      static_cast<float>(std::pow(2.0, static_cast<double>(-cents_to_cull) /
+                                           1200.0));
 
   // The very top range will have all the partials culled.
   unsigned number_of_partials = culling_scale * MaxNumberOfPartials();

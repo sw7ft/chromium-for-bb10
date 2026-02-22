@@ -369,9 +369,11 @@ void ShapeResult::RunInfo::CharacterIndexForXPosition(
     int graphemes = NumGraphemes(glyph_sequence_start, glyph_sequence_end);
     if (graphemes > 1) {
       float unit_size = result->advance / graphemes;
-      unsigned step = floor((target_x - result->origin_x) / unit_size);
+      unsigned step = static_cast<unsigned>(std::floor(
+          static_cast<double>((target_x - result->origin_x) / unit_size)));
       unsigned glyph_length = glyph_sequence_end - glyph_sequence_start;
-      unsigned final_size = floor(glyph_length / graphemes);
+      unsigned final_size = static_cast<unsigned>(std::floor(
+          static_cast<double>(glyph_length) / static_cast<double>(graphemes)));
       result->origin_x += unit_size * step;
       if (IsLtr()) {
         glyph_sequence_start += step;

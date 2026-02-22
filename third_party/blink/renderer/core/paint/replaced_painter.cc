@@ -289,7 +289,8 @@ void ReplacedPainter::MeasureOverflowMetrics() const {
   const float device_pixel_ratio =
       layout_replaced_.GetDocument().DevicePixelRatio();
   const int overflow_outside_content_rect =
-      (overflow_area - content_area).ToInt() / pow(device_pixel_ratio, 2);
+      (overflow_area - content_area).ToInt() /
+      std::pow(static_cast<double>(device_pixel_ratio), 2.0);
   UMA_HISTOGRAM_COUNTS_100000(
       "Blink.Overflow.ReplacedElementAreaOutsideContentRect",
       overflow_outside_content_rect);

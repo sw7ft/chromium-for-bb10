@@ -29,6 +29,9 @@
 
 #include "third_party/blink/renderer/core/dom/document_init.h"
 
+#if defined(__QNX__)
+#include <unistd.h>
+#endif
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/mojom/security_context/insecure_request_policy.mojom-blink.h"
@@ -298,9 +301,20 @@ Document* DocumentInit::CreateDocument() const {
   DCHECK(execution_context_);
   DCHECK(agent_);
 #endif
+#if defined(__QNX__)
+  { const char m[] = "QNX:CD:1 preSwitch\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   switch (type_) {
-    case Type::kHTML:
-      return MakeGarbageCollected<HTMLDocument>(*this);
+    case Type::kHTML: {
+#if defined(__QNX__)
+      { const char m[] = "QNX:CD:2 preHTML\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
+      auto* doc = MakeGarbageCollected<HTMLDocument>(*this);
+#if defined(__QNX__)
+      { const char m[] = "QNX:CD:3 postHTML\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
+      return doc;
+    }
     case Type::kXHTML:
       return XMLDocument::CreateXHTML(*this);
     case Type::kImage:

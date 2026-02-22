@@ -19,6 +19,12 @@
 #include <string.h>
 #include <sys/types.h>
 
+// QNX lacks dirfd(). Provide a stub returning -1.
+#ifdef __QNX__
+#include <fcntl.h>
+static int dirfd(DIR*) { return -1; }
+#endif
+
 #include "base/logging.h"
 
 namespace crashpad {

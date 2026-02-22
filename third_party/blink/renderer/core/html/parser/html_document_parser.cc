@@ -25,6 +25,10 @@
 
 #include "third_party/blink/renderer/core/html/parser/html_document_parser.h"
 
+#if defined(__QNX__)
+#include <unistd.h>
+#endif
+
 #include <memory>
 #include <utility>
 
@@ -894,6 +898,14 @@ void HTMLDocumentParser::insert(const String& source) {
 }
 
 void HTMLDocumentParser::Append(const String& input_source) {
+#if defined(__QNX__)
+  {
+    char _b[64];
+    int _n = snprintf(_b, sizeof(_b), "QNX:HDP:Append len=%u\n",
+                      input_source.length());
+    ::write(2, _b, _n);
+  }
+#endif
   TRACE_EVENT2("blink", "HTMLDocumentParser::append", "size",
                input_source.length(), "parser", (void*)this);
 
@@ -949,25 +961,44 @@ void HTMLDocumentParser::Append(const String& input_source) {
     metrics_reporter_->AddInput(input_source.length());
 
   if (task_runner_state_->InPumpSession()) {
-    // We've gotten data off the network in a nested write. We don't want to
-    // consume any more of the input stream now.  Do not worry.  We'll consume
-    // this data in a less-nested write().
+#if defined(__QNX__)
+    ::write(2, "QNX:HDP:inPump bail\n", 20);
+#endif
     return;
   }
 
-  // If we are preloading, FinishAppend() will be called later in
-  // CommitPreloadedData().
-  if (IsPreloading())
+  if (IsPreloading()) {
+#if defined(__QNX__)
+    ::write(2, "QNX:HDP:preload bail\n", 21);
+#endif
     return;
+  }
 
+#if defined(__QNX__)
+  ::write(2, "QNX:HDP:FinishAppend\n", 21);
+#endif
   FinishAppend();
+#if defined(__QNX__)
+  ::write(2, "QNX:HDP:FinishAppend done\n", 26);
+#endif
 }
 
 void HTMLDocumentParser::FinishAppend() {
+#if defined(__QNX__)
+  {
+    char _b[64];
+    int _n = snprintf(_b, sizeof(_b), "QNX:FA pump=%d\n",
+                      ShouldPumpTokenizerNowForFinishAppend() ? 1 : 0);
+    ::write(2, _b, _n);
+  }
+#endif
   if (ShouldPumpTokenizerNowForFinishAppend())
     PumpTokenizerIfPossible();
   else
     SchedulePumpTokenizer(/*from_finish_append=*/true);
+#if defined(__QNX__)
+  ::write(2, "QNX:FA done\n", 12);
+#endif
 }
 
 void HTMLDocumentParser::CommitPreloadedData() {
@@ -975,6 +1006,15 @@ void HTMLDocumentParser::CommitPreloadedData() {
     return;
 
   SetIsPreloading(false);
+#if defined(__QNX__)
+  {
+    char _b[64];
+    int _n = snprintf(_b, sizeof(_b), "QNX:CPD sfb=%d stop=%d\n",
+                      task_runner_state_->SeenFirstByte() ? 1 : 0,
+                      IsStopped() ? 1 : 0);
+    ::write(2, _b, _n);
+  }
+#endif
   if (task_runner_state_->SeenFirstByte() && !IsStopped())
     FinishAppend();
 }
@@ -1270,6 +1310,9 @@ void HTMLDocumentParser::ParseDocumentFragment(
 }
 
 void HTMLDocumentParser::AppendBytes(const char* data, size_t length) {
+#if defined(__QNX__)
+  { const char m[] = "QNX:PARSER:AppendBytes\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   TRACE_EVENT2("blink", "HTMLDocumentParser::appendBytes", "size",
                (unsigned)length, "parser", (void*)this);
 

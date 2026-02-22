@@ -393,11 +393,10 @@ void TextResourceDecoder::AutoDetectEncodingIfAllowed(const char* data,
 }
 
 String TextResourceDecoder::Decode(const char* data, size_t data_len) {
+#if defined(__QNX__)
+  ::write(2, "QNX:TRD:1 entry\n", 17);
+#endif
   wtf_size_t len = base::checked_cast<wtf_size_t>(data_len);
-  // If we have previously buffered data, then add the new data to the buffer
-  // and use the buffered content. Any case that depends on buffering (== return
-  // the empty string) should call AddToBufferIfEmpty() if it needs more data to
-  // make sure that the first data segment is buffered.
   if (!buffer_.empty()) {
     AddToBuffer(data, len);
     data = buffer_.data();
@@ -406,6 +405,9 @@ String TextResourceDecoder::Decode(const char* data, size_t data_len) {
 
   wtf_size_t length_of_bom = 0;
   if (!checked_for_bom_) {
+#if defined(__QNX__)
+    ::write(2, "QNX:TRD:2 BOM\n", 15);
+#endif
     length_of_bom = CheckForBOM(data, len);
 
     // BOM check can fail when the available data is not enough.
@@ -437,17 +439,25 @@ String TextResourceDecoder::Decode(const char* data, size_t data_len) {
   const char* data_for_decode = data + length_of_bom;
   wtf_size_t length_for_decode = len - length_of_bom;
 
+#if defined(__QNX__)
+  ::write(2, "QNX:TRD:3 preMeta\n", 18);
+#endif
   if (options_.GetContentType() == TextResourceDecoderOptions::kHTMLContent &&
       !checked_for_meta_charset_)
     CheckForMetaCharset(data_for_decode, length_for_decode);
 
+#if !defined(__QNX__)
   AutoDetectEncodingIfAllowed(data, len);
+#endif
 
   DCHECK(encoding_.IsValid());
 
   if (!codec_)
     codec_ = NewTextCodec(encoding_);
 
+#if defined(__QNX__)
+  ::write(2, "QNX:TRD:5 preDecode\n", 20);
+#endif
   String result = codec_->Decode(
       data_for_decode, length_for_decode, WTF::FlushBehavior::kDoNotFlush,
       options_.GetContentType() == TextResourceDecoderOptions::kXMLContent &&

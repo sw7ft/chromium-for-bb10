@@ -53,7 +53,7 @@ bool UnloadDeprecationAllowedForHost(const std::string& host,
   if (hosts.empty()) {
     return true;
   }
-  return hosts.contains(host);
+  return hosts.count(host) > 0;
 }
 
 bool UnloadDeprecationAllowedForOrigin(const url::Origin& origin) {

@@ -312,7 +312,9 @@ StatusCode ErrnoToStatusCode(int error_number) {
 #ifdef EBADFD
     case EBADFD:  // File descriptor in bad state
 #endif
+#if !defined(__QNX__) || EBUSY != EALREADY
     case EBUSY:    // Device or resource busy
+#endif
     case ECHILD:   // No child processes
     case EISCONN:  // Socket is connected
 #ifdef EISNAM

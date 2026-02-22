@@ -118,7 +118,8 @@ PFFFT_Setup* FFTFrame::FFTSetupForSize(wtf_size_t fft_size) {
 
 FFTFrame::FFTFrame(unsigned fft_size)
     : fft_size_(fft_size),
-      log2fft_size_(static_cast<unsigned>(log2(fft_size))),
+      log2fft_size_(static_cast<unsigned>(
+          std::log2(static_cast<double>(fft_size)))),
       real_data_(fft_size / 2),
       imag_data_(fft_size / 2),
       complex_data_(fft_size),

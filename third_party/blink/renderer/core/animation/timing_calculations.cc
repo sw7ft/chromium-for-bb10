@@ -11,7 +11,7 @@ namespace {
 inline bool EndsOnIterationBoundary(double iteration_count,
                                     double iteration_start) {
   DCHECK(std::isfinite(iteration_count));
-  return !fmod(iteration_count + iteration_start, 1);
+  return !std::fmod(static_cast<double>(iteration_count + iteration_start), 1.0);
 }
 
 void RecordBoundaryMisalignment(AnimationTimeDelta misalignment) {
@@ -23,7 +23,8 @@ void RecordBoundaryMisalignment(AnimationTimeDelta misalignment) {
   // It is not particularly meaningful to report the misalignment as a time
   // since there is no dependency on having a high resolution timer. Instead,
   // we convert back to 16ths of a pixel by scaling accordingly.
-  int sample = std::round<int>(misalignment.InMicrosecondsF());
+  int sample = static_cast<int>(
+      std::round(static_cast<double>(misalignment.InMicrosecondsF())));
   UMA_HISTOGRAM_EXACT_LINEAR("Blink.Animation.SDA.BoundaryMisalignment", sample,
                              64);
 }
@@ -286,11 +287,11 @@ absl::optional<double> TimingCalculations::CalculateCurrentIteration(
   // - 1.
   if (simple_iteration_progress.value() == 1.0) {
     // Safeguard for zero duration animation (crbug.com/954558).
-    return fmax(0, floor(overall_progress.value()) - 1);
+    return std::fmax(0.0, std::floor(overall_progress.value()) - 1.0);
   }
 
   // 4. Otherwise, return floor(overall progress).
-  return floor(overall_progress.value());
+  return std::floor(overall_progress.value());
 }
 
 // https://w3.org/TR/web-animations-1/#calculating-the-directed-progress
@@ -302,7 +303,11 @@ bool TimingCalculations::IsCurrentDirectionForwards(
                          : (std::isinf(current_iteration.value())
                                 ? true
                                 : IsWithinAnimationTimeEpsilon(
-                                      fmod(current_iteration.value(), 2), 0));
+                                      std::fmod(
+                                          static_cast<double>(
+                                              current_iteration.value()),
+                                          2.0),
+                                      0));
 
   switch (direction) {
     case Timing::PlaybackDirection::NORMAL:

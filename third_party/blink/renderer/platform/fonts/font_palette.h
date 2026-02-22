@@ -62,6 +62,8 @@ class PLATFORM_EXPORT FontPalette : public RefCounted<FontPalette> {
   struct NonNormalizedPercentages {
     double start;
     double end;
+    NonNormalizedPercentages() = default;
+    NonNormalizedPercentages(double s, double e) : start(s), end(e) {}
     bool operator==(const NonNormalizedPercentages& other) const {
       return start == other.start && end == other.end;
       ;

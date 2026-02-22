@@ -157,10 +157,12 @@ void DarkModeImageClassifier::GetBlockSamples(
 
   sampled_pixels->clear();
 
-  int cx = static_cast<int>(
-      ceil(static_cast<float>(block.width()) / sqrt(required_samples_count)));
-  int cy = static_cast<int>(
-      ceil(static_cast<float>(block.height()) / sqrt(required_samples_count)));
+  int cx = static_cast<int>(std::ceil(
+      static_cast<double>(block.width()) /
+      std::sqrt(static_cast<double>(required_samples_count))));
+  int cy = static_cast<int>(std::ceil(
+      static_cast<double>(block.height()) /
+      std::sqrt(static_cast<double>(required_samples_count))));
 
   for (int y = block.y(); y < block.bottom(); y += cy) {
     for (int x = block.x(); x < block.right(); x += cx) {

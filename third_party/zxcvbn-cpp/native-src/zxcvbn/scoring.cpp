@@ -11,6 +11,19 @@
 
 #include "base/no_destructor.h"
 
+// QNX's libstdc++ 9.3 is missing std::stoul.
+#ifdef __QNX__
+#include <cstdlib>
+namespace std {
+  inline unsigned long stoul(const std::string& s, std::size_t* pos = nullptr, int base = 10) {
+    char* end = nullptr;
+    unsigned long result = ::strtoul(s.c_str(), &end, base);
+    if (pos) *pos = static_cast<std::size_t>(end - s.c_str());
+    return result;
+  }
+}
+#endif
+
 namespace std {
 
 template<class T, class U>
@@ -164,7 +177,7 @@ ScoringResult most_guessable_match_sequence(const std::string & password,
     // calculate the minimization func
     auto g = factorial<guesses_t>(l) * pi;
     if (!exclude_additive) {
-      g += std::pow(MIN_GUESSES_BEFORE_GROWING_SEQUENCE, l - 1);
+      g += std::pow(MIN_GUESSES_BEFORE_GROWING_SEQUENCE, (double)(l - 1));
     }
     // update state if new best.
     // first see if any competing sequences covering this prefix, with l or fewer matches,
@@ -322,7 +335,7 @@ guesses_t unknown_guesses(const Match & match) {
 }
 
 guesses_t bruteforce_guesses(const Match & match) {
-  auto guesses = std::pow(BRUTEFORCE_CARDINALITY, token_len(match));
+  auto guesses = std::pow(BRUTEFORCE_CARDINALITY, (double)token_len(match));
   // small detail: make bruteforce matches at minimum one guess bigger than smallest allowed
   // submatch guesses, such that non-bruteforce submatches over the same [i..j] take precedence.
   auto min_guesses = (token_len(match) == 1)
@@ -388,7 +401,7 @@ guesses_t regex_guesses(const Match & match) {
       default: assert(false); return 0;
       }
     }();
-    return std::pow(base, token_len(match));
+    return std::pow((double)base, (double)token_len(match));
   }
   default:
     return 0;
@@ -434,7 +447,7 @@ guesses_t spatial_guesses(const Match & match) {
   for (decltype(L) i = 2; i <= L; ++i) {
     auto possible_turns = std::min(t, i - 1);
     for (decltype(possible_turns) j = 1; j <= possible_turns; ++j) {
-      guesses += nCk(i - 1, j - 1) * s * std::pow(d, j);
+      guesses += nCk(i - 1, j - 1) * s * std::pow(d, (double)j);
     }
   }
   // add extra guesses for shifted keys. (% instead of 5, A instead of a.)

@@ -25,6 +25,9 @@
 
 #include "third_party/blink/renderer/platform/wtf/text/string_statics.h"
 
+#if BUILDFLAG(IS_QNX)
+#include <unistd.h>
+#endif
 #include "third_party/blink/renderer/platform/wtf/dynamic_annotations.h"
 #include "third_party/blink/renderer/platform/wtf/static_constructors.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
@@ -123,16 +126,38 @@ bool NewlineThenWhitespaceStringsTable::IsNewlineThenWhitespaces(
 
 void StringStatics::Init() {
   DCHECK(IsMainThread());
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:SS:1 entry\n", 15);
+#endif
 
   StringImpl::InitStatics();
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:SS:2 empty\n", 15);
+#endif
   new (NotNullTag::kNotNull, (void*)&g_empty_string) String(StringImpl::empty_);
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:SS:2a 16bit\n", 16);
+#endif
   new (NotNullTag::kNotNull, (void*)&g_empty_string16_bit)
       String(StringImpl::empty16_bit_);
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:SS:2b pre*\n", 15);
+#endif
 
-  // FIXME: These should be allocated at compile time.
   new (NotNullTag::kNotNull, (void*)&g_star_atom) AtomicString("*");
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:SS:3 star\n", 14);
+#endif
+
+  new (NotNullTag::kNotNull, (void*)&g_star_atom) AtomicString("*");
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:SS:4 xml\n", 13);
+#endif
   new (NotNullTag::kNotNull, (void*)&g_xml_atom)
       AtomicString(AddStaticASCIILiteral("xml"));
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:SS:5 xmlns\n", 15);
+#endif
   new (NotNullTag::kNotNull, (void*)&g_xmlns_atom)
       AtomicString(AddStaticASCIILiteral("xmlns"));
   new (NotNullTag::kNotNull, (void*)&g_xlink_atom)
@@ -142,8 +167,14 @@ void StringStatics::Init() {
       AtomicString(AddStaticASCIILiteral("http"));
   new (NotNullTag::kNotNull, (void*)&g_https_atom)
       AtomicString(AddStaticASCIILiteral("https"));
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:SS:6 table\n", 15);
+#endif
 
   NewlineThenWhitespaceStringsTable::Init();
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:SS:7 done\n", 14);
+#endif
 }
 
 }  // namespace WTF

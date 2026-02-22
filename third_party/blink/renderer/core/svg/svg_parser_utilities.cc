@@ -136,7 +136,7 @@ static bool GenericParseNumber(const CharType*& cursor,
     // would yield a representable float), then rely on the pow()+rounding to
     // produce a reasonable result (likely zero.)
     if (exponent)
-      number *= static_cast<FloatType>(std::pow(10.0, exponent));
+      number *= static_cast<FloatType>(std::pow(10.0, static_cast<double>(exponent)));
   }
 
   // Don't return Infinity() or NaN().

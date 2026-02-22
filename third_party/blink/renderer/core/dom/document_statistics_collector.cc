@@ -142,11 +142,12 @@ void CollectFeatures(Element& root,
       if (!under_list_item && IsGoodForScoring(features, element)) {
         unsigned length = TextContentLengthSaturated(element);
         if (length >= kParagraphLengthThreshold) {
-          features.moz_score += sqrt(length - kParagraphLengthThreshold);
+          features.moz_score +=
+              std::sqrt(static_cast<double>(length - kParagraphLengthThreshold));
           features.moz_score =
               std::min(features.moz_score, kMozScoreSaturation);
         }
-        features.moz_score_all_sqrt += sqrt(length);
+        features.moz_score_all_sqrt += std::sqrt(static_cast<double>(length));
         features.moz_score_all_sqrt =
             std::min(features.moz_score_all_sqrt, kMozScoreAllSqrtSaturation);
 

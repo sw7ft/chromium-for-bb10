@@ -131,15 +131,20 @@ static void OutsetCornerForMarginOrShadow(gfx::SizeF& corner,
 
   float width_factor = 1;
   if (corner.width() < std::abs(width_outset)) {
-    width_factor = 1 + std::pow(corner.width() / std::abs(width_outset) - 1, 3);
+    width_factor = 1 + static_cast<float>(std::pow(
+                           static_cast<double>(corner.width() /
+                                               std::abs(width_outset) - 1),
+                           3.0));
   }
 
   float height_factor = 1;
   if (corner.height() == corner.width() && width_outset == height_outset) {
     height_factor = width_factor;
   } else if (corner.height() < std::abs(height_outset)) {
-    height_factor =
-        1 + std::pow(corner.height() / std::abs(height_outset) - 1, 3);
+    height_factor = 1 + static_cast<float>(std::pow(
+                            static_cast<double>(corner.height() /
+                                                std::abs(height_outset) - 1),
+                            3.0));
   }
 
   corner.set_width(std::max(corner.width() + width_factor * width_outset, 0.f));

@@ -646,7 +646,9 @@ float MathScriptScaleFactor(StyleResolverState& state) {
       }
     }
   }
-  scaleFactor *= pow(defaultScaleDown, exponent);
+  scaleFactor *=
+      std::pow(static_cast<double>(defaultScaleDown),
+               static_cast<double>(exponent));
   return invertScaleFactor ? 1 / scaleFactor : scaleFactor;
 }
 

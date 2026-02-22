@@ -21,6 +21,19 @@
 
 #include "base/no_destructor.h"
 #include "base/strings/string_util.h"
+
+// QNX's libstdc++ 9.3 is missing std::stoul.
+#ifdef __QNX__
+#include <cstdlib>
+namespace std {
+  inline unsigned long stoul(const std::string& s, std::size_t* pos = nullptr, int base = 10) {
+    char* end = nullptr;
+    unsigned long result = ::strtoul(s.c_str(), &end, base);
+    if (pos) *pos = static_cast<std::size_t>(end - s.c_str());
+    return result;
+  }
+}
+#endif
 #include "third_party/icu/source/common/unicode/unistr.h"
 #include "third_party/icu/source/i18n/unicode/regex.h"
 

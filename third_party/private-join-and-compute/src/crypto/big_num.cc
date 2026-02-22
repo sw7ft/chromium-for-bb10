@@ -91,7 +91,7 @@ StatusOr<uint64_t> BigNum::ToIntValue() const {
 int BigNum::BitLength() const { return BN_num_bits(bn_.get()); }
 
 bool BigNum::IsPrime(double prime_error_probability) const {
-  int rounds = static_cast<int>(ceil(-log(prime_error_probability) / log(4)));
+  int rounds = static_cast<int>(ceil(-log(prime_error_probability) / log(4.0)));
   return (1 == BN_is_prime_ex(bn_.get(), rounds, bn_ctx_, nullptr));
 }
 

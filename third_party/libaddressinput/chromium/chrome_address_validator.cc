@@ -158,7 +158,7 @@ void AddressValidator::RulesLoaded(bool success,
       FROM_HERE,
       base::BindOnce(&AddressValidator::RetryLoadRules,
                      weak_factory_.GetWeakPtr(), region_code),
-      GetBaseRetryPeriod() * pow(2, attempts_number_[region_code]++));
+      GetBaseRetryPeriod() * pow(2.0, (double)attempts_number_[region_code]++));
 }
 
 void AddressValidator::RetryLoadRules(const std::string& region_code) {

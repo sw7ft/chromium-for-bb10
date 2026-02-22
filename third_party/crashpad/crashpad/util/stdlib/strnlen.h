@@ -40,7 +40,13 @@ size_t strnlen(const char* string, size_t max_length);
 
 #if !BUILDFLAG(IS_MAC) || __MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_10_7
 inline size_t strnlen(const char* string, size_t max_length) {
+#ifdef __QNX__
+  // QNX's strnlen may not be in the global namespace when compiled as C++.
+  const char* end = static_cast<const char*>(memchr(string, '\0', max_length));
+  return end ? static_cast<size_t>(end - string) : max_length;
+#else
   return ::strnlen(string, max_length);
+#endif
 }
 #endif
 

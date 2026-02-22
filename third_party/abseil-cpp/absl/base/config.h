@@ -870,6 +870,10 @@ static_assert(ABSL_INTERNAL_INLINE_NAMESPACE_STR[0] != 'h' ||
 #error ABSL_INTERNAL_HAS_CXA_DEMANGLE cannot be directly set
 #elif defined(OS_ANDROID) && (defined(__i386__) || defined(__x86_64__))
 #define ABSL_INTERNAL_HAS_CXA_DEMANGLE 0
+#elif defined(__QNX__)
+// QNX has conflicting declarations of __cxa_atexit between stdlib.h and
+// cxxabi.h (noexcept mismatch), so disable cxa_demangle.
+#define ABSL_INTERNAL_HAS_CXA_DEMANGLE 0
 #elif defined(__GNUC__) && defined(__GNUC_MINOR__) &&            \
     (__GNUC__ >= 4 || (__GNUC__ >= 3 && __GNUC_MINOR__ >= 4)) && \
     !defined(__mips__)

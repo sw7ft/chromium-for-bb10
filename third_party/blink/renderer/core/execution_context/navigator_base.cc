@@ -35,6 +35,8 @@ String GetReducedNavigatorPlatform() {
   return "Linux x86_64";
 #elif BUILDFLAG(IS_IOS)
   return "iPhone";
+#elif BUILDFLAG(IS_QNX)
+  return "Linux armv7l";
 #else
 #error Unsupported platform
 #endif

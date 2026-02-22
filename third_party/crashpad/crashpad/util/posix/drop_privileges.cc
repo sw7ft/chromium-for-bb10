@@ -85,6 +85,10 @@ void DropPrivileges() {
   // necessary to perform any additional checking anyway.
   //
   // TODO(mark): Drop CAP_SETUID and CAP_SETGID if present and non-root?
+#elif defined(__QNX__)
+  // QNX POSIX: use standard setgid/setuid.
+  PCHECK(setgid(gid) == 0) << "setgid";
+  PCHECK(setuid(uid) == 0) << "setuid";
 #else
 #error Port this function to your system.
 #endif

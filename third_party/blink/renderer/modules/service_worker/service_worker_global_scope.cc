@@ -2791,9 +2791,9 @@ void ServiceWorkerGlobalScope::InsertNewItemToRaceNetworkRequests(
         url_loader_factory,
     const KURL& request_url) {
   auto race_network_request_token = String(token.ToString());
-  auto info = std::make_unique<RaceNetworkRequestInfo>(
-      fetch_event_id, race_network_request_token,
-      std::move(url_loader_factory));
+  auto info = std::unique_ptr<RaceNetworkRequestInfo>(
+      new RaceNetworkRequestInfo{fetch_event_id, race_network_request_token,
+                                 std::move(url_loader_factory)});
   race_network_request_fetch_event_ids_.insert(fetch_event_id, info.get());
   auto insert_result = race_network_requests_.insert(race_network_request_token,
                                                      std::move(info));

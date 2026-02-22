@@ -316,7 +316,7 @@ MediaControlsOrientationLockDelegate::ComputeDeviceOrientation(
   // so we pass y=x and x=-y to atan2 to rotate by 90 degrees.
   double r = std::sqrt(x * x + y * y);
   double device_orientation_angle =
-      std::fmod(Rad2deg(std::atan2(/* y= */ x, /* x= */ -y)) + 360, 360);
+      std::fmod(Rad2deg(std::atan2(/* y= */ x, /* x= */ -y)) + 360.0, 360.0);
 
   // If angle between device's screen and the horizontal plane is less than
   // kMinElevationAngle (chosen to approximately match Android's behavior), then

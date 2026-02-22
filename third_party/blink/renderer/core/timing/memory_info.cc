@@ -127,7 +127,10 @@ size_t QuantizeMemorySize(size_t size) {
         exp(log(kLargestBucketSize / size_of_next_bucket) / kNumberOfBuckets);
 
     size_t next_power_of_ten = static_cast<size_t>(
-        pow(10, floor(log10(size_of_next_bucket)) + 1) + 0.5);
+        std::pow(10.0, std::floor(std::log10(static_cast<double>(
+                            size_of_next_bucket))) +
+                    1) +
+        0.5);
     size_t granularity =
         next_power_of_ten / 1000;  // We want 3 signficant digits.
 

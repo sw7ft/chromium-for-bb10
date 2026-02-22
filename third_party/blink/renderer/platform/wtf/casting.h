@@ -7,6 +7,7 @@
 
 #include "base/notreached.h"
 #include "base/template_util.h"
+#include "build/build_config.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 
 namespace blink {
@@ -119,7 +120,11 @@ bool IsA(Base* from) {
 // returns nullptr if the input pointer is nullptr.
 template <typename Derived, typename Base>
 const Derived& To(const Base& from) {
+#if BUILDFLAG(IS_QNX)
+  DCHECK(IsA<Derived>(from));
+#else
   CHECK(IsA<Derived>(from));
+#endif
   return static_cast<const Derived&>(from);
 }
 
@@ -130,7 +135,11 @@ const Derived* To(const Base* from) {
 
 template <typename Derived, typename Base>
 Derived& To(Base& from) {
+#if BUILDFLAG(IS_QNX)
+  DCHECK(IsA<Derived>(from));
+#else
   CHECK(IsA<Derived>(from));
+#endif
   return static_cast<Derived&>(from);
 }
 template <typename Derived, typename Base>

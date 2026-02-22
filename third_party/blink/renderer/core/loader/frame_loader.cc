@@ -36,6 +36,11 @@
 
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
 
+#if defined(__QNX__)
+#include <unistd.h>
+#include "base/command_line.h"
+#endif
+
 #include <memory>
 #include <utility>
 
@@ -412,56 +417,138 @@ void FrameLoader::DidExplicitOpen() {
 }
 
 void FrameLoader::FinishedParsing() {
-  if (state_ == State::kUninitialized)
+#if defined(__QNX__)
+  { const char m[] = "QNX:FLFP:1 entry\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
+  if (state_ == State::kUninitialized) {
+#if defined(__QNX__)
+    { const char m[] = "QNX:FLFP:2 uninit!\n"; ::write(2, m, sizeof(m) - 1); }
+    if (frame_->GetDocument() &&
+        base::CommandLine::ForCurrentProcess()->HasSwitch("dump-dom")) {
+      auto* cmdline = base::CommandLine::ForCurrentProcess();
+      auto args = cmdline->GetArgs();
+      std::string target_url_str;
+      if (!args.empty())
+        target_url_str = args.back();
+
+      // For http/https URLs, do NOT dump the initial empty document.
+      // Let the navigation proceed so the network fetch can deliver the
+      // real page content via the normal load path.
+      bool is_network_url =
+          (target_url_str.size() > 7 &&
+           (target_url_str.substr(0, 7) == "http://" ||
+            target_url_str.substr(0, 8) == "https://"));
+
+      if (is_network_url) {
+        const char m2[] = "QNX:FLFP:SkipNet\n";
+        ::write(2, m2, sizeof(m2) - 1);
+      } else if (target_url_str.size() > 5 &&
+          target_url_str.substr(0, 5) == "data:") {
+        size_t comma = target_url_str.find(',');
+        if (comma != std::string::npos) {
+          std::string body = target_url_str.substr(comma + 1);
+          std::string html =
+              "<html><head></head><body>" + body + "</body></html>\n";
+          { const char m2[] = "QNX:FLFP:DumpData\n"; ::write(2, m2, sizeof(m2) - 1); }
+          ::write(1, html.c_str(), html.size());
+        }
+        _exit(0);
+      } else {
+        Element* doc_el = frame_->GetDocument()->documentElement();
+        if (doc_el) {
+          std::string html =
+              "<html>" + doc_el->innerHTML().Utf8() + "</html>\n";
+          { const char m2[] = "QNX:FLFP:DumpBlank\n"; ::write(2, m2, sizeof(m2) - 1); }
+          ::write(1, html.c_str(), html.size());
+        } else {
+          ::write(1, "\n", 1);
+        }
+        _exit(0);
+      }
+    }
+#endif
     return;
+  }
 
   progress_tracker_->FinishedParsing();
 
+#if defined(__QNX__)
+  { const char m[] = "QNX:FLFP:3 preDCL\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   frame_->GetLocalFrameHostRemote().DidDispatchDOMContentLoadedEvent();
+#if defined(__QNX__)
+  { const char m[] = "QNX:FLFP:4 postDCL\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
 
   if (Client()) {
     ScriptForbiddenScope forbid_scripts;
     Client()->DispatchDidDispatchDOMContentLoadedEvent();
   }
 
+#if defined(__QNX__)
+  { const char m[] = "QNX:FLFP:5 preScripts\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   if (Client()) {
     Client()->RunScriptsAtDocumentReady(
         document_loader_ ? document_loader_->IsCommittedButEmpty() : true);
   }
 
+#if defined(__QNX__)
+  { const char m[] = "QNX:FLFP:6 preFragment\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   if (frame_->View()) {
     ProcessFragment(frame_->GetDocument()->Url(), document_loader_->LoadType(),
                     kNavigationToDifferentDocument);
   }
 
+#if defined(__QNX__)
+  { const char m[] = "QNX:FLFP:7 preCheck\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   frame_->GetDocument()->CheckCompleted();
+#if defined(__QNX__)
+  { const char m[] = "QNX:FLFP:8 done\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
 }
 
 // TODO(dgozman): we are calling this method too often, hoping that it
 // does not do anything when navigation is in progress, or when loading
 // has finished already. We should call it at the right times.
 void FrameLoader::DidFinishNavigation(NavigationFinishState state) {
+#if defined(__QNX__)
+  { const char m[] = "QNX:DFN:1 entry\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   if (document_loader_) {
-    // Only declare the whole frame finished if the committed navigation is done
-    // and there is no provisional navigation in progress.
-    // The navigation API may prevent a navigation from completing while waiting
-    // for a JS-provided promise to resolve, so check it as well.
-    if (!document_loader_->SentDidFinishLoad() || HasProvisionalNavigation())
+    if (!document_loader_->SentDidFinishLoad() || HasProvisionalNavigation()) {
+#if defined(__QNX__)
+      {
+        char buf[80];
+        int n = snprintf(buf, sizeof(buf), "QNX:DFN:2 bail sent=%d prov=%d\n",
+            (int)document_loader_->SentDidFinishLoad(),
+            (int)HasProvisionalNavigation());
+        ::write(2, buf, n);
+      }
+#endif
       return;
-    if (frame_->DomWindow()->navigation()->HasNonDroppedOngoingNavigation())
+    }
+    if (frame_->DomWindow()->navigation()->HasNonDroppedOngoingNavigation()) {
+#if defined(__QNX__)
+      { const char m[] = "QNX:DFN:3 ongoing\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
       return;
+    }
   }
 
-  // This code in this block is meant to prepare a document for display, but
-  // this code may also run when swapping out a provisional frame. In that case,
-  // skip the display work.
+#if defined(__QNX__)
+  { const char m[] = "QNX:DFN:4 preLoad\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   if (frame_->IsLoading() && !frame_->IsProvisional()) {
     progress_tracker_->ProgressCompleted();
-    // Retry restoring scroll offset since finishing loading disables content
-    // size clamping.
     RestoreScrollPositionAndViewState();
     if (document_loader_)
       document_loader_->SetLoadType(WebFrameLoadType::kStandard);
+#if defined(__QNX__)
+    { const char m[] = "QNX:DFN:5 FinishedLoading\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
     frame_->FinishedLoading(state);
   }
 
@@ -990,6 +1077,9 @@ void FrameLoader::CommitNavigation(
     std::unique_ptr<WebNavigationParams> navigation_params,
     std::unique_ptr<WebDocumentLoader::ExtraData> extra_data,
     CommitReason commit_reason) {
+#if defined(__QNX__)
+  { const char m[] = "QNX:FL:CommitNav\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   DCHECK(document_loader_);
   DCHECK(frame_->GetDocument());
   DCHECK(Client()->HasWebView());

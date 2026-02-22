@@ -4,6 +4,9 @@
 
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string_table.h"
 
+#if BUILDFLAG(IS_QNX)
+#include <unistd.h>
+#endif
 #include "base/notreached.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_visitor.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
@@ -256,16 +259,31 @@ struct LowercaseLookupTranslator {
 }  // namespace
 
 AtomicStringTable& AtomicStringTable::Instance() {
+#if BUILDFLAG(IS_QNX) && 0 /* disabled - too verbose */
+  write(2, "QNX:AST:1 inst\n", 15);
+#endif
   DEFINE_THREAD_SAFE_STATIC_LOCAL(AtomicStringTable, table, ());
+#if BUILDFLAG(IS_QNX) && 0 /* disabled */
+  write(2, "QNX:AST:2 got\n", 14);
+#endif
   return table;
 }
 
 AtomicStringTable::AtomicStringTable() {
+#if BUILDFLAG(IS_QNX) && 0
+  write(2, "QNX:AST:3 ctor\n", 15);
+#endif
   base::AutoLock auto_lock(lock_);
+#if BUILDFLAG(IS_QNX) && 0
+  write(2, "QNX:AST:4 locked\n", 17);
+#endif
   for (StringImpl* string : StringImpl::AllStaticStrings().Values()) {
     DCHECK(string->length());
     AddNoLock(string);
   }
+#if BUILDFLAG(IS_QNX) && 0
+  write(2, "QNX:AST:5 done\n", 15);
+#endif
 }
 
 void AtomicStringTable::ReserveCapacity(unsigned size) {
@@ -275,14 +293,19 @@ void AtomicStringTable::ReserveCapacity(unsigned size) {
 
 template <typename T, typename HashTranslator>
 scoped_refptr<StringImpl> AtomicStringTable::AddToStringTable(const T& value) {
-  // Lock not only protects access to the table, it also guarantees
-  // mutual exclusion with the refcount decrement on removal.
+#if BUILDFLAG(IS_QNX) && 0
+  write(2, "QNX:ATST:1 lock\n", 16);
+#endif
   base::AutoLock auto_lock(lock_);
+#if BUILDFLAG(IS_QNX) && 0
+  write(2, "QNX:ATST:2 add\n", 15);
+#endif
   HashSet<StringImpl*>::AddResult add_result =
       table_.AddWithTranslator<HashTranslator>(value);
+#if BUILDFLAG(IS_QNX) && 0
+  write(2, "QNX:ATST:3 done\n", 16);
+#endif
 
-  // If the string is newly-translated, then we need to adopt it.
-  // The boolean in the pair tells us if that is so.
   return add_result.is_new_entry
              ? base::AdoptRef(*add_result.stored_value)
              : base::WrapRefCounted(*add_result.stored_value);
@@ -344,8 +367,18 @@ scoped_refptr<StringImpl> AtomicStringTable::Add(const LChar* s,
   if (!length)
     return StringImpl::empty_;
 
+#if BUILDFLAG(IS_QNX) && 0
+  write(2, "QNX:ADD:1 buf\n", 14);
+#endif
   LCharBuffer buffer(s, length);
-  return AddToStringTable<LCharBuffer, LCharBufferTranslator>(buffer);
+#if BUILDFLAG(IS_QNX) && 0
+  write(2, "QNX:ADD:2 table\n", 16);
+#endif
+  auto result = AddToStringTable<LCharBuffer, LCharBufferTranslator>(buffer);
+#if BUILDFLAG(IS_QNX) && 0
+  write(2, "QNX:ADD:3 done\n", 15);
+#endif
+  return result;
 }
 
 StringImpl* AtomicStringTable::AddNoLock(StringImpl* string) {

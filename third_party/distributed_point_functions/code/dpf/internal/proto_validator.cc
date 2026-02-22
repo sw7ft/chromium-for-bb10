@@ -119,7 +119,7 @@ absl::StatusOr<std::unique_ptr<ProtoValidator>> ProtoValidator::Create(
     DPF_ASSIGN_OR_RETURN(int bits_needed,
                          BitsNeeded(parameters[i].value_type(),
                                     parameters[i].security_parameter()));
-    log_bits_needed = static_cast<int>(std::ceil(std::log2(bits_needed)));
+    log_bits_needed = static_cast<int>(std::ceil(std::log2((double)bits_needed)));
 
     // The tree level depends on the domain size and the element size. A single
     // AES block can fit 128 = 2^7 bits, so usually tree_level ==

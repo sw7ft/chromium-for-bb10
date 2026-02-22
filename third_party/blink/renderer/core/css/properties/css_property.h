@@ -257,7 +257,11 @@ class CORE_EXPORT CSSProperty : public CSSUnresolvedProperty {
   constexpr CSSProperty(CSSPropertyID property_id,
                         Flags flags,
                         char repetition_separator)
-      : property_id_(static_cast<uint16_t>(property_id)),
+      :
+#if defined(__QNX__) && defined(__arm__)
+        qnx_arm_bf_pad_(0),
+#endif
+        property_id_(static_cast<uint16_t>(property_id)),
         repetition_separator_(repetition_separator),
         flags_(flags) {}
 
@@ -269,6 +273,15 @@ class CORE_EXPORT CSSProperty : public CSSUnresolvedProperty {
 
  private:
   static constexpr size_t kPropertyIdBits = 16;
+
+#if defined(__QNX__) && defined(__arm__)
+  // Clang ARM32 constexpr evaluator packs uint64_t bitfields at offset 4
+  // (contiguous after the vtable pointer), but the code generator expects
+  // them at offset 8 (respecting uint64_t 8-byte alignment). Explicit
+  // padding forces both to agree on offset 8.
+  uint32_t qnx_arm_bf_pad_ = 0;
+#endif
+
   uint64_t property_id_ : kPropertyIdBits;  // NOLINT(runtime/bitfields)
   uint64_t repetition_separator_ : 8;       // NOLINT(runtime/bitfields)
   uint64_t flags_ : 40;                     // NOLINT(runtime/bitfields)

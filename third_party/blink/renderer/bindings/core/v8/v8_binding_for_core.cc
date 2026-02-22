@@ -224,9 +224,12 @@ static inline T ToSmallerInt(v8::Isolate* isolate,
     return 0;
 
   // Confine number to (-kNumberOfValues, kNumberOfValues).
+  number_value = number_value < 0
+                     ? -std::floor(std::fabs(number_value))
+                     : std::floor(std::fabs(number_value));
   number_value =
-      number_value < 0 ? -floor(fabs(number_value)) : floor(fabs(number_value));
-  number_value = fmod(number_value, LimitsTrait::kNumberOfValues);
+      std::fmod(static_cast<double>(number_value),
+                static_cast<double>(LimitsTrait::kNumberOfValues));
 
   // Adjust range to [-kMinValue, kMaxValue].
   if (number_value < LimitsTrait::kMinValue)
@@ -291,7 +294,9 @@ static inline T ToSmallerUInt(v8::Isolate* isolate,
     return 0;
 
   // Confine number to (-kNumberOfValues, kNumberOfValues).
-  double number = fmod(trunc(number_value), LimitsTrait::kNumberOfValues);
+  double number = std::fmod(
+      std::trunc(static_cast<double>(number_value)),
+      static_cast<double>(LimitsTrait::kNumberOfValues));
 
   // Adjust range to [0, kNumberOfValues).
   if (number < 0)

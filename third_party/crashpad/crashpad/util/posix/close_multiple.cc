@@ -77,6 +77,8 @@ bool CloseMultipleNowOrOnExecUsingFDDir(int min_fd, int preserve_fd) {
   static constexpr char kFDDir[] = "/dev/fd";
 #elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
   static constexpr char kFDDir[] = "/proc/self/fd";
+#elif BUILDFLAG(IS_QNX)
+  static constexpr char kFDDir[] = "/dev/fd";
 #endif
 
   DirectoryReader reader;
@@ -143,10 +145,9 @@ void CloseMultipleNowOrOnExec(int fd, int preserve_fd) {
 #endif
 
 #if !(BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || \
-      BUILDFLAG(IS_ANDROID)) ||                        \
+      BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_QNX)) ||  \
     defined(OPEN_MAX)
-  // Linux does not provide OPEN_MAX. See
-  // https://git.kernel.org/cgit/linux/kernel/git/stable/linux-stable.git/commit/include/linux/limits.h?id=77293034696e3e0b6c8b8fc1f96be091104b3d2b.
+  // Linux and QNX do not provide OPEN_MAX.
   max_fd = std::max(max_fd, OPEN_MAX);
 #endif
 

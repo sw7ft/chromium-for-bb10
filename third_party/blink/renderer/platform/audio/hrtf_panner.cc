@@ -225,7 +225,8 @@ void HRTFPanner::Pan(double desired_azimuth,
 
   // This algorithm currently requires that we process in power-of-two size
   // chunks of at least `RenderQuantumFrames()`.
-  DCHECK_EQ(1UL << static_cast<int>(log2(frames_to_process)),
+  DCHECK_EQ(1UL << static_cast<int>(
+                   std::log2(static_cast<double>(frames_to_process))),
             frames_to_process);
   DCHECK_GE(frames_to_process, RenderQuantumFrames());
 

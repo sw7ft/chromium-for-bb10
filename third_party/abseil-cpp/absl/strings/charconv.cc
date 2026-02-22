@@ -151,7 +151,7 @@ struct FloatTraits<double> {
     // Support ldexp no matter which namespace it's in.  Some platforms
     // incorrectly don't put it in namespace std.
     using namespace std;  // NOLINT
-    return sign ? -ldexp(mantissa, exponent) : ldexp(mantissa, exponent);
+    return sign ? -ldexp(static_cast<double>(mantissa), exponent) : ldexp(static_cast<double>(mantissa), exponent);
 #else
     constexpr uint64_t kMantissaMask =
         (uint64_t{1} << (kTargetMantissaBits - 1)) - 1;

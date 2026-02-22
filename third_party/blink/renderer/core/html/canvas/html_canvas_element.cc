@@ -1164,7 +1164,8 @@ String HTMLCanvasElement::ToDataURLInternal(
     String data_url = data_buffer->ToDataURL(encoding_mime_type, quality);
     base::TimeDelta elapsed_time = base::TimeTicks::Now() - start_time;
     float sqrt_pixels =
-        std::sqrt(image_bitmap->width()) * std::sqrt(image_bitmap->height());
+        std::sqrt(static_cast<double>(image_bitmap->width())) *
+        std::sqrt(static_cast<double>(image_bitmap->height()));
     float scaled_time_float = elapsed_time.InMicrosecondsF() /
                               (sqrt_pixels == 0 ? 1.0f : sqrt_pixels);
 

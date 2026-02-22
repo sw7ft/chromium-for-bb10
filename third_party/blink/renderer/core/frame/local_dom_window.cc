@@ -34,6 +34,9 @@
 #include "base/task/single_thread_task_runner.h"
 #include "base/trace_event/typed_macros.h"
 #include "build/build_config.h"
+#if defined(__QNX__)
+#include <unistd.h>
+#endif
 #include "cc/input/snap_selection_strategy.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
@@ -790,17 +793,35 @@ Document* LocalDOMWindow::InstallNewDocument(const DocumentInit& init) {
   DCHECK(!document_);
   DCHECK_EQ(init.GetWindow(), this);
 
+#if defined(__QNX__)
+  { const char m[] = "QNX:IND:1 preCreate\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   document_ = init.CreateDocument();
+#if defined(__QNX__)
+  { const char m[] = "QNX:IND:2 preInit\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   document_->Initialize();
+#if defined(__QNX__)
+  { const char m[] = "QNX:IND:3 preViewport\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
 
   document_->GetViewportData().UpdateViewportDescription();
+#if defined(__QNX__)
+  { const char m[] = "QNX:IND:4 preSched\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
 
   auto* frame_scheduler = GetFrame()->GetFrameScheduler();
   frame_scheduler->TraceUrlChange(document_->Url().GetString());
   frame_scheduler->SetCrossOriginToNearestMainFrame(
       GetFrame()->IsCrossOriginToNearestMainFrame());
+#if defined(__QNX__)
+  { const char m[] = "QNX:IND:5 preSupplement\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
 
   GetFrame()->GetPage()->GetChromeClient().InstallSupplements(*GetFrame());
+#if defined(__QNX__)
+  { const char m[] = "QNX:IND:6 done\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
 
   return document_.Get();
 }

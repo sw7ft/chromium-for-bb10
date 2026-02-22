@@ -5,6 +5,10 @@
 #include "third_party/blink/public/common/loader/throttling_url_loader.h"
 
 #include <vector>
+#if defined(__QNX__) || defined(__QNXNTO__)
+#include <unistd.h>
+#include <cstdio>
+#endif
 
 #include "base/containers/contains.h"
 #include "base/functional/bind.h"
@@ -538,6 +542,14 @@ void ThrottlingURLLoader::Start(
                                             url_request, std::move(task_runner),
                                             std::move(cors_exempt_header_list));
 
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    char m[96];
+    int n = snprintf(m, sizeof(m), "QNX:TUL:Start deferred=%d throttles=%zu\n",
+                     deferred, throttles_.size());
+    ::write(2, m, n);
+  }
+#endif
   if (deferred)
     deferred_stage_ = DEFERRED_START;
   else
@@ -545,6 +557,12 @@ void ThrottlingURLLoader::Start(
 }
 
 void ThrottlingURLLoader::StartNow() {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    const char m[] = "QNX:TUL:StartNow!\n";
+    ::write(2, m, sizeof(m) - 1);
+  }
+#endif
   DCHECK(start_info_);
   if (throttle_will_start_original_url_) {
     throttle_will_start_redirect_url_ = original_url_;
@@ -604,11 +622,23 @@ void ThrottlingURLLoader::StartNow() {
     base::UmaHistogramBoolean("FetchKeepAlive.Renderer.Total.Started", true);
   }
   DCHECK(start_info_->url_loader_factory);
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    const char m[] = "QNX:TUL:preCreateLoader\n";
+    ::write(2, m, sizeof(m) - 1);
+  }
+#endif
   start_info_->url_loader_factory->CreateLoaderAndStart(
       url_loader_.BindNewPipeAndPassReceiver(start_info_->task_runner),
       start_info_->request_id, start_info_->options, start_info_->url_request,
       client_receiver_.BindNewPipeAndPassRemote(start_info_->task_runner),
       net::MutableNetworkTrafficAnnotationTag(traffic_annotation_));
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    const char m[] = "QNX:TUL:postCreateLoader\n";
+    ::write(2, m, sizeof(m) - 1);
+  }
+#endif
 
   // TODO(https://crbug.com/919736): Remove this call.
   client_receiver_.internal_state()->EnableBatchDispatch();
@@ -696,6 +726,14 @@ void ThrottlingURLLoader::OnReceiveResponse(
     network::mojom::URLResponseHeadPtr response_head,
     mojo::ScopedDataPipeConsumerHandle body,
     absl::optional<mojo_base::BigBuffer> cached_metadata) {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    char m[128];
+    int n = snprintf(m, sizeof(m), "QNX:TUL:OnRecvResp body=%d\n",
+                     body.is_valid() ? 1 : 0);
+    ::write(2, m, n);
+  }
+#endif
   DCHECK_EQ(DEFERRED_NONE, deferred_stage_);
   DCHECK(!loader_completed_);
   DCHECK(deferring_throttles_.empty());

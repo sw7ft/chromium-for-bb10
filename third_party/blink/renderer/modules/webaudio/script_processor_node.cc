@@ -74,7 +74,8 @@ uint32_t ChooseBufferSize(uint32_t callback_buffer_size) {
   // size.
   // TODO(crbug.com/855758): What is the best way to choose this?
   uint32_t buffer_size =
-      1 << static_cast<uint32_t>(log2(4 * callback_buffer_size) + 0.5);
+      1 << static_cast<uint32_t>(
+              std::log2(static_cast<double>(4 * callback_buffer_size)) + 0.5);
 
   if (buffer_size < 256) {
     return 256;

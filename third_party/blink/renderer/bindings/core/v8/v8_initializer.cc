@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <limits>
 #include <memory>
+#include <unistd.h>
 #include <utility>
 
 #include "base/memory/scoped_refptr.h"
@@ -864,11 +865,13 @@ void V8Initializer::InitializeMainThread(
     const std::string js_command_line_flags) {
   DCHECK(IsMainThread());
 
+  { const char m[] = "QNX:V8M:1 IsoHolderInit\n"; write(2, m, sizeof(m)-1); }
   DEFINE_STATIC_LOCAL(ArrayBufferAllocator, array_buffer_allocator, ());
   gin::IsolateHolder::Initialize(gin::IsolateHolder::kNonStrictMode,
                                  &array_buffer_allocator, reference_table,
                                  js_command_line_flags, ReportV8FatalError,
                                  ReportV8OOMError);
+  { const char m[] = "QNX:V8M:2 IsoHolderDone\n"; write(2, m, sizeof(m)-1); }
 
   ThreadScheduler* scheduler = ThreadScheduler::Current();
 
@@ -881,9 +884,11 @@ void V8Initializer::InitializeMainThread(
     create_histogram_callback = CreateHistogram;
     add_histogram_sample_callback = AddHistogramSample;
   }
+  { const char m[] = "QNX:V8M:3 IsoCreate\n"; write(2, m, sizeof(m)-1); }
   v8::Isolate* isolate = V8PerIsolateData::Initialize(
       scheduler->V8TaskRunner(), scheduler->V8LowPriorityTaskRunner(),
       snapshot_mode, create_histogram_callback, add_histogram_sample_callback);
+  { const char m[] = "QNX:V8M:4 IsoDone\n"; write(2, m, sizeof(m)-1); }
   scheduler->SetV8Isolate(isolate);
 
   // ThreadState::isolate_ needs to be set before setting the EmbedderHeapTracer
@@ -891,6 +896,7 @@ void V8Initializer::InitializeMainThread(
   // over to Blink.
   DCHECK(ThreadStateStorage::MainThreadStateStorage());
 
+  { const char m[] = "QNX:V8M:5 V8Common\n"; write(2, m, sizeof(m)-1); }
   InitializeV8Common(isolate);
 
   isolate->AddMessageListenerWithErrorLevel(
@@ -922,6 +928,7 @@ void V8Initializer::InitializeMainThread(
 
   isolate->SetHostCreateShadowRealmContextCallback(
       OnCreateShadowRealmV8Context);
+  { const char m[] = "QNX:V8M:6 AllDone\n"; write(2, m, sizeof(m)-1); }
 }
 
 // Stack size for workers is limited to 500KB because default stack size for

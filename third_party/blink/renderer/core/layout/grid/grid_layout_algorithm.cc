@@ -1498,8 +1498,9 @@ wtf_size_t GridLayoutAlgorithm::ComputeAutomaticRepetitionsForSubgrid(
   const wtf_size_t tracks_left_over_for_auto_repeat =
       subgrid_span_size - non_auto_repeat_line_count + 1;
   DCHECK_GT(tracks_per_repeat, 0u);
-  return static_cast<wtf_size_t>(
-      std::floor(tracks_left_over_for_auto_repeat / tracks_per_repeat));
+  return static_cast<wtf_size_t>(std::floor(
+      static_cast<double>(tracks_left_over_for_auto_repeat) /
+      static_cast<double>(tracks_per_repeat)));
 }
 
 void GridLayoutAlgorithm::ComputeGridItemBaselines(

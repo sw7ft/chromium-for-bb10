@@ -53,14 +53,30 @@ void DecodedDataDocumentParser::AppendBytes(const char* data, size_t length) {
   if (!length)
     return;
 
-  // This should be checking isStopped(), but XMLDocumentParser prematurely
-  // stops parsing when handling an XSLT processing instruction and still
-  // needs to receive decoded bytes.
   if (IsDetached())
     return;
 
+#if defined(__QNX__)
+  {
+    char _b[64];
+    int _n = snprintf(_b, sizeof(_b), "QNX:DDDP:pre-decode len=%zu dec=%p\n",
+                      length, decoder_.get());
+    ::write(2, _b, _n);
+  }
+#endif
   String decoded = decoder_->Decode(data, length);
+#if defined(__QNX__)
+  {
+    char _b[64];
+    int _n = snprintf(_b, sizeof(_b), "QNX:DDDP:post-decode dlen=%u\n",
+                      decoded.length());
+    ::write(2, _b, _n);
+  }
+#endif
   UpdateDocument(decoded);
+#if defined(__QNX__)
+  ::write(2, "QNX:DDDP:post-update\n", 21);
+#endif
 }
 
 void DecodedDataDocumentParser::Flush() {

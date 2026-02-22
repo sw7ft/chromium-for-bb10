@@ -17,6 +17,8 @@
 #include "third_party/libevent/solaris/event-config.h"
 #elif defined(_AIX)
 #include "third_party/libevent/aix/event-config.h"
+#elif defined(__QNXNTO__)
+#include "third_party/libevent/qnx/event-config.h"
 #else
 #error generate event-config.h for your platform
 #endif

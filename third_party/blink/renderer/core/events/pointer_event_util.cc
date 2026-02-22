@@ -69,8 +69,9 @@ double PointerEventUtil::AltitudeFromTilt(double tilt_x_degrees,
     return kPiOverTwoDouble - abs(tilt_x_radians);
   }
 
-  return atan(1.0 /
-              sqrt(pow(tan(tilt_x_radians), 2) + pow(tan(tilt_y_radians), 2)));
+  return std::atan(1.0 /
+                   std::sqrt(std::pow(std::tan(tilt_x_radians), 2.0) +
+                             std::pow(std::tan(tilt_y_radians), 2.0)));
 }
 
 // static

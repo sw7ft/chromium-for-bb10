@@ -53,7 +53,8 @@ float ExtractAverageGroupDelay(AudioChannel* channel,
   DCHECK_GE(channel->length(), analysis_fft_size);
 
   // Check for power-of-2.
-  DCHECK_EQ(1UL << static_cast<unsigned>(log2(analysis_fft_size)),
+  DCHECK_EQ(1UL << static_cast<unsigned>(
+                       std::log2(static_cast<double>(analysis_fft_size))),
             analysis_fft_size);
 
   FFTFrame estimation_frame(analysis_fft_size);

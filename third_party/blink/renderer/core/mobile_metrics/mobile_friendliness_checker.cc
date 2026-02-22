@@ -47,9 +47,12 @@ int32_t BucketWithOffsetAndUnit(int32_t num, int32_t offset, int32_t unit) {
   // Bucketing raw number with `offset` centered.
   const int32_t grid = (num - offset) / unit;
   const int32_t bucketed =
-      grid == 0  ? 0
-      : grid > 0 ? std::pow(2, static_cast<int32_t>(std::log2(grid)))
-                 : -std::pow(2, static_cast<int32_t>(std::log2(-grid)));
+      grid == 0 ? 0
+      : grid > 0
+          ? std::pow(2.0, static_cast<double>(static_cast<int32_t>(
+                              std::log2(static_cast<double>(grid)))))
+          : -std::pow(2.0, static_cast<double>(static_cast<int32_t>(
+                               std::log2(static_cast<double>(-grid)))));
   return bucketed * unit + offset;
 }
 

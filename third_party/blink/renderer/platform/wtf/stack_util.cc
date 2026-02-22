@@ -29,12 +29,11 @@ size_t GetUnderestimatedStackSize() {
 // FIXME: On Mac OSX and Linux, this method cannot estimate stack size
 // correctly for the main thread.
 
+#elif BUILDFLAG(IS_QNX)
+  // QNX lacks pthread_getattr_np; return conservative estimate.
+  return 512 * 1024;
 #elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || \
     BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FREEBSD) || BUILDFLAG(IS_FUCHSIA)
-  // pthread_getattr_np() can fail if the thread is not invoked by
-  // pthread_create() (e.g., the main thread of blink_unittests).
-  // If so, a conservative size estimate is returned.
-
   pthread_attr_t attr;
   int error;
 #if BUILDFLAG(IS_FREEBSD)
@@ -54,13 +53,6 @@ size_t GetUnderestimatedStackSize() {
 #if BUILDFLAG(IS_FREEBSD)
   pthread_attr_destroy(&attr);
 #endif
-
-  // Return a 512k stack size, (conservatively) assuming the following:
-  //  - that size is much lower than the pthreads default (x86 pthreads has a 2M
-  //    default.)
-  //  - no one is running Blink with an RLIMIT_STACK override, let alone as
-  //    low as 512k.
-  //
   return 512 * 1024;
 #elif BUILDFLAG(IS_APPLE)
   // pthread_get_stacksize_np() returns too low a value for the main thread on
@@ -97,7 +89,11 @@ size_t GetUnderestimatedStackSize() {
 }
 
 void* GetStackStart() {
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || \
+#if BUILDFLAG(IS_QNX)
+  // QNX lacks pthread_getattr_np. Use address of local variable as estimate.
+  void* local_var;
+  return &local_var;
+#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || \
     BUILDFLAG(IS_FREEBSD) || BUILDFLAG(IS_FUCHSIA)
   pthread_attr_t attr;
   int error;

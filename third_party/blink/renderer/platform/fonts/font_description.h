@@ -159,6 +159,9 @@ class PLATFORM_EXPORT FontDescription {
       return common == other.common && discretionary == other.discretionary
         && historical == other.historical && contextual == other.contextual;
     }
+    bool operator!=(const VariantLigatures& other) const {
+      return !(*this == other);
+    }
   };
 
   struct Size {

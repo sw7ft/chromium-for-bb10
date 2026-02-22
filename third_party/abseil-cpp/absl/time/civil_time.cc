@@ -52,7 +52,7 @@ bool ParseYearAnd(string_view fmt, string_view s, CivilT* c) {
   char* endp;
   errno = 0;
   const civil_year_t y =
-      std::strtoll(np, &endp, 10);  // NOLINT(runtime/deprecated_fn)
+      strtoll(np, &endp, 10);  // NOLINT(runtime/deprecated_fn)
   if (endp == np || errno == ERANGE) return false;
   const std::string norm = StrCat(NormalizeYear(y), endp);
 

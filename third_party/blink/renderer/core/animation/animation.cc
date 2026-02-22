@@ -91,9 +91,10 @@ namespace {
 // Furthermore, we can encounter numeric overflows when converting to a
 // time format that is backed by a 64-bit integer.
 bool SupportedTimeValue(double time_in_ms) {
-  return std::abs(time_in_ms) < std::pow(std::numeric_limits<double>::radix,
-                                         std::numeric_limits<double>::digits) /
-                                    1000;
+  return std::abs(time_in_ms) <
+         std::pow(static_cast<double>(std::numeric_limits<double>::radix),
+                  static_cast<double>(std::numeric_limits<double>::digits)) /
+             1000.0;
 }
 
 enum class PseudoPriority { kNone, kMarker, kBefore, kOther, kAfter };

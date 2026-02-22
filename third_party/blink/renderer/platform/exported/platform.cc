@@ -31,6 +31,9 @@
 #include "third_party/blink/public/platform/platform.h"
 
 #include <memory>
+#if BUILDFLAG(IS_QNX)
+#include <unistd.h>
+#endif
 
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
@@ -192,12 +195,33 @@ WebThemeEngine* Platform::ThemeEngine() {
 }
 
 void Platform::InitializeBlink() {
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:Blink:1 entry\n", 18);
+#endif
   DCHECK(!did_initialize_blink_);
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:Blink:2 Part\n", 17);
+#endif
   WTF::Partitions::Initialize();
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:Blink:3 WTF\n", 16);
+#endif
   WTF::Initialize();
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:Blink:4 Length\n", 19);
+#endif
   Length::Initialize();
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:Blink:5 Heap\n", 17);
+#endif
   ProcessHeap::Init();
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:Blink:6 Thread\n", 19);
+#endif
   ThreadState::AttachMainThread();
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:Blink:7 done\n", 17);
+#endif
   did_initialize_blink_ = true;
 }
 

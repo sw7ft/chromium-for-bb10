@@ -29,6 +29,8 @@
 #define METRICS_OS_NAME "Linux"
 #elif BUILDFLAG(IS_FUCHSIA)
 #define METRICS_OS_NAME "Fuchsia"
+#elif BUILDFLAG(IS_QNX)
+#define METRICS_OS_NAME "QNX"
 #endif
 
 namespace crashpad {

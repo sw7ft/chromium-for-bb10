@@ -29,6 +29,10 @@
 
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 
+#if defined(__QNX__)
+#include <unistd.h>
+#endif
+
 #include <memory>
 #include <utility>
 
@@ -1141,6 +1145,13 @@ void DocumentLoader::SetHistoryItemStateForCommit(
 }
 
 void DocumentLoader::BodyDataReceived(base::span<const char> data) {
+#if defined(__QNX__)
+  {
+    char _b[64];
+    int _n = snprintf(_b, sizeof(_b), "QNX:BDR len=%zu\n", data.size());
+    ::write(2, _b, _n);
+  }
+#endif
   EncodedBodyData body_data(data);
   BodyDataReceivedImpl(body_data);
 }
@@ -1171,12 +1182,21 @@ DocumentLoader::TakeProcessBackgroundDataCallback() {
 void DocumentLoader::BodyDataReceivedImpl(BodyData& data) {
   TRACE_EVENT0("loading", "DocumentLoader::BodyDataReceived");
   base::span<const char> encoded_data = data.EncodedData();
+#if defined(__QNX__)
+  {
+    char _b[64];
+    int _n = snprintf(_b, sizeof(_b), "QNX:BDRI:1 len=%zu\n", encoded_data.size());
+    ::write(2, _b, _n);
+  }
+#endif
   if (encoded_data.size()) {
     GetFrameLoader().Progress().IncrementProgress(main_resource_identifier_,
                                                   encoded_data.size());
+#if !defined(__QNX__)
     probe::DidReceiveData(probe::ToCoreProbeSink(GetFrame()),
                           main_resource_identifier_, this, encoded_data.data(),
                           encoded_data.size());
+#endif
   }
 
   TRACE_EVENT1("loading", "DocumentLoader::HandleData", "length",
@@ -1184,17 +1204,19 @@ void DocumentLoader::BodyDataReceivedImpl(BodyData& data) {
 
   DCHECK(!frame_->GetPage()->Paused());
   time_of_last_data_received_ = clock_->NowTicks();
+#if defined(__QNX__)
+  ::write(2, "QNX:BDRI:2 pre-proc\n", 20);
+#endif
 
   if (loading_main_document_from_mhtml_archive_) {
-    // 1) Ftp directory listings accumulate data buffer and transform it later
-    //    to the actual document content.
-    // 2) Mhtml archives accumulate data buffer and parse it as mhtml later
-    //    to retrieve the actual document content.
     data.Buffer(this);
     return;
   }
 
   ProcessDataBuffer(&data);
+#if defined(__QNX__)
+  ::write(2, "QNX:BDRI:3 post-proc\n", 21);
+#endif
 }
 
 void DocumentLoader::BodyLoadingFinished(
@@ -1203,18 +1225,36 @@ void DocumentLoader::BodyLoadingFinished(
     int64_t total_encoded_body_length,
     int64_t total_decoded_body_length,
     const absl::optional<WebURLError>& error) {
+#if defined(__QNX__)
+  {
+    char _b[96];
+    int _n = snprintf(_b, sizeof(_b), "QNX:BLF enc=%lld body=%lld err=%d\n",
+                      (long long)total_encoded_data_length,
+                      (long long)total_decoded_body_length,
+                      error ? 1 : 0);
+    ::write(2, _b, _n);
+  }
+#endif
   TRACE_EVENT0("loading", "DocumentLoader::BodyLoadingFinished");
 
   DCHECK(frame_);
   if (!error) {
     GetFrameLoader().Progress().CompleteProgress(main_resource_identifier_);
+#if !defined(__QNX__)
     probe::DidFinishLoading(
         probe::ToCoreProbeSink(GetFrame()), main_resource_identifier_, this,
         completion_time, total_encoded_data_length, total_decoded_body_length);
+#endif
 
+#if defined(__QNX__)
+    ::write(2, "QNX:BLF:preDWP\n", 15);
+#endif
     DOMWindowPerformance::performance(*frame_->DomWindow())
         ->OnBodyLoadFinished(total_encoded_body_length,
                              total_decoded_body_length);
+#if defined(__QNX__)
+    ::write(2, "QNX:BLF:postDWP\n", 16);
+#endif
 
     if (resource_timing_info_for_parent_) {
       // Note that we already checked for Timing-Allow-Origin, otherwise we
@@ -1237,7 +1277,13 @@ void DocumentLoader::BodyLoadingFinished(
       frame_->Owner()->AddResourceTiming(
           std::move(resource_timing_info_for_parent_));
     }
+#if defined(__QNX__)
+    ::write(2, "QNX:BLF:preFL\n", 14);
+#endif
     FinishedLoading(completion_time);
+#if defined(__QNX__)
+    ::write(2, "QNX:BLF:postFL\n", 15);
+#endif
     return;
   }
 
@@ -1287,6 +1333,9 @@ void DocumentLoader::LoadFailed(const ResourceError& error) {
 }
 
 void DocumentLoader::FinishedLoading(base::TimeTicks finish_time) {
+#if defined(__QNX__)
+  { const char m[] = "QNX:FL:1 entry\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   body_loader_.reset();
   virtual_time_pauser_.UnpauseVirtualTime();
 
@@ -1323,11 +1372,24 @@ void DocumentLoader::FinishedLoading(base::TimeTicks finish_time) {
 
   if (parser_) {
     if (parser_blocked_count_) {
+#if defined(__QNX__)
+      { const char m[] = "QNX:FL:2 blocked\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
       finish_loading_when_parser_resumed_ = true;
     } else {
+#if defined(__QNX__)
+      { const char m[] = "QNX:FL:3 preFinish\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
       parser_->Finish();
+#if defined(__QNX__)
+      { const char m[] = "QNX:FL:4 postFinish\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
       parser_.Clear();
     }
+  } else {
+#if defined(__QNX__)
+    { const char m[] = "QNX:FL:5 noParser\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   }
 }
 
@@ -1445,18 +1507,18 @@ void DocumentLoader::CommitData(BodyData& data) {
   TRACE_EVENT1("loading", "DocumentLoader::CommitData", "length",
                data.EncodedData().size());
 
-  // This can happen if document.close() is called by an event handler while
-  // there's still pending incoming data.
-  // TODO(dgozman): we should stop body loader when stopping the parser to
-  // avoid unnecessary work. This may happen, for example, when we abort current
-  // committed document which is still loading when initiating a new navigation.
   if (!frame_ || !frame_->GetDocument()->Parsing() || !parser_)
     return;
-
+#if defined(__QNX__)
+  ::write(2, "QNX:CD:1 pre-append\n", 20);
+#endif
   base::AutoReset<bool> reentrancy_protector(&in_commit_data_, true);
   if (data.EncodedData().size())
     data_received_ = true;
   data.AppendToParser(this);
+#if defined(__QNX__)
+  ::write(2, "QNX:CD:2 post-append\n", 21);
+#endif
 }
 
 mojom::CommitResult DocumentLoader::CommitSameDocumentNavigation(
@@ -1868,16 +1930,22 @@ void DocumentLoader::StartLoadingInternal() {
 }
 
 void DocumentLoader::StartLoadingResponse() {
-  // TODO(dcheng): Clean up the null checks in this helper.
+#if defined(__QNX__)
+  { const char m[] = "QNX:SLR:1 entry\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   if (!frame_)
     return;
 
   CHECK_GE(state_, kCommitted);
 
+#if defined(__QNX__)
+  { const char m[] = "QNX:SLR:2 preParser\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   CreateParserPostCommit();
+#if defined(__QNX__)
+  { const char m[] = "QNX:SLR:3 postParser\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
 
-  // The main document from an MHTML archive is not loaded from its HTTP
-  // response, but from the main resource within the archive (in the response).
   if (loading_main_document_from_mhtml_archive_) {
     // If the `archive_` contains a main resource, load the main document from
     // the archive, else it will remain empty.
@@ -1901,9 +1969,14 @@ void DocumentLoader::StartLoadingResponse() {
     return;
   }
 
-  // Empty documents are empty by definition. Nothing to load.
   if (loading_url_as_empty_document_) {
+#if defined(__QNX__)
+    { const char m[] = "QNX:SLR:4 emptyDoc\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
     FinishedLoading(base::TimeTicks::Now());
+#if defined(__QNX__)
+    { const char m[] = "QNX:SLR:5 finDone\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
     return;
   }
 
@@ -1929,16 +2002,37 @@ void DocumentLoader::StartLoadingResponse() {
     return;
 
   if (!url_.ProtocolIsInHTTPFamily()) {
+#if defined(__QNX__)
+    { const char m[] = "QNX:SLR:6 nonHTTP startBody\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
     body_loader_->StartLoadingBody(this);
     return;
   }
 
   if (parser_->IsPreloading()) {
-    // If we were waiting for the document loader, the body has already
-    // started loading and it is safe to continue parsing.
+#if defined(__QNX__)
+    { const char m[] = "QNX:SLR:7 preloading commitData\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
     parser_->CommitPreloadedData();
+#if defined(__QNX__)
+    {
+      char _b[64];
+      int _n = snprintf(_b, sizeof(_b), "QNX:SLR:7a bl=%d\n", body_loader_ ? 1 : 0);
+      ::write(2, _b, _n);
+    }
+    if (body_loader_) {
+      body_loader_->SetDefersLoading(WebLoaderFreezeMode::kNone);
+      ::write(2, "QNX:SLR:7b unfroze\n", 19);
+    }
+#endif
   } else {
+#if defined(__QNX__)
+    { const char m[] = "QNX:SLR:8 startBody HTTP\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
     body_loader_->StartLoadingBody(this);
+#if defined(__QNX__)
+    { const char m[] = "QNX:SLR:9 startBody done\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   }
 }
 
@@ -2547,6 +2641,16 @@ void DocumentLoader::InitializeWindow(Document* owner_document) {
 }
 
 void DocumentLoader::CommitNavigation() {
+#if defined(__QNX__)
+  {
+    char m[256];
+    WTF::String url_str = url_.GetString();
+    int n = snprintf(m, sizeof(m), "QNX:DL:CommitNav url=%s body=%d\n",
+                     url_str.Utf8().c_str(),
+                     body_loader_ ? 1 : 0);
+    ::write(2, m, n);
+  }
+#endif
   DCHECK_LT(state_, kCommitted);
   DCHECK(frame_->GetPage());
   DCHECK(!frame_->GetDocument() || !frame_->GetDocument()->IsActive());
@@ -2644,6 +2748,9 @@ void DocumentLoader::CommitNavigation() {
   WillCommitNavigation();
 
   is_prerendering_ = frame_->GetPage()->IsPrerendering();
+#if defined(__QNX__)
+  { const char m[] = "QNX:DL:PreInstallDoc\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   Document* document = frame_->DomWindow()->InstallNewDocument(
       DocumentInit::Create()
           .WithWindow(frame_->DomWindow(), owner_document)
@@ -2657,7 +2764,13 @@ void DocumentLoader::CommitNavigation() {
           .WithJavascriptURL(commit_reason_ == CommitReason::kJavascriptUrl)
           .WithFallbackBaseURL(fallback_base_url_)
           .WithUkmSourceId(ukm_source_id_));
+#if defined(__QNX__)
+  { const char m[] = "QNX:DL:PostInstallDoc\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
 
+#if defined(__QNX__)
+  { const char m[] = "QNX:DL:7 preUseCount\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   RecordUseCountersForCommit();
   RecordConsoleMessagesForCommit();
   if (!response_.HttpHeaderField(http_names::kExpectCT).empty()) {
@@ -2754,10 +2867,14 @@ void DocumentLoader::CommitNavigation() {
         browsing_context_group_info_.value());
   }
 
+#if defined(__QNX__)
+  { const char m[] = "QNX:DL:8 preDidInstall\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   DidInstallNewDocument(document);
 
-  // This must be called before the document is opened, otherwise HTML parser
-  // will use stale values from HTMLParserOption.
+#if defined(__QNX__)
+  { const char m[] = "QNX:DL:9 preDidCommit\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   DidCommitNavigation();
 
   // This must be called after DidInstallNewDocument which sets the content
@@ -2832,9 +2949,15 @@ void DocumentLoader::CommitNavigation() {
 
   // TODO(crbug.com/1476866): We should check for protocols and not emit
   // performance timeline entries for file protocol navigations.
+#if defined(__QNX__)
+  { const char m[] = "QNX:DL:10 prePerf\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   DOMWindowPerformance::performance(*frame_->DomWindow())
       ->CreateNavigationTimingInstance(std::move(navigation_timing_info));
 
+#if defined(__QNX__)
+  { const char m[] = "QNX:DL:11 preNotify\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   {
     // Notify the browser process about the commit.
     FrameNavigationDisabler navigation_disabler(*frame_);
@@ -2865,8 +2988,13 @@ void DocumentLoader::CommitNavigation() {
   // is available by tracking the execution context's lifetime.
   ProfilerGroup::InitializeIfEnabled(frame_->DomWindow());
 
-  // Load the document if needed.
+#if defined(__QNX__)
+  { const char m[] = "QNX:DL:12 preStartLoad\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   StartLoadingResponse();
+#if defined(__QNX__)
+  { const char m[] = "QNX:DL:13 CommitDone\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
 }
 
 void DocumentLoader::CreateParserPostCommit() {
@@ -3338,6 +3466,9 @@ void DocumentLoader::MaybeStartLoadingBodyInBackground(
     LocalFrame* frame,
     const KURL& url,
     const ResourceResponse& response) {
+#if defined(__QNX__)
+  return;
+#endif
   if (!body_loader ||
       !base::FeatureList::IsEnabled(features::kThreadedBodyLoader) ||
       !EqualIgnoringASCIICase(response.MimeType(), "text/html")) {

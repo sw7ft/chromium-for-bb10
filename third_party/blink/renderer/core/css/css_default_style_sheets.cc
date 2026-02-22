@@ -54,6 +54,7 @@
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/leak_annotations.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
+#include <unistd.h>
 
 namespace blink {
 
@@ -86,11 +87,27 @@ void CSSDefaultStyleSheets::Init() {
 
 // static
 StyleSheetContents* CSSDefaultStyleSheets::ParseUASheet(const String& str) {
+#if defined(__QNX__)
+  {
+    char buf[80];
+    int n = snprintf(buf, sizeof(buf), "QNX:PUA:0 len=%u\n", str.length());
+    write(2, buf, n);
+  }
+#endif
   // UA stylesheets always parse in the insecure context mode.
-  auto* sheet = MakeGarbageCollected<StyleSheetContents>(
-      MakeGarbageCollected<CSSParserContext>(
-          kUASheetMode, SecureContextMode::kInsecureContext));
+  auto* ctx = MakeGarbageCollected<CSSParserContext>(
+          kUASheetMode, SecureContextMode::kInsecureContext);
+#if defined(__QNX__)
+  write(2, "QNX:PUA:1 ctx\n", 14);
+#endif
+  auto* sheet = MakeGarbageCollected<StyleSheetContents>(ctx);
+#if defined(__QNX__)
+  write(2, "QNX:PUA:2 sheet\n", 16);
+#endif
   sheet->ParseString(str);
+#if defined(__QNX__)
+  write(2, "QNX:PUA:3 parsed\n", 17);
+#endif
   // User Agent stylesheets are parsed once for the lifetime of the renderer
   // process and are intentionally leaked.
   LEAK_SANITIZER_IGNORE_OBJECT(sheet);
@@ -106,17 +123,45 @@ const MediaQueryEvaluator& CSSDefaultStyleSheets::ScreenEval() {
 
 CSSDefaultStyleSheets::CSSDefaultStyleSheets()
     : media_controls_style_sheet_loader_(nullptr) {
+  {
+    const char msg[] = "QNX:CDSS:1 ctor\n";
+    write(2, msg, sizeof(msg) - 1);
+  }
   // Strict-mode rules.
-  String default_rules = UncompressResourceAsASCIIString(IDR_UASTYLE_HTML_CSS) +
-                         LayoutTheme::GetTheme().ExtraDefaultStyleSheet();
+  String default_rules = UncompressResourceAsASCIIString(IDR_UASTYLE_HTML_CSS);
+  {
+    const char msg[] = "QNX:CDSS:2 uncompress\n";
+    write(2, msg, sizeof(msg) - 1);
+  }
+  default_rules = default_rules + LayoutTheme::GetTheme().ExtraDefaultStyleSheet();
+  {
+    const char msg[] = "QNX:CDSS:3 theme\n";
+    write(2, msg, sizeof(msg) - 1);
+  }
 
   default_style_sheet_ = ParseUASheet(default_rules);
+  {
+    const char msg[] = "QNX:CDSS:4 parsed\n";
+    write(2, msg, sizeof(msg) - 1);
+  }
 
   // Quirks-mode rules.
   String quirks_rules = UncompressResourceAsASCIIString(IDR_UASTYLE_QUIRKS_CSS);
+  {
+    const char msg[] = "QNX:CDSS:5 quirks\n";
+    write(2, msg, sizeof(msg) - 1);
+  }
   quirks_style_sheet_ = ParseUASheet(quirks_rules);
+  {
+    const char msg[] = "QNX:CDSS:6 qparsed\n";
+    write(2, msg, sizeof(msg) - 1);
+  }
 
   InitializeDefaultStyles();
+  {
+    const char msg[] = "QNX:CDSS:7 done\n";
+    write(2, msg, sizeof(msg) - 1);
+  }
 }
 
 void CSSDefaultStyleSheets::PrepareForLeakDetection() {

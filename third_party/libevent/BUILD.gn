@@ -62,6 +62,12 @@ static_library("libevent") {
       "epoll.c",
     ]
     include_dirs += [ "android" ]
+  } else if (is_qnx) {
+    sources += [
+      "qnx/config.h",
+      "qnx/event-config.h",
+    ]
+    include_dirs += [ "qnx" ]
   }
 
   if (!is_debug) {

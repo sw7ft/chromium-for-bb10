@@ -74,6 +74,9 @@ class FontVariantNumeric {
   bool operator==(const FontVariantNumeric& other) const {
     return fields_as_unsigned_ == other.fields_as_unsigned_;
   }
+  bool operator!=(const FontVariantNumeric& other) const {
+    return !(*this == other);
+  }
 
   String ToString() const;
 

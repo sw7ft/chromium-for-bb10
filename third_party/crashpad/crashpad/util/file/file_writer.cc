@@ -87,6 +87,9 @@ bool WeakFileHandleFileWriter::WriteIoVec(std::vector<WritableIoVec>* iovecs) {
   // this file to the NDK as <limits.h>, substituting
   // bionic/libc/include/bits/posix_limits.h.
   const size_t kIovMax = sysconf(_SC_IOV_MAX);
+#elif defined(__QNX__)
+  // QNX's <limits.h> #undefs IOV_MAX. Use a reasonable default.
+  const size_t kIovMax = 1024;
 #else
   const size_t kIovMax = IOV_MAX;
 #endif

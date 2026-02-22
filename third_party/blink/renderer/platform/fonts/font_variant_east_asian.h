@@ -57,6 +57,9 @@ class FontVariantEastAsian {
   bool operator==(const FontVariantEastAsian& other) const {
     return fields_as_unsigned_ == other.fields_as_unsigned_;
   }
+  bool operator!=(const FontVariantEastAsian& other) const {
+    return !(*this == other);
+  }
 
   String ToString() const;
 

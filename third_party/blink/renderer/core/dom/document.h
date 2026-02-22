@@ -1932,6 +1932,8 @@ class CORE_EXPORT Document : public ContainerNode,
     PaintPreviewScope(Document& document, PaintPreviewState state);
     ~PaintPreviewScope();
 
+    PaintPreviewScope(const PaintPreviewScope&) = default;
+    PaintPreviewScope& operator=(const PaintPreviewScope&) = default;
     PaintPreviewScope(PaintPreviewScope&) = delete;
     PaintPreviewScope& operator=(PaintPreviewScope&) = delete;
 

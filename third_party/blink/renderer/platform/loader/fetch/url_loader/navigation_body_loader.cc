@@ -4,6 +4,10 @@
 
 #include "third_party/blink/renderer/platform/loader/fetch/url_loader/navigation_body_loader.h"
 
+#if defined(__QNX__)
+#include <cstdio>
+#include <unistd.h>
+#endif
 #include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
 #include "base/metrics/field_trial_params.h"
@@ -81,11 +85,28 @@ void ReadFromDataPipeImpl(BodyReader& reader,
                           mojo::ScopedDataPipeConsumerHandle& handle,
                           mojo::SimpleWatcher& handle_watcher) {
   uint32_t num_bytes_consumed = 0;
+  int _iter = 0;
   while (reader.ShouldContinueReading()) {
     const void* buffer = nullptr;
     uint32_t available = 0;
+#if defined(__QNX__)
+    {
+      char _b[64];
+      int _n = snprintf(_b, sizeof(_b), "QNX:RFDP iter=%d pre-begin\n", _iter);
+      ::write(2, _b, _n);
+    }
+#endif
     MojoResult result =
         handle->BeginReadData(&buffer, &available, MOJO_READ_DATA_FLAG_NONE);
+#if defined(__QNX__)
+    {
+      char _b[64];
+      int _n = snprintf(_b, sizeof(_b), "QNX:RFDP iter=%d res=%d avail=%u\n",
+                        _iter, (int)result, available);
+      ::write(2, _b, _n);
+    }
+    _iter++;
+#endif
     if (result == MOJO_RESULT_SHOULD_WAIT) {
       handle_watcher.ArmOrNotify();
       return;
@@ -112,7 +133,21 @@ void ReadFromDataPipeImpl(BodyReader& reader,
     num_bytes_consumed += available;
     if (!reader.DataReceived(static_cast<const char*>(buffer), available))
       return;
+#if defined(__QNX__)
+    {
+      char _b[64];
+      int _n = snprintf(_b, sizeof(_b), "QNX:RFDP pre-end avail=%u\n", available);
+      ::write(2, _b, _n);
+    }
+#endif
     result = handle->EndReadData(available);
+#if defined(__QNX__)
+    {
+      char _b[64];
+      int _n = snprintf(_b, sizeof(_b), "QNX:RFDP post-end res=%d\n", (int)result);
+      ::write(2, _b, _n);
+    }
+#endif
     DCHECK_EQ(MOJO_RESULT_OK, result);
   }
 }
@@ -388,7 +423,14 @@ void NavigationBodyLoader::OnTransferSizeUpdated(int32_t transfer_size_diff) {
 
 void NavigationBodyLoader::OnComplete(
     const network::URLLoaderCompletionStatus& status) {
-  // Except for errors, there must always be a response's body.
+#if defined(__QNX__)
+  {
+    char _b[64];
+    int _n = snprintf(_b, sizeof(_b), "QNX:NBL:OC err=%d eof=%d\n",
+                      status.error_code, (int)has_seen_end_of_data_);
+    ::write(2, _b, _n);
+  }
+#endif
   DCHECK(has_received_body_handle_ || status.error_code != net::OK);
   has_received_completion_ = true;
   status_ = status;
@@ -396,6 +438,14 @@ void NavigationBodyLoader::OnComplete(
 }
 
 void NavigationBodyLoader::SetDefersLoading(WebLoaderFreezeMode mode) {
+#if defined(__QNX__)
+  {
+    char _b[64];
+    int _n = snprintf(_b, sizeof(_b), "QNX:NBL:SDL cur=%d new=%d\n",
+                      (int)freeze_mode_, (int)mode);
+    ::write(2, _b, _n);
+  }
+#endif
   if (freeze_mode_ == mode)
     return;
   freeze_mode_ = mode;
@@ -462,6 +512,15 @@ void NavigationBodyLoader::OnConnectionClosed() {
 }
 
 void NavigationBodyLoader::OnReadable(MojoResult unused) {
+#if defined(__QNX__)
+  {
+    char _b[64];
+    int _n = snprintf(_b, sizeof(_b), "QNX:NBL:OR eof=%d frz=%d re=%d\n",
+                      (int)has_seen_end_of_data_, (int)freeze_mode_,
+                      (int)is_in_on_readable_);
+    ::write(2, _b, _n);
+  }
+#endif
   TRACE_EVENT1("loading", "NavigationBodyLoader::OnReadable", "url",
                original_url_.GetString().Utf8());
   if (has_seen_end_of_data_ || freeze_mode_ != WebLoaderFreezeMode::kNone ||
@@ -478,18 +537,50 @@ void NavigationBodyLoader::OnReadable(MojoResult unused) {
   ReadFromDataPipe();
   if (!weak_self)
     return;
+#if defined(__QNX__)
+  {
+    char _b[96];
+    int _n = snprintf(_b, sizeof(_b),
+        "QNX:NBL:OR:post eof=%d comp=%d\n",
+        (int)has_seen_end_of_data_, (int)has_received_completion_);
+    ::write(2, _b, _n);
+  }
+#endif
   is_in_on_readable_ = false;
 }
 
 void NavigationBodyLoader::ProcessOffThreadData() {
+#if defined(__QNX__)
+  {
+    char _b[96];
+    int _n = snprintf(_b, sizeof(_b), "QNX:NBL:POT eof=%d frz=%d cli=%d\n",
+                      (int)has_seen_end_of_data_,
+                      (int)freeze_mode_,
+                      client_ ? 1 : 0);
+    ::write(2, _b, _n);
+  }
+#endif
   if (has_seen_end_of_data_ || freeze_mode_ != WebLoaderFreezeMode::kNone ||
       !client_) {
+#if defined(__QNX__)
+    ::write(2, "QNX:NBL:POT bail\n", 17);
+#endif
     return;
   }
 
+#if defined(__QNX__)
+  ::write(2, "QNX:NBL:POT proceed\n", 20);
+#endif
   auto chunks =
       off_thread_body_reader_->TakeData(max_data_to_process_per_task_);
   auto weak_self = weak_factory_.GetWeakPtr();
+#if defined(__QNX__)
+  {
+    char _b[64];
+    int _n = snprintf(_b, sizeof(_b), "QNX:NBL:POT chunks=%zu\n", chunks.size());
+    ::write(2, _b, _n);
+  }
+#endif
   for (const auto& chunk : chunks) {
     client_->DecodedBodyDataReceived(
         chunk.decoded_data, chunk.encoding_data,
@@ -546,6 +637,15 @@ void NavigationBodyLoader::NotifyCompletionIfAppropriate() {
 
 void NavigationBodyLoader::
     BindURLLoaderAndStartLoadingResponseBodyIfPossible() {
+#if defined(__QNX__)
+  {
+    char _b[96];
+    int _n = snprintf(_b, sizeof(_b), "QNX:NBL:Bind body=%d otr=%d\n",
+                      response_body_.is_valid() ? 1 : 0,
+                      off_thread_body_reader_ ? 1 : 0);
+    ::write(2, _b, _n);
+  }
+#endif
   if (!response_body_ && !off_thread_body_reader_)
     return;
   // Bind the mojo::URLLoaderClient interface in advance, because we will start

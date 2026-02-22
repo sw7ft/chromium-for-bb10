@@ -469,7 +469,7 @@ if (is_ios) {
   }
 }
 
-if (is_linux || is_chromeos || is_android) {
+if (is_linux || is_chromeos || is_android || is_qnx) {
   if (current_toolchain == host_toolchain) {
     executable("symupload") {
       sources = [
@@ -581,246 +581,259 @@ if (is_linux || is_chromeos || is_android) {
     }
   }
 
-  static_library("client") {
-    sources = [
-      "breakpad/src/client/linux/crash_generation/crash_generation_client.cc",
-      "breakpad/src/client/linux/crash_generation/crash_generation_client.h",
-      "breakpad/src/client/linux/dump_writer_common/mapping_info.h",
-      "breakpad/src/client/linux/dump_writer_common/thread_info.cc",
-      "breakpad/src/client/linux/dump_writer_common/thread_info.h",
-      "breakpad/src/client/linux/dump_writer_common/ucontext_reader.cc",
-      "breakpad/src/client/linux/dump_writer_common/ucontext_reader.h",
-      "breakpad/src/client/linux/handler/exception_handler.cc",
-      "breakpad/src/client/linux/handler/exception_handler.h",
-      "breakpad/src/client/linux/handler/minidump_descriptor.cc",
-      "breakpad/src/client/linux/handler/minidump_descriptor.h",
-      "breakpad/src/client/linux/log/log.cc",
-      "breakpad/src/client/linux/log/log.h",
-      "breakpad/src/client/linux/microdump_writer/microdump_writer.cc",
-      "breakpad/src/client/linux/microdump_writer/microdump_writer.h",
-      "breakpad/src/client/linux/minidump_writer/cpu_set.h",
-      "breakpad/src/client/linux/minidump_writer/directory_reader.h",
-      "breakpad/src/client/linux/minidump_writer/line_reader.h",
-      "breakpad/src/client/linux/minidump_writer/linux_core_dumper.cc",
-      "breakpad/src/client/linux/minidump_writer/linux_core_dumper.h",
-      "breakpad/src/client/linux/minidump_writer/linux_dumper.cc",
-      "breakpad/src/client/linux/minidump_writer/linux_dumper.h",
-      "breakpad/src/client/linux/minidump_writer/linux_ptrace_dumper.cc",
-      "breakpad/src/client/linux/minidump_writer/linux_ptrace_dumper.h",
-      "breakpad/src/client/linux/minidump_writer/minidump_writer.cc",
-      "breakpad/src/client/linux/minidump_writer/minidump_writer.h",
-      "breakpad/src/client/linux/minidump_writer/pe_file.cc",
-      "breakpad/src/client/linux/minidump_writer/pe_file.h",
-      "breakpad/src/client/linux/minidump_writer/pe_structs.h",
-      "breakpad/src/client/linux/minidump_writer/proc_cpuinfo_reader.h",
-      "breakpad/src/client/minidump_file_writer-inl.h",
-      "breakpad/src/client/minidump_file_writer.cc",
-      "breakpad/src/client/minidump_file_writer.h",
-      "breakpad/src/common/convert_UTF.cc",
-      "breakpad/src/common/convert_UTF.h",
-      "breakpad/src/common/linux/breakpad_getcontext.S",
-      "breakpad/src/common/linux/elf_core_dump.cc",
-      "breakpad/src/common/linux/elf_core_dump.h",
-      "breakpad/src/common/linux/elfutils.cc",
-      "breakpad/src/common/linux/elfutils.h",
-      "breakpad/src/common/linux/file_id.cc",
-      "breakpad/src/common/linux/file_id.h",
-      "breakpad/src/common/linux/google_crashdump_uploader.cc",
-      "breakpad/src/common/linux/google_crashdump_uploader.h",
-      "breakpad/src/common/linux/guid_creator.cc",
-      "breakpad/src/common/linux/guid_creator.h",
-      "breakpad/src/common/linux/libcurl_wrapper.cc",
-      "breakpad/src/common/linux/libcurl_wrapper.h",
-      "breakpad/src/common/linux/linux_libc_support.cc",
-      "breakpad/src/common/linux/linux_libc_support.h",
-      "breakpad/src/common/linux/memory_mapped_file.cc",
-      "breakpad/src/common/linux/memory_mapped_file.h",
-      "breakpad/src/common/linux/safe_readlink.cc",
-      "breakpad/src/common/linux/safe_readlink.h",
-      "breakpad/src/common/memory_allocator.h",
-      "breakpad/src/common/memory_range.h",
-      "breakpad/src/common/scoped_ptr.h",
-      "breakpad/src/common/simple_string_dictionary.cc",
-      "breakpad/src/common/simple_string_dictionary.h",
-      "breakpad/src/common/string_conversion.cc",
-      "breakpad/src/common/string_conversion.h",
-    ]
+  # The breakpad Linux client uses deeply Linux-specific APIs (ptrace,
+  # /proc, linux_syscall_support.h, etc.) that are not available on QNX.
+  # QNX will use its own crash handling mechanisms.
+  if (!is_qnx) {
+    static_library("client") {
+      sources = [
+        "breakpad/src/client/linux/crash_generation/crash_generation_client.cc",
+        "breakpad/src/client/linux/crash_generation/crash_generation_client.h",
+        "breakpad/src/client/linux/dump_writer_common/mapping_info.h",
+        "breakpad/src/client/linux/dump_writer_common/thread_info.cc",
+        "breakpad/src/client/linux/dump_writer_common/thread_info.h",
+        "breakpad/src/client/linux/dump_writer_common/ucontext_reader.cc",
+        "breakpad/src/client/linux/dump_writer_common/ucontext_reader.h",
+        "breakpad/src/client/linux/handler/exception_handler.cc",
+        "breakpad/src/client/linux/handler/exception_handler.h",
+        "breakpad/src/client/linux/handler/minidump_descriptor.cc",
+        "breakpad/src/client/linux/handler/minidump_descriptor.h",
+        "breakpad/src/client/linux/log/log.cc",
+        "breakpad/src/client/linux/log/log.h",
+        "breakpad/src/client/linux/microdump_writer/microdump_writer.cc",
+        "breakpad/src/client/linux/microdump_writer/microdump_writer.h",
+        "breakpad/src/client/linux/minidump_writer/cpu_set.h",
+        "breakpad/src/client/linux/minidump_writer/directory_reader.h",
+        "breakpad/src/client/linux/minidump_writer/line_reader.h",
+        "breakpad/src/client/linux/minidump_writer/linux_core_dumper.cc",
+        "breakpad/src/client/linux/minidump_writer/linux_core_dumper.h",
+        "breakpad/src/client/linux/minidump_writer/linux_dumper.cc",
+        "breakpad/src/client/linux/minidump_writer/linux_dumper.h",
+        "breakpad/src/client/linux/minidump_writer/linux_ptrace_dumper.cc",
+        "breakpad/src/client/linux/minidump_writer/linux_ptrace_dumper.h",
+        "breakpad/src/client/linux/minidump_writer/minidump_writer.cc",
+        "breakpad/src/client/linux/minidump_writer/minidump_writer.h",
+        "breakpad/src/client/linux/minidump_writer/pe_file.cc",
+        "breakpad/src/client/linux/minidump_writer/pe_file.h",
+        "breakpad/src/client/linux/minidump_writer/pe_structs.h",
+        "breakpad/src/client/linux/minidump_writer/proc_cpuinfo_reader.h",
+        "breakpad/src/client/minidump_file_writer-inl.h",
+        "breakpad/src/client/minidump_file_writer.cc",
+        "breakpad/src/client/minidump_file_writer.h",
+        "breakpad/src/common/convert_UTF.cc",
+        "breakpad/src/common/convert_UTF.h",
+        "breakpad/src/common/linux/breakpad_getcontext.S",
+        "breakpad/src/common/linux/elf_core_dump.cc",
+        "breakpad/src/common/linux/elf_core_dump.h",
+        "breakpad/src/common/linux/elfutils.cc",
+        "breakpad/src/common/linux/elfutils.h",
+        "breakpad/src/common/linux/file_id.cc",
+        "breakpad/src/common/linux/file_id.h",
+        "breakpad/src/common/linux/google_crashdump_uploader.cc",
+        "breakpad/src/common/linux/google_crashdump_uploader.h",
+        "breakpad/src/common/linux/guid_creator.cc",
+        "breakpad/src/common/linux/guid_creator.h",
+        "breakpad/src/common/linux/libcurl_wrapper.cc",
+        "breakpad/src/common/linux/libcurl_wrapper.h",
+        "breakpad/src/common/linux/linux_libc_support.cc",
+        "breakpad/src/common/linux/linux_libc_support.h",
+        "breakpad/src/common/linux/memory_mapped_file.cc",
+        "breakpad/src/common/linux/memory_mapped_file.h",
+        "breakpad/src/common/linux/safe_readlink.cc",
+        "breakpad/src/common/linux/safe_readlink.h",
+        "breakpad/src/common/memory_allocator.h",
+        "breakpad/src/common/memory_range.h",
+        "breakpad/src/common/scoped_ptr.h",
+        "breakpad/src/common/simple_string_dictionary.cc",
+        "breakpad/src/common/simple_string_dictionary.h",
+        "breakpad/src/common/string_conversion.cc",
+        "breakpad/src/common/string_conversion.h",
+      ]
 
-    configs -= [ "//build/config/compiler:chromium_code" ]
-    configs += [ "//build/config/compiler:no_chromium_code" ]
-    public_configs = [ ":client_config" ]
+      configs -= [ "//build/config/compiler:chromium_code" ]
+      configs += [ "//build/config/compiler:no_chromium_code" ]
+      public_configs = [ ":client_config" ]
 
-    if (current_cpu == "arm" && is_chromeos_ash) {
-      # Avoid running out of registers in
-      # linux_syscall_support.h:sys_clone()'s inline assembly.
-      cflags = [ "-marm" ]
+      if (current_cpu == "arm" && is_chromeos_ash) {
+        # Avoid running out of registers in
+        # linux_syscall_support.h:sys_clone()'s inline assembly.
+        cflags = [ "-marm" ]
+      }
+
+      libs = [ "dl" ]
+
+      include_dirs = [
+        ".",
+        "breakpad/src",
+        "breakpad/src/client",
+        "breakpad/src/third_party/linux/include",
+      ]
     }
 
-    libs = [ "dl" ]
+    static_library("processor_support") {
+      sources = [
+        "breakpad/src/common/scoped_ptr.h",
+        "breakpad/src/processor/basic_code_module.h",
+        "breakpad/src/processor/basic_code_modules.cc",
+        "breakpad/src/processor/basic_code_modules.h",
+        "breakpad/src/processor/convert_old_arm64_context.cc",
+        "breakpad/src/processor/convert_old_arm64_context.h",
+        "breakpad/src/processor/dump_context.cc",
+        "breakpad/src/processor/dump_object.cc",
+        "breakpad/src/processor/logging.cc",
+        "breakpad/src/processor/logging.h",
+        "breakpad/src/processor/minidump.cc",
+        "breakpad/src/processor/pathname_stripper.cc",
+        "breakpad/src/processor/pathname_stripper.h",
+        "breakpad/src/processor/proc_maps_linux.cc",
+      ]
 
-    include_dirs = [
-      ".",
-      "breakpad/src",
-      "breakpad/src/client",
-      "breakpad/src/third_party/linux/include",
-    ]
-  }
+      include_dirs = [
+        "breakpad/src",
+        "breakpad/src/client",
+        "breakpad/src/third_party/linux/include",
+        ".",
+      ]
 
-  static_library("processor_support") {
-    sources = [
-      "breakpad/src/common/scoped_ptr.h",
-      "breakpad/src/processor/basic_code_module.h",
-      "breakpad/src/processor/basic_code_modules.cc",
-      "breakpad/src/processor/basic_code_modules.h",
-      "breakpad/src/processor/convert_old_arm64_context.cc",
-      "breakpad/src/processor/convert_old_arm64_context.h",
-      "breakpad/src/processor/dump_context.cc",
-      "breakpad/src/processor/dump_object.cc",
-      "breakpad/src/processor/logging.cc",
-      "breakpad/src/processor/logging.h",
-      "breakpad/src/processor/minidump.cc",
-      "breakpad/src/processor/pathname_stripper.cc",
-      "breakpad/src/processor/pathname_stripper.h",
-      "breakpad/src/processor/proc_maps_linux.cc",
-    ]
-
-    include_dirs = [
-      "breakpad/src",
-      "breakpad/src/client",
-      "breakpad/src/third_party/linux/include",
-      ".",
-    ]
-
-    # There are some warnings in this code.
-    configs -= [ "//build/config/compiler:chromium_code" ]
-    configs += [ "//build/config/compiler:no_chromium_code" ]
-  }
-
-  test("breakpad_unittests") {
-    sources = [
-      "breakpad/src/client/linux/handler/exception_handler_unittest.cc",
-      "breakpad/src/client/linux/minidump_writer/cpu_set_unittest.cc",
-      "breakpad/src/client/linux/minidump_writer/directory_reader_unittest.cc",
-      "breakpad/src/client/linux/minidump_writer/line_reader_unittest.cc",
-      "breakpad/src/client/linux/minidump_writer/linux_core_dumper_unittest.cc",
-      "breakpad/src/client/linux/minidump_writer/linux_ptrace_dumper_unittest.cc",
-      "breakpad/src/client/linux/minidump_writer/minidump_writer_unittest.cc",
-      "breakpad/src/client/linux/minidump_writer/minidump_writer_unittest_utils.cc",
-      "breakpad/src/client/linux/minidump_writer/proc_cpuinfo_reader_unittest.cc",
-      "breakpad/src/common/linux/breakpad_getcontext_unittest.cc",
-      "breakpad/src/common/linux/elf_core_dump_unittest.cc",
-      "breakpad/src/common/linux/file_id_unittest.cc",
-      "breakpad/src/common/linux/linux_libc_support_unittest.cc",
-      "breakpad/src/common/linux/scoped_pipe.cc",
-      "breakpad/src/common/linux/scoped_pipe.h",
-      "breakpad/src/common/linux/scoped_pipe_unittest.cc",
-      "breakpad/src/common/linux/scoped_tmpfile.cc",
-      "breakpad/src/common/linux/scoped_tmpfile.h",
-      "breakpad/src/common/linux/scoped_tmpfile_unittest.cc",
-      "breakpad/src/common/linux/synth_elf.cc",
-      "breakpad/src/common/linux/tests/crash_generator.cc",
-      "breakpad/src/common/linux/tests/crash_generator.h",
-      "breakpad/src/common/memory_allocator_unittest.cc",
-      "breakpad/src/common/memory_range.h",
-      "breakpad/src/common/simple_string_dictionary_unittest.cc",
-      "breakpad/src/common/test_assembler.cc",
-      "breakpad/src/common/tests/file_utils.cc",
-      "breakpad/src/common/tests/file_utils.h",
-      "breakpad/src/tools/linux/md2core/minidump_memory_range.h",
-      "breakpad/src/tools/linux/md2core/minidump_memory_range_unittest.cc",
-      "chromium/breakpad_googletest_includes.h",
-    ]
-
-    deps = [
-      ":client",
-      ":processor_support",
-      "//testing/gmock",
-      "//testing/gtest",
-      "//testing/gtest:gtest_main",
-    ]
-
-    data_deps = [ ":linux_dumper_unittest_helper" ]
-
-    include_dirs = [
-      "chromium",  # Use our copy of breakpad_googletest_includes.h
-      ".",
-    ]
-
-    # There are some warnings in this code.
-    configs -= [ "//build/config/compiler:chromium_code" ]
-    configs += [
-      ":client_config",
-      "//build/config/compiler:no_chromium_code",
-    ]
-
-    if (is_clang) {
-      # See https://crbug.com/138571#c18
-      cflags = [ "-Wno-unused-value" ]
+      # There are some warnings in this code.
+      configs -= [ "//build/config/compiler:chromium_code" ]
+      configs += [ "//build/config/compiler:no_chromium_code" ]
     }
 
-    if (is_android) {
-      use_raw_android_executable = true
-      libs = [ "log" ]
-      extra_dist_files = [ "$root_out_dir/linux_dumper_unittest_helper" ]
+    test("breakpad_unittests") {
+      sources = [
+        "breakpad/src/client/linux/handler/exception_handler_unittest.cc",
+        "breakpad/src/client/linux/minidump_writer/cpu_set_unittest.cc",
+        "breakpad/src/client/linux/minidump_writer/directory_reader_unittest.cc",
+        "breakpad/src/client/linux/minidump_writer/line_reader_unittest.cc",
+        "breakpad/src/client/linux/minidump_writer/linux_core_dumper_unittest.cc",
+        "breakpad/src/client/linux/minidump_writer/linux_ptrace_dumper_unittest.cc",
+        "breakpad/src/client/linux/minidump_writer/minidump_writer_unittest.cc",
+        "breakpad/src/client/linux/minidump_writer/minidump_writer_unittest_utils.cc",
+        "breakpad/src/client/linux/minidump_writer/proc_cpuinfo_reader_unittest.cc",
+        "breakpad/src/common/linux/breakpad_getcontext_unittest.cc",
+        "breakpad/src/common/linux/elf_core_dump_unittest.cc",
+        "breakpad/src/common/linux/file_id_unittest.cc",
+        "breakpad/src/common/linux/linux_libc_support_unittest.cc",
+        "breakpad/src/common/linux/scoped_pipe.cc",
+        "breakpad/src/common/linux/scoped_pipe.h",
+        "breakpad/src/common/linux/scoped_pipe_unittest.cc",
+        "breakpad/src/common/linux/scoped_tmpfile.cc",
+        "breakpad/src/common/linux/scoped_tmpfile.h",
+        "breakpad/src/common/linux/scoped_tmpfile_unittest.cc",
+        "breakpad/src/common/linux/synth_elf.cc",
+        "breakpad/src/common/linux/tests/crash_generator.cc",
+        "breakpad/src/common/linux/tests/crash_generator.h",
+        "breakpad/src/common/memory_allocator_unittest.cc",
+        "breakpad/src/common/memory_range.h",
+        "breakpad/src/common/simple_string_dictionary_unittest.cc",
+        "breakpad/src/common/test_assembler.cc",
+        "breakpad/src/common/tests/file_utils.cc",
+        "breakpad/src/common/tests/file_utils.h",
+        "breakpad/src/tools/linux/md2core/minidump_memory_range.h",
+        "breakpad/src/tools/linux/md2core/minidump_memory_range_unittest.cc",
+        "chromium/breakpad_googletest_includes.h",
+      ]
+
+      deps = [
+        ":client",
+        ":processor_support",
+        "//testing/gmock",
+        "//testing/gtest",
+        "//testing/gtest:gtest_main",
+      ]
+
+      data_deps = [ ":linux_dumper_unittest_helper" ]
+
+      include_dirs = [
+        "chromium",  # Use our copy of breakpad_googletest_includes.h
+        ".",
+      ]
+
+      # There are some warnings in this code.
+      configs -= [ "//build/config/compiler:chromium_code" ]
+      configs += [
+        ":client_config",
+        "//build/config/compiler:no_chromium_code",
+      ]
+
+      if (is_clang) {
+        # See https://crbug.com/138571#c18
+        cflags = [ "-Wno-unused-value" ]
+      }
+
+      if (is_android) {
+        use_raw_android_executable = true
+        libs = [ "log" ]
+        extra_dist_files = [ "$root_out_dir/linux_dumper_unittest_helper" ]
+      }
+
+      # Add the breakpad unittest config at the end to override all configs.
+      configs += [ ":breakpad_unittest_config" ]
     }
 
-    # Add the breakpad unittest config at the end to override all configs.
-    configs += [ ":breakpad_unittest_config" ]
-  }
+    executable("linux_dumper_unittest_helper") {
+      testonly = true
+      sources = [ "breakpad/src/client/linux/minidump_writer/linux_dumper_unittest_helper.cc" ]
+      deps = [ ":processor_support" ]
 
-  executable("linux_dumper_unittest_helper") {
-    testonly = true
-    sources = [ "breakpad/src/client/linux/minidump_writer/linux_dumper_unittest_helper.cc" ]
-    deps = [ ":processor_support" ]
+      configs += [ ":client_config" ]
 
-    configs += [ ":client_config" ]
-
-    if (is_component_build) {
-      ldflags = [ "-Wl,-rpath,\$ORIGIN" ]
+      if (is_component_build) {
+        ldflags = [ "-Wl,-rpath,\$ORIGIN" ]
+      }
     }
-  }
 
-  executable("generate_test_dump") {
-    testonly = true
-    sources = [ "linux/generate-test-dump.cc" ]
+    executable("generate_test_dump") {
+      testonly = true
+      sources = [ "linux/generate-test-dump.cc" ]
 
-    # This file has an unused variable warning.
-    configs -= [ "//build/config/compiler:chromium_code" ]
-    configs += [
-      ":client_config",
-      "//build/config/compiler:no_chromium_code",
-    ]
+      # This file has an unused variable warning.
+      configs -= [ "//build/config/compiler:chromium_code" ]
+      configs += [
+        ":client_config",
+        "//build/config/compiler:no_chromium_code",
+      ]
 
-    deps = [ ":client" ]
+      deps = [ ":client" ]
 
-    if (is_android) {
-      libs = [ "log" ]
+      if (is_android) {
+        libs = [ "log" ]
+      }
     }
-  }
 
-  executable("minidump-2-core") {
-    sources = [
-      "breakpad/src/common/path_helper.cc",
-      "breakpad/src/common/path_helper.h",
-      "breakpad/src/tools/linux/md2core/minidump-2-core.cc",
-      "breakpad/src/tools/linux/md2core/minidump_memory_range.h",
-    ]
+    executable("minidump-2-core") {
+      sources = [
+        "breakpad/src/common/path_helper.cc",
+        "breakpad/src/common/path_helper.h",
+        "breakpad/src/tools/linux/md2core/minidump-2-core.cc",
+        "breakpad/src/tools/linux/md2core/minidump_memory_range.h",
+      ]
 
-    include_dirs = [ "breakpad/src" ]
+      include_dirs = [ "breakpad/src" ]
 
-    deps = [ ":client" ]
-  }
+      deps = [ ":client" ]
+    }
 
-  executable("core-2-minidump") {
-    sources = [
-      "breakpad/src/common/path_helper.cc",
-      "breakpad/src/common/path_helper.h",
-      "breakpad/src/tools/linux/core2md/core2md.cc",
-    ]
+    executable("core-2-minidump") {
+      sources = [
+        "breakpad/src/common/path_helper.cc",
+        "breakpad/src/common/path_helper.h",
+        "breakpad/src/tools/linux/core2md/core2md.cc",
+      ]
 
-    deps = [ ":client" ]
+      deps = [ ":client" ]
 
-    include_dirs = [ "breakpad/src" ]
+      include_dirs = [ "breakpad/src" ]
+    }
+  }  # !is_qnx
+
+  # QNX stub: provide an empty client target so dependents still link.
+  if (is_qnx) {
+    static_library("client") {
+      sources = []
+      public_configs = [ ":client_config" ]
+    }
   }
 }
 
