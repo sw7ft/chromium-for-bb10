@@ -205,7 +205,8 @@ ShellDevToolsBindings::GetInstancesForWebContents(WebContents* web_contents) {
 
 void ShellDevToolsBindings::ReadyToCommitNavigation(
     NavigationHandle* navigation_handle) {
-#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS) && !BUILDFLAG(IS_QNX)
+  // QNX: skip DevTools frontend setup (can block/hang in single-process headless)
   content::RenderFrameHost* frame = navigation_handle->GetRenderFrameHost();
   if (navigation_handle->IsInPrimaryMainFrame()) {
     frontend_host_ = DevToolsFrontendHost::Create(

@@ -72,7 +72,7 @@ void ShellFederatedPermissionContext::SetRequiresUserMediation(
 
 bool ShellFederatedPermissionContext::RequiresUserMediation(
     const GURL& rp_url) {
-  return require_user_mediation_sites_.contains(rp_url);
+  return require_user_mediation_sites_.count(rp_url) > 0;
 }
 
 base::Time ShellFederatedPermissionContext::GetAutoReauthnEmbargoStartTime(

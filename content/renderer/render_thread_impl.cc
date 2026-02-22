@@ -275,6 +275,9 @@ BASE_DECLARE_FEATURE(kUseThreadPoolForMediaTaskRunner){
 
 // Updates the crash key for whether this renderer is foregrounded.
 void UpdateForegroundCrashKey(bool foreground) {
+#if BUILDFLAG(IS_QNX)
+  return;
+#endif
   static auto* const crash_key = base::debug::AllocateCrashKeyString(
       "renderer_foreground", base::debug::CrashKeySize::Size32);
   base::debug::SetCrashKeyString(crash_key, foreground ? "true" : "false");
@@ -526,6 +529,10 @@ RenderThreadImpl::RenderThreadImpl(
 
 void RenderThreadImpl::Init() {
   TRACE_EVENT0("startup", "RenderThreadImpl::Init");
+  {
+    const char msg[] = "QNX:RTI:1 Init\n";
+    write(2, msg, sizeof(msg) - 1);
+  }
 
   SCOPED_UMA_HISTOGRAM_TIMER("Renderer.RenderThreadImpl.Init");
 
@@ -554,6 +561,10 @@ void RenderThreadImpl::Init() {
   metrics::InitializeSingleSampleMetricsFactory(base::BindRepeating(
       &CreateSingleSampleMetricsProvider, child_process_host()));
 
+  {
+    const char msg[] = "QNX:RTI:2 GPU\n";
+    write(2, msg, sizeof(msg) - 1);
+  }
   mojo::PendingRemote<viz::mojom::Gpu> remote_gpu;
   BindHostReceiver(remote_gpu.InitWithNewPipeAndPassReceiver());
   gpu_ = viz::Gpu::Create(std::move(remote_gpu), GetIOTaskRunner());
@@ -571,11 +582,19 @@ void RenderThreadImpl::Init() {
   // NOTE: Do not add interfaces to |binders| within this method. Instead,
   // modify the definition of |ExposeRendererInterfacesToBrowser()| to ensure
   // security review coverage.
+  {
+    const char msg[] = "QNX:RTI:3 WebKit\n";
+    write(2, msg, sizeof(msg) - 1);
+  }
   mojo::BinderMap binders;
   InitializeWebKit(&binders);
 
   vc_manager_ = std::make_unique<blink::WebVideoCaptureImplManager>();
 
+  {
+    const char msg[] = "QNX:RTI:4 RenderStarted\n";
+    write(2, msg, sizeof(msg) - 1);
+  }
   GetContentClient()->renderer()->RenderThreadStarted();
   ExposeRendererInterfacesToBrowser(weak_factory_.GetWeakPtr(), &binders);
   ExposeInterfacesToBrowser(std::move(binders));
@@ -641,6 +660,10 @@ void RenderThreadImpl::Init() {
       base::BindRepeating(&RenderThreadImpl::OnSyncMemoryPressure,
                           base::Unretained(this)));
 
+  {
+    const char msg[] = "QNX:RTI:5 DiscMem\n";
+    write(2, msg, sizeof(msg) - 1);
+  }
   discardable_memory_allocator_ = CreateDiscardableMemoryAllocator();
 
   // TODO(boliu): In single process, browser main loop should set up the
@@ -702,6 +725,10 @@ void RenderThreadImpl::Init() {
                   ukm_recorder.get());
             },
             std::move(pending_factory)));
+  }
+  {
+    const char msg[] = "QNX:RTI:6 Done\n";
+    write(2, msg, sizeof(msg) - 1);
   }
   UpdateForegroundCrashKey(
       /*foreground=*/!blink::kLaunchingProcessIsBackgrounded);
@@ -844,6 +871,10 @@ void RenderThreadImpl::InitializeWebKit(mojo::BinderMap* binders) {
     gin::Debug::SetJitCodeEventHandler(vTune::GetVtuneCodeEventHandler());
 #endif
 
+  {
+    const char msg[] = "QNX:IWK:1 platform\n";
+    write(2, msg, sizeof(msg) - 1);
+  }
   blink_platform_impl_ =
       std::make_unique<RendererBlinkPlatformImpl>(main_thread_scheduler_.get());
   // This, among other things, enables any feature marked "test" in
@@ -855,14 +886,30 @@ void RenderThreadImpl::InitializeWebKit(mojo::BinderMap* binders) {
       ->SetRuntimeFeaturesDefaultsBeforeBlinkInitialization();
   SetRuntimeFeaturesDefaultsAndUpdateFromArgs(command_line);
 
+  {
+    const char msg[] = "QNX:IWK:2 blinkInit\n";
+    write(2, msg, sizeof(msg) - 1);
+  }
   blink::Initialize(blink_platform_impl_.get(), binders,
                     main_thread_scheduler_.get());
 
+  {
+    const char msg[] = "QNX:IWK:3 v8isolate\n";
+    write(2, msg, sizeof(msg) - 1);
+  }
   v8::Isolate* isolate = blink::MainThreadIsolate();
 
+  {
+    const char msg[] = "QNX:IWK:4 compositor\n";
+    write(2, msg, sizeof(msg) - 1);
+  }
   if (!command_line.HasSwitch(switches::kDisableThreadedCompositing))
     InitializeCompositorThread();
 
+  {
+    const char msg[] = "QNX:IWK:5 schemes\n";
+    write(2, msg, sizeof(msg) - 1);
+  }
   RenderThreadImpl::RegisterSchemes();
 
   RenderMediaClient::Initialize();

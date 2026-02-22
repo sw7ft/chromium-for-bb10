@@ -54,6 +54,9 @@ const char kRunWebTests[] = "run-web-tests";
 // Register the provided scheme as a standard scheme.
 const char kTestRegisterStandardScheme[] = "test-register-standard-scheme";
 
+// Print DOM to stdout when main frame loads (for headless verification).
+const char kDumpDom[] = "dump-dom";
+
 bool IsRunWebTestsSwitchPresent() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kRunWebTests);

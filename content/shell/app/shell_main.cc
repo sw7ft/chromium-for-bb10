@@ -78,11 +78,115 @@ int main(int argc, const char** argv) {
 
 #else
 
+#if BUILDFLAG(IS_QNX)
+#include <sys/stat.h>
+#include <unistd.h>
+#include <cstring>
+#include <cstdlib>
+#include <signal.h>
+#include <ucontext.h>
+#define QNX_TRACE(msg) write(2, msg, sizeof(msg) - 1)
+
+static void qnx_hex(unsigned long v, char* buf, int len) {
+  for (int i = len - 1; i >= 0; --i) {
+    int d = v & 0xf;
+    buf[i] = d < 10 ? '0' + d : 'a' + d - 10;
+    v >>= 4;
+  }
+}
+
+static void qnx_segv_handler(int sig, siginfo_t* info, void* ctx) {
+  char line[128];
+  ucontext_t* uc = (ucontext_t*)ctx;
+  // Print fault address
+  write(2, "QNX SEGV: addr=0x", 17);
+  qnx_hex((unsigned long)info->si_addr, line, 8);
+  line[8] = '\n'; write(2, line, 9);
+  // Print PC (R15)
+  write(2, "QNX SEGV: pc=0x", 15);
+  qnx_hex((unsigned long)uc->uc_mcontext.cpu.gpr[15], line, 8);
+  line[8] = '\n'; write(2, line, 9);
+  // Print LR (R14) - this is the return address / caller of strlen
+  write(2, "QNX SEGV: lr=0x", 15);
+  qnx_hex((unsigned long)uc->uc_mcontext.cpu.gpr[14], line, 8);
+  line[8] = '\n'; write(2, line, 9);
+  // Print a few more registers for context: R0-R3 (function args)
+  for (int i = 0; i < 4; i++) {
+    char prefix[] = "QNX SEGV: r0=0x";
+    prefix[13] = '0' + i;
+    write(2, prefix, 15);
+    qnx_hex((unsigned long)uc->uc_mcontext.cpu.gpr[i], line, 8);
+    line[8] = '\n'; write(2, line, 9);
+  }
+  // Print SP (R13)
+  write(2, "QNX SEGV: sp=0x", 15);
+  qnx_hex((unsigned long)uc->uc_mcontext.cpu.gpr[13], line, 8);
+  line[8] = '\n'; write(2, line, 9);
+  // Print a few stack words (potential return addresses)
+  unsigned long* sp = (unsigned long*)uc->uc_mcontext.cpu.gpr[13];
+  write(2, "QNX SEGV: stack:\n", 17);
+  for (int i = 0; i < 16; i++) {
+    qnx_hex((unsigned long)sp[i], line, 8);
+    line[8] = ' '; line[9] = '\n';
+    write(2, line, 10);
+  }
+  // Re-raise to get QNX's default handler output
+  signal(sig, SIG_DFL);
+  raise(sig);
+}
+#endif
+
 int main(int argc, const char** argv) {
+#if BUILDFLAG(IS_QNX)
+  QNX_TRACE("QNX: main() entered\n");
+  // Install SIGSEGV handler that dumps registers (especially LR = caller)
+  {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_flags = SA_SIGINFO;
+    sa.sa_sigaction = qnx_segv_handler;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGSEGV, &sa, nullptr);
+    sigaction(SIGBUS, &sa, nullptr);
+  }
+  // Set CHROME_EXE_PATH from argv[0] so ICU loader can find data files
+  if (argc > 0 && argv[0]) {
+    setenv("CHROME_EXE_PATH", argv[0], 1);
+  }
+  // Determine a writable base directory from exe path or cwd.
+  // Force-override TMPDIR/HOME because device defaults (/tmp) may not be
+  // writable by the devuser account. Shared memory creation uses TMPDIR.
+  {
+    char cwd_buf[1024];
+    const char* writable_dir = getcwd(cwd_buf, sizeof(cwd_buf));
+    if (!writable_dir) writable_dir = ".";
+    // Create a dedicated tmp subdirectory so temp files don't collide with
+    // deploy files, and QNX mkstemp works in a clean directory.
+    char tmp_buf[1100];
+    snprintf(tmp_buf, sizeof(tmp_buf), "%s/tmp", writable_dir);
+    mkdir(tmp_buf, 0777);
+    setenv("HOME", writable_dir, 0);
+    setenv("TMPDIR", tmp_buf, 1);
+    setenv("XDG_CONFIG_HOME", writable_dir, 1);
+    setenv("XDG_CACHE_HOME", writable_dir, 1);
+    setenv("XDG_DATA_HOME", writable_dir, 1);
+    setenv("XDG_RUNTIME_DIR", tmp_buf, 1);
+    fprintf(stderr, "QNX: writable_dir=%s TMPDIR=%s\n",
+            writable_dir, getenv("TMPDIR"));
+  }
+  if (!getenv("USER")) setenv("USER", "user", 1);
+  if (!getenv("LOGNAME")) setenv("LOGNAME", "user", 1);
+  if (!getenv("SHELL")) setenv("SHELL", "/bin/sh", 1);
+  if (!getenv("LANG")) setenv("LANG", "C", 1);
+  QNX_TRACE("QNX: env vars set, creating delegate\n");
+#endif
   content::ShellMainDelegate delegate;
   content::ContentMainParams params(&delegate);
   params.argc = argc;
   params.argv = argv;
+#if BUILDFLAG(IS_QNX)
+  QNX_TRACE("QNX: calling ContentMain\n");
+#endif
   return content::ContentMain(std::move(params));
 }
 

@@ -401,7 +401,14 @@ static_library("content_shell_lib") {
     deps += [ "//ui/views" ]
   }
 
-  if (use_aura) {
+  if (is_qnx) {
+    sources += [
+      "browser/berry_browser_chrome.cc",
+      "browser/berry_browser_chrome.h",
+      "browser/shell_platform_delegate_qnx.cc",
+      "browser/shell_web_contents_view_delegate_aura.cc",
+    ]
+  } else if (use_aura) {
     deps += [
       "//ui/aura",
       "//ui/aura:test_support",
@@ -645,6 +652,14 @@ if (is_android) {
 
     if (is_win) {
       sources += [ "app/shell.rc" ]
+    }
+
+    if (is_qnx) {
+      sources += [ "app/qnx_platform_stubs.cc" ]
+      ldflags = [
+        "-Wl,--wrap=abort",
+        "-Wl,--allow-multiple-definition",
+      ]
     }
 
     defines = []

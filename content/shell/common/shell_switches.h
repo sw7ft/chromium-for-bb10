@@ -24,6 +24,7 @@ extern const char kIsolatedContextOrigins[];
 extern const char kRemoteDebuggingAddress[];
 extern const char kRunWebTests[];
 extern const char kTestRegisterStandardScheme[];
+extern const char kDumpDom[];
 
 // Helper that returns true if kRunWebTests is present in the command line,
 // meaning Content Shell is running in web test mode.

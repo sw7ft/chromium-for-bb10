@@ -16,6 +16,9 @@
 #if BUILDFLAG(IS_ANDROID)
 #include "base/android/jni_android.h"
 #endif
+#if BUILDFLAG(IS_QNX)
+#include <unistd.h>
+#endif
 
 namespace content {
 
@@ -31,33 +34,40 @@ InProcessRendererThread::~InProcessRendererThread() {
 }
 
 void InProcessRendererThread::Init() {
-  // In single-process mode, we never enter the sandbox, so run the post-sandbox
-  // code now.
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:Renderer:1 Init\n", 20);
+#endif
   content::ContentRendererClient* client = GetContentClient()->renderer();
   if (client) {
     client->PostSandboxInitialized();
   }
 
-  // Call AttachCurrentThreadWithName, before any other AttachCurrentThread()
-  // calls. The latter causes Java VM to assign Thread-??? to the thread name.
-  // Please note calls to AttachCurrentThreadWithName after AttachCurrentThread
-  // will not change the thread name kept in Java VM.
 #if BUILDFLAG(IS_ANDROID)
   base::android::AttachCurrentThreadWithName(thread_name());
-  // Make sure we aren't somehow reinitialising the inprocess renderer thread on
-  // Android. Temporary CHECK() to debug http://crbug.com/514141
   CHECK(!render_process_);
 #endif
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:Renderer:2 InitBlink\n", 25);
+#endif
   blink::Platform::InitializeBlink();
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:Renderer:3 Scheduler\n", 25);
+#endif
   std::unique_ptr<blink::scheduler::WebThreadScheduler> main_thread_scheduler =
       blink::scheduler::WebThreadScheduler::CreateMainThreadScheduler();
 
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:Renderer:4 RenderProc\n", 26);
+#endif
   render_process_ = RenderProcessImpl::Create();
-  // RenderThreadImpl doesn't currently support a proper shutdown sequence
-  // and it's okay when we're running in multi-process mode because renderers
-  // get killed by the OS. In-process mode is used for test and debug only.
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:Renderer:5 RenderThread\n", 28);
+#endif
   new RenderThreadImpl(params_, renderer_client_id_,
                        std::move(main_thread_scheduler));
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:Renderer:6 Done\n", 20);
+#endif
 }
 
 void InProcessRendererThread::CleanUp() {

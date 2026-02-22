@@ -6,6 +6,9 @@
 
 #include <utility>
 
+#if BUILDFLAG(IS_QNX)
+#include <unistd.h>
+#endif
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
@@ -193,15 +196,30 @@ void ShellBrowserMainParts::PostCreateThreads() {
 }
 
 int ShellBrowserMainParts::PreMainMessageLoopRun() {
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:PMLR:1 enter\n", 18);
+#endif
 #if BUILDFLAG(IS_FUCHSIA)
   fuchsia_view_presenter_ = std::make_unique<FuchsiaViewPresenter>();
 #endif
 
   InitializeBrowserContexts();
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:PMLR:2 BrowserCtx\n", 22);
+#endif
   Shell::Initialize(CreateShellPlatformDelegate());
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:PMLR:3 ShellInit\n", 21);
+#endif
   net::NetModule::SetResourceProvider(PlatformResourceProvider);
   ShellDevToolsManagerDelegate::StartHttpHandler(browser_context_.get());
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:PMLR:4 DevTools\n", 20);
+#endif
   InitializeMessageLoopContext();
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:PMLR:5 MsgLoopCtx\n", 22);
+#endif
   return 0;
 }
 

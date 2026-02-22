@@ -339,6 +339,24 @@ void ShellMainDelegate::InitializeResourceBundle() {
       std::move(android_pak_file), pak_region, ui::k100Percent);
 #elif BUILDFLAG(IS_APPLE)
   ui::ResourceBundle::InitSharedInstanceWithPakPath(GetResourcesPakFilePath());
+#elif BUILDFLAG(IS_QNX)
+  // QNX: PathService::Get(DIR_ASSETS) + Append() is broken.
+  // Construct path from CHROME_EXE_PATH env var.
+  std::string pak_dir;
+  const char* exe_env = getenv("CHROME_EXE_PATH");
+  if (exe_env && exe_env[0]) {
+    pak_dir = exe_env;
+    size_t slash = pak_dir.rfind('/');
+    if (slash != std::string::npos)
+      pak_dir = pak_dir.substr(0, slash + 1);
+    else
+      pak_dir = "./";
+  } else {
+    pak_dir = "./";
+  }
+  base::FilePath pak_file(pak_dir + "content_shell.pak");
+  LOG(WARNING) << "QNX: Loading resource bundle from: " << pak_file.value();
+  ui::ResourceBundle::InitSharedInstanceWithPakPath(pak_file);
 #else
   base::FilePath pak_file;
   bool r = base::PathService::Get(base::DIR_ASSETS, &pak_file);

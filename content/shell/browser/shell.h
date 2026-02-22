@@ -237,6 +237,8 @@ class Shell : public WebContentsDelegate, public WebContentsObserver {
 #endif
   void TitleWasSet(NavigationEntry* entry) override;
   void RenderFrameCreated(RenderFrameHost* frame_host) override;
+  void DidFinishLoad(RenderFrameHost* render_frame_host,
+                     const GURL& validated_url) override;
 #if BUILDFLAG(IS_MAC)
   void PrimaryPageChanged(Page& page) override;
 #endif

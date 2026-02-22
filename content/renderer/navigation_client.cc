@@ -4,7 +4,11 @@
 
 #include "content/renderer/navigation_client.h"
 
+#include "build/build_config.h"
 #include "base/check.h"
+#if BUILDFLAG(IS_QNX)
+#include <unistd.h>
+#endif
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
 #include "content/common/frame.mojom.h"
@@ -50,6 +54,9 @@ void NavigationClient::CommitNavigation(
     mojom::CookieManagerInfoPtr cookie_manager_info,
     mojom::StorageInfoPtr storage_info,
     CommitNavigationCallback callback) {
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:NavClient:Commit\n", 20);
+#endif
   DCHECK(blink::IsRequestDestinationFrame(common_params->request_destination));
 
   // TODO(https://crbug.com/1467502): The reset should be done when the

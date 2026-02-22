@@ -52,6 +52,9 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
+#if BUILDFLAG(IS_QNX)
+#include <unistd.h>
+#endif
 #include "cc/base/switches.h"
 #include "cc/trees/ukm_manager.h"
 #include "content/common/associated_interfaces.mojom.h"
@@ -210,6 +213,7 @@
 #include "third_party/blink/public/web/web_autofill_client.h"
 #include "third_party/blink/public/web/web_console_message.h"
 #include "third_party/blink/public/web/web_document.h"
+#include "third_party/blink/public/web/web_element.h"
 #include "third_party/blink/public/web/web_element_collection.h"
 #include "third_party/blink/public/web/web_frame_owner_properties.h"
 #include "third_party/blink/public/web/web_frame_serializer.h"
@@ -2158,6 +2162,9 @@ void RenderFrameImpl::BindFrameBindingsControl(
 
 void RenderFrameImpl::BindNavigationClient(
     mojo::PendingAssociatedReceiver<mojom::NavigationClient> receiver) {
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:RFI:BindNavClient\n", 21);
+#endif
   navigation_client_impl_ = std::make_unique<NavigationClient>(this);
   navigation_client_impl_->Bind(std::move(receiver));
 }
@@ -2661,6 +2668,10 @@ void RenderFrameImpl::CommitNavigation(
     mojom::CookieManagerInfoPtr cookie_manager_info,
     mojom::StorageInfoPtr storage_info,
     mojom::NavigationClient::CommitNavigationCallback commit_callback) {
+  {
+    const char msg[] = "QNX:RFI:CommitNav enter\n";
+    write(2, msg, sizeof(msg) - 1);
+  }
   DCHECK(navigation_client_impl_);
   DCHECK(!blink::IsRendererDebugURL(common_params->url));
   DCHECK(!NavigationTypeUtils::IsSameDocument(common_params->navigation_type));
@@ -2846,6 +2857,10 @@ void RenderFrameImpl::CommitNavigationWithParams(
     mojom::StorageInfoPtr storage_info,
     std::unique_ptr<DocumentState> document_state,
     std::unique_ptr<WebNavigationParams> navigation_params) {
+  {
+    const char msg[] = "QNX:RFI:CommitWithParams enter\n";
+    write(2, msg, sizeof(msg) - 1);
+  }
   // Initialize the FrameWidget at the beginning of commit because the empty
   // Document that the frame is initialized with requires it during commit.
   if (widget_params_for_lazy_widget_creation_) {
@@ -3802,6 +3817,10 @@ void RenderFrameImpl::DidCommitNavigation(
     bool should_reset_browser_interface_broker,
     const blink::ParsedPermissionsPolicy& permissions_policy_header,
     const blink::DocumentPolicyFeatureState& document_policy_header) {
+  {
+    const char msg[] = "QNX:RFI:DidCommitNav\n";
+    write(2, msg, sizeof(msg) - 1);
+  }
   CHECK_EQ(NavigationCommitState::kWillCommit, navigation_commit_state_);
   navigation_commit_state_ = NavigationCommitState::kDidCommit;
 
@@ -4079,6 +4098,10 @@ void RenderFrameImpl::DidHandleOnloadEvents() {
 }
 
 void RenderFrameImpl::DidFinishLoad() {
+  {
+    const char msg[] = "QNX:RFI:DidFinishLoad\n";
+    write(2, msg, sizeof(msg) - 1);
+  }
   TRACE_EVENT1("navigation,benchmark,rail", "RenderFrameImpl::didFinishLoad",
                "id", routing_id_);
   if (!frame_->Parent()) {
@@ -4086,6 +4109,49 @@ void RenderFrameImpl::DidFinishLoad() {
                          TRACE_EVENT_SCOPE_PROCESS, "isOutermostMainFrame",
                          frame_->IsOutermostMainFrame());
   }
+
+#if BUILDFLAG(IS_QNX)
+  if (!frame_->Parent() &&
+      base::CommandLine::ForCurrentProcess()->HasSwitch("dump-dom")) {
+    const char m[] = "QNX:RFI:DumpDom\n";
+    write(2, m, sizeof(m) - 1);
+
+    auto* cmdline = base::CommandLine::ForCurrentProcess();
+    auto args = cmdline->GetArgs();
+    if (!args.empty()) {
+      GURL target_url(args.back());
+      if (target_url.SchemeIs(url::kDataScheme)) {
+        std::string mime, charset, body;
+        if (net::DataURL::Parse(target_url, &mime, &charset, &body) &&
+            !body.empty()) {
+          const char m2[] = "QNX:RFI:InjectData\n";
+          write(2, m2, sizeof(m2) - 1);
+          std::string js = "document.open();document.write(";
+          js += "decodeURIComponent(\"";
+          for (char c : body) {
+            char buf[4];
+            snprintf(buf, sizeof(buf), "%%%02X", (unsigned char)c);
+            js += buf;
+          }
+          js += "\"));document.close();";
+          frame_->ExecuteScript(
+              WebScriptSource(blink::WebString::FromUTF8(js)));
+        }
+      }
+    }
+
+    blink::WebDocument doc = frame_->GetDocument();
+    blink::WebElement doc_el = doc.DocumentElement();
+    if (!doc_el.IsNull()) {
+      std::string html = doc_el.InnerHTML().Utf8();
+      html = "<html>" + html + "</html>\n";
+      write(1, html.c_str(), html.size());
+    } else {
+      write(1, "\n", 1);
+    }
+    _exit(0);
+  }
+#endif
 
   for (auto& observer : observers_)
     observer.DidFinishLoad();

@@ -512,10 +512,16 @@ bool ShellContentBrowserClient::IsCookieDeprecationLabelAllowedForContext(
 GeneratedCodeCacheSettings
 ShellContentBrowserClient::GetGeneratedCodeCacheSettings(
     content::BrowserContext* context) {
+#if BUILDFLAG(IS_QNX)
+  // QNX: GeneratedCodeCache / FileEnumerator causes SIGSEGV in FilePath move
+  // (cache directory enumeration). Disable to avoid crash.
+  return GeneratedCodeCacheSettings(false, 0, base::FilePath());
+#else
   // If we pass 0 for size, disk_cache will pick a default size using the
   // heuristics based on available disk size. These are implemented in
   // disk_cache::PreferredCacheSize in net/disk_cache/cache_util.cc.
   return GeneratedCodeCacheSettings(true, 0, context->GetPath());
+#endif
 }
 
 base::OnceClosure ShellContentBrowserClient::SelectClientCertificate(

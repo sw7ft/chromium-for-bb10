@@ -5,14 +5,22 @@
 #include "content/shell/browser/shell.h"
 
 #include <stddef.h>
+#include <cstdio>
 
 #include <map>
 #include <memory>
 #include <string>
 #include <utility>
 
+#if BUILDFLAG(IS_QNX)
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#endif
 #include "base/command_line.h"
+#include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
+#include "base/values.h"
 #include "base/location.h"
 #include "base/no_destructor.h"
 #include "base/run_loop.h"
@@ -47,6 +55,7 @@
 #include "third_party/blink/public/common/renderer_preferences/renderer_preferences.h"
 #include "third_party/blink/public/mojom/choosers/file_chooser.mojom-forward.h"
 #include "third_party/blink/public/mojom/window_features/window_features.mojom.h"
+#include "url/url_constants.h"
 
 namespace content {
 
@@ -216,6 +225,9 @@ Shell* Shell::CreateNewWindow(BrowserContext* browser_context,
                               const GURL& url,
                               const scoped_refptr<SiteInstance>& site_instance,
                               const gfx::Size& initial_size) {
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:Shell:1 CreateNewWindow\n", 27);
+#endif
   WebContents::CreateParams create_params(browser_context, site_instance);
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kForcePresentationReceiverForTesting)) {
@@ -223,12 +235,21 @@ Shell* Shell::CreateNewWindow(BrowserContext* browser_context,
   }
   std::unique_ptr<WebContents> web_contents =
       WebContents::Create(create_params);
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:Shell:2 WebContents\n", 23);
+#endif
   Shell* shell =
       CreateShell(std::move(web_contents), AdjustWindowSize(initial_size),
                   true /* should_set_delegate */);
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:Shell:3 CreateShell\n", 23);
+#endif
 
   if (!url.is_empty())
     shell->LoadURL(url);
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:Shell:4 LoadURL done\n", 25);
+#endif
   return shell;
 }
 
@@ -238,19 +259,41 @@ void Shell::RenderFrameCreated(RenderFrameHost* frame_host) {
 }
 
 void Shell::LoadURL(const GURL& url) {
+#if BUILDFLAG(IS_QNX)
+  GURL load_url = url;
+  if (url.SchemeIs(url::kDataScheme)) {
+    const char m[] = "QNX:Shell:DataToBlank\n";
+    write(2, m, sizeof(m) - 1);
+    load_url = GURL("about:blank");
+  }
+  LoadURLForFrame(
+      load_url, std::string(),
+      ui::PageTransitionFromInt(ui::PAGE_TRANSITION_TYPED |
+                                ui::PAGE_TRANSITION_FROM_ADDRESS_BAR));
+#else
   LoadURLForFrame(
       url, std::string(),
       ui::PageTransitionFromInt(ui::PAGE_TRANSITION_TYPED |
                                 ui::PAGE_TRANSITION_FROM_ADDRESS_BAR));
+#endif
 }
 
 void Shell::LoadURLForFrame(const GURL& url,
                             const std::string& frame_name,
                             ui::PageTransition transition_type) {
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:LoadURL:1 enter\n", 20);
+#endif
   NavigationController::LoadURLParams params(url);
   params.frame_name = frame_name;
   params.transition_type = transition_type;
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:LoadURL:2 params\n", 21);
+#endif
   web_contents_->GetController().LoadURLWithParams(params);
+#if BUILDFLAG(IS_QNX)
+  write(2, "QNX:LoadURL:3 done\n", 19);
+#endif
 }
 
 void Shell::LoadDataWithBaseURL(const GURL& url,
@@ -587,6 +630,48 @@ void Shell::NavigationStateChanged(WebContents* source,
                                    InvalidateTypes changed_flags) {
   if (changed_flags & INVALIDATE_TYPE_URL)
     g_platform->SetAddressBarURL(this, source->GetVisibleURL());
+}
+
+void Shell::DidFinishLoad(RenderFrameHost* render_frame_host,
+                          const GURL& validated_url) {
+#if BUILDFLAG(IS_QNX)
+  {
+    char buf[128];
+    int n = snprintf(buf, sizeof(buf), "QNX:Shell:DFL enter main=%d dump=%d\n",
+        (int)render_frame_host->IsInPrimaryMainFrame(),
+        (int)base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpDom));
+    write(2, buf, n);
+  }
+#endif
+  if (!render_frame_host->IsInPrimaryMainFrame())
+    return;
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpDom))
+    return;
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Shell:DFL exec\n"; write(2, m, sizeof(m) - 1); }
+#endif
+
+  const std::u16string script = u"document.documentElement.outerHTML";
+  render_frame_host->ExecuteJavaScriptForTests(
+      script,
+      base::BindOnce(
+          [](base::Value value) {
+#if BUILDFLAG(IS_QNX)
+            { const char m[] = "QNX:Shell:DFL callback\n"; write(2, m, sizeof(m) - 1); }
+#endif
+            std::string html;
+            if (value.is_string())
+              html = value.GetString();
+            write(1, html.c_str(), html.size());
+            write(1, "\n", 1);
+#if BUILDFLAG(IS_QNX)
+            { const char m[] = "QNX:Shell:DFL output done, exiting\n"; write(2, m, sizeof(m) - 1); }
+            _exit(0);
+#else
+            printf("%s\n", html.c_str());
+            fflush(stdout);
+#endif
+          }));
 }
 
 JavaScriptDialogManager* Shell::GetJavaScriptDialogManager(

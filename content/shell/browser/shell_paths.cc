@@ -39,6 +39,14 @@ bool GetDefaultUserDataDirectory(base::FilePath* result) {
 #elif BUILDFLAG(IS_FUCHSIA)
   *result = base::FilePath(base::kPersistedDataDirectoryPath)
                 .Append(FILE_PATH_LITERAL("content_shell"));
+#elif BUILDFLAG(IS_QNX)
+  // Use a writable directory relative to HOME or cwd on QNX
+  const char* home = getenv("HOME");
+  if (home && home[0]) {
+    *result = base::FilePath(home).Append("content_shell_data");
+  } else {
+    *result = base::FilePath("./content_shell_data");
+  }
 #else
   NOTIMPLEMENTED();
   return false;
