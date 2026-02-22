@@ -454,6 +454,20 @@ void TaskQueueImpl::PostImmediateTaskImpl(PostedTask task,
       should_schedule_work =
           any_thread_.post_immediate_task_should_schedule_work;
     }
+#if defined(__QNX__) || defined(__QNXNTO__)
+    if (current_thread == CurrentThread::kNotMainThread) {
+      should_schedule_work = true;
+      if (!(was_immediate_incoming_queue_empty &&
+            any_thread_.immediate_work_queue_empty)) {
+        char _b[128];
+        int _n = snprintf(_b, sizeof(_b),
+            "QNX:PITI cross ieq=%d wqe=%d\n",
+            was_immediate_incoming_queue_empty ? 1 : 0,
+            any_thread_.immediate_work_queue_empty ? 1 : 0);
+        ::write(2, _b, _n);
+      }
+    }
+#endif
   }
 
   // On windows it's important to call this outside of a lock because calling a

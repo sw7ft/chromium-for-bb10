@@ -81,6 +81,9 @@ class BASE_EXPORT AtomicFlagSet {
   // resets all flags to inactive. Must be called on the associated thread.
   void RunActiveCallbacks() const;
 
+  // Runs all registered callbacks regardless of flag state.
+  void RunAllCallbacks() const;
+
  protected:
   Group* GetAllocListForTesting() const { return alloc_list_head_.get(); }
 

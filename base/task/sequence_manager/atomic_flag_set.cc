@@ -124,6 +124,21 @@ void AtomicFlagSet::RunActiveCallbacks() const {
   }
 }
 
+void AtomicFlagSet::RunAllCallbacks() const {
+  DCHECK_CALLED_ON_VALID_THREAD(associated_thread_->thread_checker);
+  for (Group* iter = alloc_list_head_.get(); iter; iter = iter->next.get()) {
+    std::atomic_exchange_explicit(&iter->flags, size_t{0},
+                                  std::memory_order_acquire);
+    size_t allocated = iter->allocated_flags;
+    while (allocated) {
+      int index = Group::IndexOfFirstFlagSet(allocated);
+      allocated ^= size_t{1} << index;
+      if (!iter->flag_callbacks[index].is_null())
+        iter->flag_callbacks[index].Run();
+    }
+  }
+}
+
 AtomicFlagSet::Group::Group() = default;
 
 AtomicFlagSet::Group::~Group() {
