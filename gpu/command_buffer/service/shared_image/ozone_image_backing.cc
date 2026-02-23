@@ -138,7 +138,7 @@ gfx::GpuMemoryBufferHandle OzoneImageBacking::GetGpuMemoryBufferHandle() {
 gfx::GpuMemoryBufferHandle
 OzoneImageBacking::GetSinglePlaneGpuMemoryBufferHandle(uint32_t index) {
   gfx::GpuMemoryBufferHandle gmb_handle = GetGpuMemoryBufferHandle();
-#if BUILDFLAG(IS_FUCHSIA)
+#if BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_QNX)
   NOTREACHED() << "Cannot get single plane from GPU memory buffer";
   return gmb_handle;
 #else

@@ -20,6 +20,7 @@ class QnxScreenWindowManager {
   void AddWindow(gfx::AcceleratedWidget widget, QnxScreenWindow* window);
   void RemoveWindow(gfx::AcceleratedWidget widget);
   QnxScreenWindow* GetWindow(gfx::AcceleratedWidget widget);
+  QnxScreenWindow* GetFirstWindow();
 
  private:
   std::map<gfx::AcceleratedWidget, QnxScreenWindow*> windows_;

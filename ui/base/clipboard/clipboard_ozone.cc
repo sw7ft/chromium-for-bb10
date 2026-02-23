@@ -424,9 +424,11 @@ std::vector<std::u16string> ClipboardOzone::GetStandardFormats(
     // `WriteText` uses the following mime types for text, so if those types are
     // available, we add kMimeTypeText to the list.
     if ((mime_type == ClipboardFormatType::PlainTextType().GetName() ||
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
          mime_type == kMimeTypeLinuxText || mime_type == kMimeTypeLinuxString ||
-         mime_type == kMimeTypeTextUtf8 ||
-         mime_type == kMimeTypeLinuxUtf8String) &&
+         mime_type == kMimeTypeLinuxUtf8String ||
+#endif
+         mime_type == kMimeTypeTextUtf8) &&
         !base::Contains(types, base::UTF8ToUTF16(kMimeTypeText))) {
       types.push_back(base::UTF8ToUTF16(kMimeTypeText));
       continue;
@@ -688,8 +690,12 @@ void ClipboardOzone::WritePortableAndPlatformRepresentations(
 void ClipboardOzone::WriteText(base::StringPiece text) {
   std::vector<uint8_t> data(text.begin(), text.end());
   async_clipboard_ozone_->InsertData(
-      std::move(data), {kMimeTypeText, kMimeTypeLinuxText, kMimeTypeLinuxString,
-                        kMimeTypeTextUtf8, kMimeTypeLinuxUtf8String});
+      std::move(data), {kMimeTypeText,
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
+                        kMimeTypeLinuxText, kMimeTypeLinuxString,
+                        kMimeTypeLinuxUtf8String,
+#endif
+                        kMimeTypeTextUtf8});
 }
 
 void ClipboardOzone::WriteHTML(base::StringPiece markup,

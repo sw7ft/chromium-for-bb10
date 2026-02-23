@@ -7,7 +7,7 @@
 namespace ui {
 
 class OzonePlatform;
-OzonePlatform* CreateOzonePlatformQnxScreen();
+OzonePlatform* CreateOzonePlatformQnx_screen();
 
 }  // namespace ui
 

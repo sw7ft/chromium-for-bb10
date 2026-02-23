@@ -1383,14 +1383,15 @@ void RenderFrameHostManager::DidCreateNavigationRequest(
     }
   } else {
 #if BUILDFLAG(IS_QNX)
+    write(2, "QNX:RFHM:bypass\n", 17);
+    request->SetAssociatedRFHType(
+        NavigationRequest::AssociatedRenderFrameHostType::CURRENT);
+#else
     write(2, "QNX:RFHM:1 GetFH\n", 18);
-#endif
     BrowsingContextGroupSwap ignored_bcg_swap_info =
         BrowsingContextGroupSwap::CreateDefault();
     auto result = GetFrameHostForNavigation(request, &ignored_bcg_swap_info);
-#if BUILDFLAG(IS_QNX)
     write(2, "QNX:RFHM:2 GotFH\n", 18);
-#endif
     if (result.has_value()) {
       DCHECK(result.value());
     } else if (result.error() ==
@@ -1400,6 +1401,7 @@ void RenderFrameHostManager::DidCreateNavigationRequest(
           ->RecordMetricsForBlockedGetFrameHostAttempt(
               /* commit_attempt=*/false);
     }
+#endif
   }
 }
 
@@ -1577,12 +1579,11 @@ RenderFrameHostManager::GetFrameHostForNavigation(
   // GetFrameHostForNavigation will be called more than once during a navigation
   // (currently twice, on request and when it's about to commit in the
   // renderer).
+#if !BUILDFLAG(IS_QNX)
   TRACE_EVENT("navigation", "RenderFrameHostManager::GetFrameHostForNavigation",
               ChromeTrackEvent::kFrameTreeNodeInfo, *frame_tree_node_);
-
-  // TODO(peilinwang): remove when we've finished investigating BeginNavigation
-  // jank (https://crbug.com/1380942).
   SCOPED_UMA_HISTOGRAM_TIMER("Navigation.GetFrameHostForNavigation.Duration");
+#endif
 
   DCHECK(!request->common_params().url.SchemeIs(url::kJavaScriptScheme))
       << "Don't call this method for JavaScript URLs as those create a "

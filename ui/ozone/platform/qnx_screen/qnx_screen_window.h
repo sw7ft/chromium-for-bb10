@@ -59,6 +59,7 @@ class QnxScreenWindow : public PlatformWindow {
   void SetWindowIcons(const gfx::ImageSkia& window_icon,
                       const gfx::ImageSkia& app_icon) override;
   void SizeConstraintsChanged() override;
+  void PrepareForShutdown() override;
 
   void PostBuffer();
 

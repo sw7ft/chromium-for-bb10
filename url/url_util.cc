@@ -278,7 +278,6 @@ bool DoCanonicalize(const CHAR* spec,
                                         output_parsed);
 
   } else if (DoIsStandard(spec, scheme, &scheme_type)) {
-    // All "normal" URLs.
     ParseStandardURL(spec, spec_len, &parsed_input);
     success = CanonicalizeStandardURL(spec, spec_len, parsed_input, scheme_type,
                                       charset_converter, output, output_parsed);

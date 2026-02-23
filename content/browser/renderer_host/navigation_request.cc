@@ -2725,6 +2725,10 @@ void NavigationRequest::
       << "`render_frame_host_` should not be set before the "
          "`NavigationRequest` starts to select the RFH.";
 
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Browser:SelFrame:useCurrent\n"; ::write(2, m, sizeof(m) - 1); }
+  render_frame_host_ = frame_tree_node_->current_frame_host()->GetSafeRef();
+#else
   if (auto result =
           frame_tree_node_->render_manager()->GetFrameHostForNavigation(
               this, &browsing_context_group_swap_);
@@ -2749,6 +2753,7 @@ void NavigationRequest::
         return;
     }
   }
+#endif
 
   CHECK(Navigator::CheckWebUIRendererDoesNotDisplayNormalURL(
       &*render_frame_host_.value(), GetUrlInfo(),
@@ -4367,13 +4372,9 @@ void NavigationRequest::SelectFrameHostForOnResponseStarted(
     } else {
       switch (result.error()) {
         case GetFrameHostForNavigationFailed::kCouldNotReinitializeMainFrame:
-          // TODO(https://crbug.com/1400535): This was unhandled before and
-          // remains explicitly unhandled. This branch may be removed in the
-          // future.
           break;
         case GetFrameHostForNavigationFailed::kBlockedByPendingCommit:
           DCHECK(ShouldQueueDueToExistingPendingCommitRFH());
-          // This closure is posted to the event loop, so it must use WeakPtr.
           resume_commit_closure_ = base::BindOnce(
               &NavigationRequest::SelectFrameHostForOnResponseStarted,
               weak_factory_.GetWeakPtr(),
@@ -4387,8 +4388,6 @@ void NavigationRequest::SelectFrameHostForOnResponseStarted(
       }
     }
 
-    // GetFrameHostForNavigation() should update associated_rfh_type_, so it
-    // should never be NONE here.
     DCHECK_NE(AssociatedRenderFrameHostType::NONE, associated_rfh_type_);
 
     if (!Navigator::CheckWebUIRendererDoesNotDisplayNormalURL(
@@ -7531,12 +7530,14 @@ void NavigationRequest::ReadyToCommitNavigation(bool is_error) {
   // disconnection from the renderer NavigationClient; but browser-initiated
   // navigations do not, so we must look explicitly. We should not proceed and
   // claim "ReadyToCommitNavigation" to the delegate if the renderer is gone.
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:Browser:NR_skipLiveCheck\n"; ::write(2, m, sizeof(m) - 1); }
+#else
   if (!GetRenderFrameHost()->IsRenderFrameLive()) {
     OnNavigationClientDisconnected(0, "");
-    // DO NOT ADD CODE AFTER THIS, as the NavigationHandle has been deleted
-    // by the previous call.
     return;
   }
+#endif
 #if BUILDFLAG(IS_QNX)
   { const char m[] = "QNX:Browser:NR_afterLive\n"; ::write(2, m, sizeof(m) - 1); }
 #endif

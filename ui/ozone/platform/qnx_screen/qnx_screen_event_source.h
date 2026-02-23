@@ -25,6 +25,7 @@ class QnxScreenEventSource : public PlatformEventSource {
   void ProcessEvent(screen_event_t event);
   void ProcessTouchEvent(screen_event_t event, int type);
   void ProcessKeyboardEvent(screen_event_t event);
+  void RepaintToolbar();
 
   screen_context_t ctx_;
   screen_event_t event_ = nullptr;

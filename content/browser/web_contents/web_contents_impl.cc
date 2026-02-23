@@ -8942,9 +8942,11 @@ bool WebContentsImpl::CreateRenderViewForRenderManager(
     RenderViewHost* render_view_host,
     const absl::optional<blink::FrameToken>& opener_frame_token,
     RenderFrameProxyHost* proxy_host) {
+#if !BUILDFLAG(IS_QNX)
   TRACE_EVENT1("browser,navigation",
                "WebContentsImpl::CreateRenderViewForRenderManager",
                "render_view_host", render_view_host);
+#endif
   auto* rvh_impl = static_cast<RenderViewHostImpl*>(render_view_host);
   // Observers should not destroy the WebContents here or we will crash as the
   // stack unwinds. See crbug.com/1181043.

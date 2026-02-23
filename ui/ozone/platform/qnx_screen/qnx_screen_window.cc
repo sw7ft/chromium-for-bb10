@@ -6,6 +6,7 @@
 #include <screen/screen.h>
 #include <unistd.h>
 
+#include "ui/base/cursor/platform_cursor.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_window_manager.h"
 
 namespace ui {
@@ -42,11 +43,41 @@ QnxScreenWindow::QnxScreenWindow(PlatformWindowDelegate* delegate,
   if (size[1] <= 0) size[1] = 1440;
   screen_set_window_property_iv(window_, SCREEN_PROPERTY_SIZE, size);
   screen_set_window_property_iv(window_, SCREEN_PROPERTY_SOURCE_SIZE, size);
+  screen_set_window_property_iv(window_, SCREEN_PROPERTY_BUFFER_SIZE, size);
+
+  int zorder = 100;
+  screen_set_window_property_iv(window_, SCREEN_PROPERTY_ZORDER, &zorder);
+
+  int visible = 1;
+  screen_set_window_property_iv(window_, SCREEN_PROPERTY_VISIBLE, &visible);
 
   rc = screen_create_window_buffers(window_, 2);
   if (rc != 0) {
     const char msg[] = "QNX:OzWin: screen_create_window_buffers failed\n";
     ::write(2, msg, sizeof(msg) - 1);
+  } else {
+    // Fill initial buffer with a visible color to confirm window is showing
+    screen_buffer_t buf[2];
+    screen_get_window_property_pv(window_, SCREEN_PROPERTY_RENDER_BUFFERS,
+                                  (void**)buf);
+    void* ptr = nullptr;
+    screen_get_buffer_property_pv(buf[0], SCREEN_PROPERTY_POINTER, &ptr);
+    if (ptr) {
+      int stride = 0;
+      screen_get_buffer_property_iv(buf[0], SCREEN_PROPERTY_STRIDE, &stride);
+      // Fill with dark blue (RGBX8888: 0xFF1a1a40)
+      uint32_t* pixels = static_cast<uint32_t*>(ptr);
+      for (int y = 0; y < size[1]; y++) {
+        uint32_t* row = reinterpret_cast<uint32_t*>(
+            static_cast<uint8_t*>(ptr) + y * stride);
+        for (int x = 0; x < size[0]; x++)
+          row[x] = 0xFF401a1a;  // BGRA dark blue
+      }
+      int dirty[4] = {0, 0, size[0], size[1]};
+      screen_post_window(window_, buf[0], 1, dirty, 0);
+      const char msg[] = "QNX:OzWin: Initial buffer posted (dark blue)\n";
+      ::write(2, msg, sizeof(msg) - 1);
+    }
   }
 
   manager_->AddWindow(widget_, this);
@@ -72,7 +103,7 @@ void QnxScreenWindow::SetBoundsInPixels(const gfx::Rect& bounds) {
     screen_set_window_property_iv(window_, SCREEN_PROPERTY_SIZE, size);
     screen_set_window_property_iv(window_, SCREEN_PROPERTY_SOURCE_SIZE, size);
   }
-  delegate_->OnBoundsChanged({bounds_});
+  delegate_->OnBoundsChanged({/*origin_changed=*/true});
 }
 
 gfx::Rect QnxScreenWindow::GetBoundsInDIP() const {
@@ -110,15 +141,14 @@ bool QnxScreenWindow::IsVisible() const {
   return visible_;
 }
 
+void QnxScreenWindow::PrepareForShutdown() {}
 void QnxScreenWindow::SetTitle(const std::u16string& title) {}
 void QnxScreenWindow::SetCapture() {}
 void QnxScreenWindow::ReleaseCapture() {}
 bool QnxScreenWindow::HasCapture() const { return false; }
 
 void QnxScreenWindow::SetFullscreen(bool fullscreen,
-                                    int64_t target_display_id) {
-  // Passport is always fullscreen
-}
+                                    int64_t target_display_id) {}
 
 void QnxScreenWindow::Maximize() {}
 void QnxScreenWindow::Minimize() {}

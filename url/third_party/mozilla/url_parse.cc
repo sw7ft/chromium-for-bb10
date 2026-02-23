@@ -264,7 +264,6 @@ void ParsePath(const CHAR* spec,
     query->reset();
   }
 
-  // File path: treat an empty file path as no file path.
   if (file_end != path.begin)
     *filepath = MakeRange(path.begin, file_end);
   else
@@ -327,15 +326,26 @@ void DoParseAfterScheme(const CHAR* spec,
   int end_auth = FindNextAuthorityTerminator(spec, after_slashes, spec_len);
   authority = Component(after_slashes, end_auth - after_slashes);
 
-  if (end_auth == spec_len)  // No beginning of path found.
+  if (end_auth == spec_len)
     full_path = Component();
-  else  // Everything starting from the slash to the end is the path.
+  else
     full_path = Component(end_auth, spec_len - end_auth);
 
-  // Now parse those two sub-parts.
   DoParseAuthority(spec, authority, &parsed->username, &parsed->password,
                    &parsed->host, &parsed->port);
+#if defined(__QNX__)
+  // ParsePath on QNX/ARM drops the path component (compiler/codegen bug).
+  // Bypass it and set path directly from the full_path range.
+  if (full_path.is_valid() && full_path.len > 0) {
+    parsed->path = full_path;
+    parsed->query.reset();
+    parsed->ref.reset();
+  } else {
+    ParsePath(spec, full_path, &parsed->path, &parsed->query, &parsed->ref);
+  }
+#else
   ParsePath(spec, full_path, &parsed->path, &parsed->query, &parsed->ref);
+#endif
 }
 
 // The main parsing function for standard URLs. Standard URLs have a scheme,

@@ -163,6 +163,19 @@ void ShellBrowserMainParts::InitializeBrowserContexts() {
 }
 
 void ShellBrowserMainParts::InitializeMessageLoopContext() {
+#if BUILDFLAG(IS_QNX)
+  GURL url = GetStartupURL();
+  auto* cmdline = base::CommandLine::ForCurrentProcess();
+  if (cmdline->HasSwitch("dump-dom")) {
+    std::string spec = url.spec();
+    bool is_blank = spec.empty() || spec == "about:" || spec == "about:blank";
+    if (is_blank) {
+      const char out[] = "<html><head></head><body></body></html>\n";
+      ::write(1, out, sizeof(out) - 1);
+      _exit(0);
+    }
+  }
+#endif
   Shell::CreateNewWindow(browser_context_.get(), GetStartupURL(), nullptr,
                          gfx::Size());
 }
