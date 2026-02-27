@@ -3,6 +3,14 @@
 
 source_set("qnx_screen") {
   sources = [
+    "client_native_pixmap_factory_qnx_screen.cc",
+    "client_native_pixmap_factory_qnx_screen.h",
+    "qnx_screen_input_callback.cc",
+    "qnx_screen_input_callback.h",
+    "qnx_screen_overlay_callback.cc",
+    "qnx_screen_overlay_callback.h",
+    "qnx_screen_repaint.cc",
+    "qnx_screen_repaint.h",
     "ozone_platform_qnx_screen.cc",
     "ozone_platform_qnx_screen.h",
     "qnx_screen_event_source.cc",
@@ -20,6 +28,7 @@ source_set("qnx_screen") {
     "//skia",
     "//ui/base/cursor",
     "//ui/base/ime",
+    "//ui/display",
     "//ui/display/types",
     "//ui/events",
     "//ui/events/ozone/layout:layout",

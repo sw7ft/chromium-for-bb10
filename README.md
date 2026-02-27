@@ -7,28 +7,36 @@ A port of Chromium's `content_shell` to QNX, targeting the **BlackBerry Passport
 - **Headless browser** running in single-process mode on the BlackBerry Passport
 - **HTML parsing and DOM construction** via Blink
 - **V8 JavaScript engine** initialized and running on ARM32 QNX
-- **`--dump-dom` output** for `about:blank` and `data:` URLs with clean exit
+- **`--dump-dom` output** for `about:blank`, `data:`, and **HTTP URLs** with clean exit
+- **Local HTTP page loading** -- full HTML + JavaScript rendering via `http://127.0.0.1`
 - **ICU internationalization**, CSS default stylesheets, full DOM tree
 
 ```
-$ ssh passport "cd /accounts/devuser/berry-deploy && ./content_shell \
-    --headless --single-process --no-sandbox --disable-gpu --dump-dom \
-    'data:text/html,<h1>Hello from BlackBerry</h1>'" 2>/dev/null
-<html><head></head><body><h1>Hello from BlackBerry</h1></body></html>
+$ ssh passport "cd /accounts/devuser/berry-deploy && \
+    LD_LIBRARY_PATH=. ./content_shell \
+    --no-sandbox --disable-gpu --no-zygote --single-process \
+    --disable-features=ServiceWorker,NetworkServiceDedicatedThread,MojoIpcz \
+    --headless --dump-dom http://127.0.0.1:8001/" 2>/dev/null
+<html><head><title>Directory listing for /</title>
+</head><body><h2>Directory listing for /</h2><hr><ul>
+<li><a href="example.html">example.html</a></li>
+</ul><hr></body></html>
 ```
 
-## In Progress (BerryBrowserNative)
+## In Progress
 
-- **Mojo IPC debugging** -- eventfd emulation fixed; channel-level traces added to diagnose message delivery
+- **External HTTP** (e.g. `http://example.com`) -- TCP connect and request/response work, but QNX `select()` has broken readiness detection for external sockets requiring thread-pool workarounds
 - **Ozone platform for QNX Screen** -- windowed rendering backend using `screen_create_window()` + Skia software rasterizer
 - **Browser chrome UI** -- Skia-rendered toolbar with URL bar, back/forward/reload buttons
-- **Touch and keyboard input** -- via `screen_get_event()` polling
+- **BAR packaging** -- native app packaging for BB10 launcher (currently crashes on launch, needs Ozone debugging)
 
 ## What Doesn't Work (Yet)
 
-- **HTTP/HTTPS loading** -- Mojo IPC message delivery is unreliable on QNX after the first navigation, blocking the network URL loader pipeline
-- **Multi-process mode** -- same Mojo IPC limitation
+- **HTTPS** -- TLS not yet tested
+- **External HTTP** -- partially working (connect + send works, read readiness detection in progress)
+- **Multi-process mode** -- QNX process model differences
 - **Service workers, web workers** -- disabled
+- **Windowed mode** -- Ozone `qnx_screen` platform needs debugging
 
 ## Target Hardware
 
@@ -53,8 +61,8 @@ All patches apply against this commit. Fetch Chromium source using `depot_tools`
 ```
 ├── README.md
 ├── patches/
-│   └── qnx-port.patch          # unified diff (324 modified files, ~12k lines)
-├── src/                         # 21 new QNX-specific files
+│   └── qnx-port.patch          # unified diff (368 modified files, ~16k lines)
+├── src/                         # 42 new QNX-specific files
 │   ├── base/qnx/               # platform abstractions (memory, process, files, threading)
 │   ├── build/config/qnx/       # GN platform config (defines, sysroot, flags)
 │   ├── build/toolchain/qnx/    # GN toolchain (Clang 17 compile + GCC 9.3 link)
@@ -103,7 +111,7 @@ cd /path/to/chromium-for-bb10
 ./scripts/apply-patches.sh ~/chromium/src
 ```
 
-This applies `patches/qnx-port.patch` and copies the 21 new files into place.
+This applies `patches/qnx-port.patch` and copies the 42 new files into place.
 
 ### 3. Configure the build
 
@@ -149,11 +157,20 @@ scp out/qnx-arm/content_shell out/qnx-arm/content_shell.pak \
 ### 7. Run
 
 ```bash
+# Dump DOM for a local HTTP page (start python server: python3.2 -m http.server 8001)
 ssh passport "cd /accounts/devuser/berry-deploy && \
     LD_LIBRARY_PATH=. ./content_shell \
-    --headless --single-process --no-sandbox --disable-gpu \
-    --disable-features=ServiceWorker --dump-dom \
-    'data:text/html,<h1>Hello from BlackBerry</h1>'"
+    --no-sandbox --disable-gpu --no-zygote --single-process \
+    --disable-features=ServiceWorker,NetworkServiceDedicatedThread,MojoIpcz \
+    --headless --dump-dom http://127.0.0.1:8001/" 2>/dev/null
+
+# Dump DOM for a data: URL
+ssh passport "cd /accounts/devuser/berry-deploy && \
+    LD_LIBRARY_PATH=. ./content_shell \
+    --no-sandbox --disable-gpu --no-zygote --single-process \
+    --disable-features=ServiceWorker,NetworkServiceDedicatedThread,MojoIpcz \
+    --headless --dump-dom \
+    'data:text/html,<h1>Hello from BlackBerry</h1>'" 2>/dev/null
 ```
 
 ## Build Configuration
@@ -192,15 +209,23 @@ symbol_level = 1
 
 The port works around several QNX-specific issues:
 
-- **Mojo IPC unreliability**: After the first page load, Mojo messages between browser and renderer components are not delivered reliably. The port bypasses this for `--dump-dom` by dumping the DOM directly from `FrameLoader::FinishedParsing()` during the initial document lifecycle, before any async Mojo communication is needed.
+- **URL path parsing bug**: QNX ARM codegen silently drops URL path components in `ParsePath()`. Bypassed with direct path assignment in `DoParseAfterScheme()`.
 
-- **FrameLoader uninitialized state**: The initial empty document's `FrameLoader` is in `kUninitialized` state on QNX, preventing the normal load event chain. The port detects this and handles DOM output directly.
+- **DOCTYPE crash**: Lowercase `<!doctype html>` causes SIGSEGV in `strlen` during HTML tokenization on QNX ARM. Fixed by normalizing to uppercase `<!DOCTYPE` in `HTMLDocumentParser::Append()`.
 
-- **data: URL handling**: `Shell::LoadURL` converts `data:` URLs to `about:blank` on QNX (since data URL navigation also depends on Mojo). The original data URL content is extracted from the command line and output directly.
+- **Clipboard hang**: `ui::Clipboard::IsSupportedClipboardBuffer()` hangs on QNX Ozone. Guarded with `#if !BUILDFLAG(IS_QNX)`.
+
+- **TRACE_EVENT hangs**: Perfetto tracing macros cause hangs on QNX. All critical paths guarded with `#if !BUILDFLAG(IS_QNX)`.
+
+- **libevent poll() broken**: `poll()` blocks indefinitely for external TCP sockets on QNX. Disabled poll backend, forced `select()` with minimum 50ms timeout.
+
+- **Socket readiness detection**: QNX `select()` with zero timeout doesn't detect TCP socket readiness. Non-blocking task-based polling and thread-pool-offloaded `select()` used as workarounds.
 
 - **Single-process only**: Due to QNX process model differences, only `--single-process` mode is supported.
 
 - **Platform stubs**: Missing QNX APIs (sandboxing, GPU, UI platform delegate, etc.) are stubbed out.
+
+See [docs/STATUS.md](docs/STATUS.md) for a detailed issue log.
 
 ## SSH Configuration
 

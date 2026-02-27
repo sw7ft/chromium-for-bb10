@@ -196,10 +196,18 @@ index 6ac840b89f..389fd90eab 100644
  
  bool BeingDebugged() {
 diff --git a/base/debug/stack_trace_posix.cc b/base/debug/stack_trace_posix.cc
-index 5fec90b39c..b2b46363ce 100644
+index 5fec90b39c..198d7a10ba 100644
 --- a/base/debug/stack_trace_posix.cc
 +++ b/base/debug/stack_trace_posix.cc
-@@ -17,6 +17,11 @@
+@@ -6,6 +6,7 @@
+ 
+ #include <errno.h>
+ #include <fcntl.h>
++#include <pthread.h>
+ #include <signal.h>
+ #include <stddef.h>
+ #include <stdint.h>
+@@ -17,6 +18,11 @@
  #include <sys/syscall.h>
  #include <sys/types.h>
  #include <unistd.h>
@@ -211,7 +219,7 @@ index 5fec90b39c..b2b46363ce 100644
  
  #include <algorithm>
  #include <map>
-@@ -328,6 +333,59 @@ void StackDumpSignalHandler(int signal, siginfo_t* info, void* void_context) {
+@@ -328,6 +334,75 @@ void StackDumpSignalHandler(int signal, siginfo_t* info, void* void_context) {
    // NOTE: This code MUST be async-signal safe.
    // NO malloc or stdio is allowed here.
  
@@ -233,8 +241,8 @@ index 5fec90b39c..b2b46363ce 100644
 +      sp = uc->uc_mcontext.cpu.gpr[13];
 +    }
 +    int n = snprintf(buf, sizeof(buf),
-+      "QNX:CHROMIUM_CRASH sig=%s(%d) code=%d pc=0x%x lr=0x%x sp=0x%x\n",
-+      signame, signal, si_code, pc, lr, sp);
++      "QNX:CRASH tid=%x sig=%s(%d) code=%d pc=0x%x lr=0x%x sp=0x%x\n",
++      (unsigned)pthread_self(), signame, signal, si_code, pc, lr, sp);
 +    write(STDERR_FILENO, buf, n);
 +
 +    Dl_info dli;
@@ -263,15 +271,31 @@ index 5fec90b39c..b2b46363ce 100644
 +        write(STDERR_FILENO, buf, n);
 +      }
 +    }
-+    // Stack scan disabled: caused secondary SIGSEGV on QNX.
-+    // Using QNX:TO_FAIL in casting.h instead for type cast diagnostics.
++    // Stack scan: print potential return addresses from stack
++    if (sp > 0x10000) {
++      write(STDERR_FILENO, "QNX:STACK:", 10);
++      unsigned* sptr = (unsigned*)sp;
++      for (int i = 0; i < 80 && (unsigned)(sptr + i) < 0x7fffffff; i++) {
++        unsigned val = sptr[i];
++        if (val > 0x1000000 && val < 0x6000000) {
++          Dl_info sdi;
++          if (dladdr((void*)(val & ~1), &sdi) && sdi.dli_sname) {
++            n = snprintf(buf, sizeof(buf), " [%d]%x:%s+%x",
++              i, val, sdi.dli_sname,
++              (unsigned)((char*)(val & ~1) - (char*)sdi.dli_saddr));
++            write(STDERR_FILENO, buf, n);
++          }
++        }
++      }
++      write(STDERR_FILENO, "\n", 1);
++    }
 +  }
 +#endif
 +
  #if !BUILDFLAG(IS_NACL)
    // Give a registered callback a chance to recover from this signal
    //
-@@ -995,6 +1053,9 @@ bool EnableInProcessStackDumping() {
+@@ -995,6 +1070,9 @@ bool EnableInProcessStackDumping() {
    success &= (sigaction(SIGFPE, &action, nullptr) == 0);
    success &= (sigaction(SIGBUS, &action, nullptr) == 0);
    success &= (sigaction(SIGSEGV, &action, nullptr) == 0);
@@ -715,6 +739,43 @@ index 27b65e7c53..e93602fdc9 100644
  #elif BUILDFLAG(IS_FUCHSIA)
  using MessagePumpForUI = MessagePumpFuchsia;
  #else
+diff --git a/base/message_loop/message_pump_libevent.cc b/base/message_loop/message_pump_libevent.cc
+index 72f67b836c..dcd6012690 100644
+--- a/base/message_loop/message_pump_libevent.cc
++++ b/base/message_loop/message_pump_libevent.cc
+@@ -202,9 +202,11 @@ bool MessagePumpLibevent::WatchFileDescriptor(int fd,
+   }
+ #endif
+ 
++#if !BUILDFLAG(IS_QNX)
+   TRACE_EVENT("base", "MessagePumpLibevent::WatchFileDescriptor", "fd", fd,
+               "persistent", persistent, "watch_read", mode & WATCH_READ,
+               "watch_write", mode & WATCH_WRITE);
++#endif
+   DCHECK_GE(fd, 0);
+   DCHECK(controller);
+   DCHECK(delegate);
+@@ -469,10 +471,19 @@ void MessagePumpLibevent::OnWakeup(int socket, short flags, void* context) {
+   MessagePumpLibevent* that = static_cast<MessagePumpLibevent*>(context);
+   DCHECK(that->wakeup_pipe_out_ == socket);
+ 
+-  // Remove and discard the wakeup byte.
++  // Remove and discard the wakeup byte(s).
++#if defined(__QNX__) || defined(__QNXNTO__)
++  // On QNX, drain all pending bytes to prevent poll() from missing
++  // readability transitions when the pipe has accumulated data.
++  {
++    char drain[64];
++    while (HANDLE_EINTR(read(socket, drain, sizeof(drain))) > 0) {}
++  }
++#else
+   char buf;
+   long nread = HANDLE_EINTR(read(socket, &buf, 1));
+   DCHECK_EQ(nread, 1);
++#endif
+   that->processed_io_events_ = true;
+   // Tell libevent to break out of inner loop.
+   event_base_loopbreak(that->event_base_.get());
 diff --git a/base/metrics/persistent_histogram_allocator.h b/base/metrics/persistent_histogram_allocator.h
 index fdf136fd0d..ec8a1bdd7b 100644
 --- a/base/metrics/persistent_histogram_allocator.h
@@ -941,6 +1002,121 @@ index eae7b944cd..00d4020963 100644
  
  // I/O manipulators are function pointers, but should be sent directly to the
  // `ostream` instead of being cast to `const void*` like other function
+diff --git a/base/task/sequence_manager/atomic_flag_set.cc b/base/task/sequence_manager/atomic_flag_set.cc
+index 34605009cc..c5c89afa31 100644
+--- a/base/task/sequence_manager/atomic_flag_set.cc
++++ b/base/task/sequence_manager/atomic_flag_set.cc
+@@ -124,6 +124,21 @@ void AtomicFlagSet::RunActiveCallbacks() const {
+   }
+ }
+ 
++void AtomicFlagSet::RunAllCallbacks() const {
++  DCHECK_CALLED_ON_VALID_THREAD(associated_thread_->thread_checker);
++  for (Group* iter = alloc_list_head_.get(); iter; iter = iter->next.get()) {
++    std::atomic_exchange_explicit(&iter->flags, size_t{0},
++                                  std::memory_order_acquire);
++    size_t allocated = iter->allocated_flags;
++    while (allocated) {
++      int index = Group::IndexOfFirstFlagSet(allocated);
++      allocated ^= size_t{1} << index;
++      if (!iter->flag_callbacks[index].is_null())
++        iter->flag_callbacks[index].Run();
++    }
++  }
++}
++
+ AtomicFlagSet::Group::Group() = default;
+ 
+ AtomicFlagSet::Group::~Group() {
+diff --git a/base/task/sequence_manager/atomic_flag_set.h b/base/task/sequence_manager/atomic_flag_set.h
+index e3c7d069bc..a3060e9dde 100644
+--- a/base/task/sequence_manager/atomic_flag_set.h
++++ b/base/task/sequence_manager/atomic_flag_set.h
+@@ -81,6 +81,9 @@ class BASE_EXPORT AtomicFlagSet {
+   // resets all flags to inactive. Must be called on the associated thread.
+   void RunActiveCallbacks() const;
+ 
++  // Runs all registered callbacks regardless of flag state.
++  void RunAllCallbacks() const;
++
+  protected:
+   Group* GetAllocListForTesting() const { return alloc_list_head_.get(); }
+ 
+diff --git a/base/task/sequence_manager/task_queue_impl.cc b/base/task/sequence_manager/task_queue_impl.cc
+index 841d8e61e1..b2272c07f5 100644
+--- a/base/task/sequence_manager/task_queue_impl.cc
++++ b/base/task/sequence_manager/task_queue_impl.cc
+@@ -454,6 +454,20 @@ void TaskQueueImpl::PostImmediateTaskImpl(PostedTask task,
+       should_schedule_work =
+           any_thread_.post_immediate_task_should_schedule_work;
+     }
++#if defined(__QNX__) || defined(__QNXNTO__)
++    if (current_thread == CurrentThread::kNotMainThread) {
++      should_schedule_work = true;
++      if (!(was_immediate_incoming_queue_empty &&
++            any_thread_.immediate_work_queue_empty)) {
++        char _b[128];
++        int _n = snprintf(_b, sizeof(_b),
++            "QNX:PITI cross ieq=%d wqe=%d\n",
++            was_immediate_incoming_queue_empty ? 1 : 0,
++            any_thread_.immediate_work_queue_empty ? 1 : 0);
++        ::write(2, _b, _n);
++      }
++    }
++#endif
+   }
+ 
+   // On windows it's important to call this outside of a lock because calling a
+diff --git a/base/task/sequence_manager/thread_controller_with_message_pump_impl.cc b/base/task/sequence_manager/thread_controller_with_message_pump_impl.cc
+index 2826030d58..4f84d1216d 100644
+--- a/base/task/sequence_manager/thread_controller_with_message_pump_impl.cc
++++ b/base/task/sequence_manager/thread_controller_with_message_pump_impl.cc
+@@ -8,6 +8,12 @@
+ #include <atomic>
+ #include <utility>
+ 
++#if defined(__QNX__) || defined(__QNXNTO__)
++#include <cstdio>
++#include <unistd.h>
++#include <pthread.h>
++#endif
++
+ #include "base/auto_reset.h"
+ #include "base/feature_list.h"
+ #include "base/logging.h"
+@@ -186,6 +192,11 @@ void ThreadControllerWithMessagePumpImpl::ScheduleWork() {
+     }
+     pump_->ScheduleWork();
+   }
++#if defined(__QNX__) || defined(__QNXNTO__)
++  else if (pump_ && !associated_thread_->IsBoundToCurrentThread()) {
++    pump_->ScheduleWork();
++  }
++#endif
+ }
+ 
+ void ThreadControllerWithMessagePumpImpl::SetNextDelayedDoWork(
+@@ -455,6 +466,20 @@ absl::optional<WakeUp> ThreadControllerWithMessagePumpImpl::DoWorkImpl(
+       TaskAnnotator::LongTaskTracker long_task_tracker(
+           time_source_, selected_task->task, &task_annotator_);
+ 
++#if defined(__QNX__) || defined(__QNXNTO__)
++      {
++        static int task_counter = 0;
++        task_counter++;
++        const auto& loc = selected_task->task.posted_from;
++        char _b[200];
++        int _n = snprintf(_b, sizeof(_b), "QNX:RT tid=%x #%d %s:%d %s\n",
++                          (unsigned)pthread_self(), task_counter,
++                          loc.file_name() ? loc.file_name() : "?",
++                          loc.line_number(),
++                          loc.function_name() ? loc.function_name() : "?");
++        if (_n > 0) write(2, _b, _n);
++      }
++#endif
+       // Note: all arguments after task are just passed to a TRACE_EVENT for
+       // logging so lambda captures are safe as lambda is executed inline.
+       SequencedTaskSource* source = main_thread_only().task_source;
 diff --git a/base/task/thread_pool/initialization_util.cc b/base/task/thread_pool/initialization_util.cc
 index edf29c9a57..0c4e68be34 100644
 --- a/base/task/thread_pool/initialization_util.cc
@@ -1174,23 +1350,36 @@ index f589d179ca..f53d549a05 100644
    return 0;
  #else
 diff --git a/base/threading/platform_thread_posix.cc b/base/threading/platform_thread_posix.cc
-index e5a751446b..d287ec07fa 100644
+index e5a751446b..8343760f94 100644
 --- a/base/threading/platform_thread_posix.cc
 +++ b/base/threading/platform_thread_posix.cc
-@@ -14,6 +14,12 @@
+@@ -14,6 +14,15 @@
  #include <sys/types.h>
  #include <unistd.h>
  
 +#if BUILDFLAG(IS_QNX)
++#include <cstdio>
 +#define QNX_TF(msg) write(2, msg, sizeof(msg) - 1)
++#define QNX_TFF(...) do { char _b[160]; int _n = snprintf(_b, sizeof(_b), __VA_ARGS__); if (_n > 0) write(2, _b, _n); } while(0)
 +#else
 +#define QNX_TF(msg) ((void)0)
++#define QNX_TFF(...) ((void)0)
 +#endif
 +
  #include <memory>
  #include <tuple>
  
-@@ -90,14 +96,18 @@ void* ThreadFunc(void* params) {
+@@ -73,6 +82,9 @@ void* ThreadFunc(void* params) {
+         static_cast<ThreadParams*>(params));
+ 
+     delegate = thread_params->delegate;
++    QNX_TFF("QNX:TF:0 del=%x tid=%x\n",
++            (unsigned)reinterpret_cast<uintptr_t>(delegate),
++            (unsigned)pthread_self());
+     if (!thread_params->joinable)
+       base::DisallowSingleton();
+ 
+@@ -90,14 +102,22 @@ void* ThreadFunc(void* params) {
      // Threads on linux/android may inherit their priority from the thread
      // where they were created. This explicitly sets the priority of all new
      // threads.
@@ -1205,11 +1394,15 @@ index e5a751446b..d287ec07fa 100644
        PlatformThread::CurrentHandle().platform_handle(),
        PlatformThread::CurrentId());
  
-+  QNX_TF("QNX:TF:4 ThreadMain\n");
++  QNX_TFF("QNX:TF:4 del=%x vtbl=%x tid=%x\n",
++          (unsigned)reinterpret_cast<uintptr_t>(delegate),
++          (delegate && reinterpret_cast<uintptr_t>(delegate) > 0x1000)
++              ? (unsigned)*reinterpret_cast<uintptr_t*>(delegate) : 0u,
++          (unsigned)pthread_self());
    delegate->ThreadMain();
  
    ThreadIdNameManager::GetInstance()->RemoveName(
-@@ -372,7 +382,7 @@ namespace internal {
+@@ -372,7 +392,7 @@ namespace internal {
  
  void SetCurrentThreadTypeImpl(ThreadType thread_type,
                                MessagePumpType pump_type_hint) {
@@ -1218,6 +1411,87 @@ index e5a751446b..d287ec07fa 100644
    NOTIMPLEMENTED();
  #else
    if (internal::SetCurrentThreadTypeForPlatform(thread_type, pump_type_hint))
+diff --git a/base/threading/thread.cc b/base/threading/thread.cc
+index 9a30864307..12a2975cbd 100644
+--- a/base/threading/thread.cc
++++ b/base/threading/thread.cc
+@@ -8,6 +8,17 @@
+ #include <type_traits>
+ #include <utility>
+ 
++#if BUILDFLAG(IS_QNX)
++#include <pthread.h>
++#include <unistd.h>
++#include <cstdio>
++#define QNX_TM(msg) do { write(2, msg, sizeof(msg) - 1); } while(0)
++#define QNX_TMF(...) do { char _b[128]; int _n = snprintf(_b, sizeof(_b), __VA_ARGS__); if (_n > 0) write(2, _b, _n); } while(0)
++#else
++#define QNX_TM(msg) ((void)0)
++#define QNX_TMF(...) ((void)0)
++#endif
++
+ #include "base/dcheck_is_on.h"
+ #include "base/functional/bind.h"
+ #include "base/functional/callback_helpers.h"
+@@ -354,6 +365,8 @@ bool Thread::GetThreadWasQuitProperly() {
+ }
+ 
+ void Thread::ThreadMain() {
++  QNX_TMF("QNX:TM:0 tid=%x\n", (unsigned)pthread_self());
++  QNX_TMF("QNX:TM:0b name=%s\n", name_.empty() ? "(empty)" : name_.c_str());
+   // First, make GetThreadId() available to avoid deadlocks. It could be called
+   // any place in the following thread initialization code.
+   DCHECK(!id_event_.IsSignaled());
+@@ -364,15 +377,18 @@ void Thread::ThreadMain() {
+   id_ = PlatformThread::CurrentId();
+   DCHECK_NE(kInvalidThreadId, id_);
+   id_event_.Signal();
++  QNX_TM("QNX:TM:1 id\n");
+ 
+   // Complete the initialization of our Thread object.
+   PlatformThread::SetName(name_.c_str());
+   ANNOTATE_THREAD_NAME(name_.c_str());  // Tell the name to race detector.
++  QNX_TM("QNX:TM:2 name\n");
+ 
+   // Lazily initialize the |message_loop| so that it can run on this thread.
+   DCHECK(delegate_);
+   // This binds CurrentThread and SingleThreadTaskRunner::CurrentDefaultHandle.
+   delegate_->BindToCurrentThread();
++  QNX_TM("QNX:TM:3 bind\n");
+   DCHECK(CurrentThread::Get());
+   DCHECK(SingleThreadTaskRunner::HasCurrentDefault());
+ #if (BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_NACL)) || BUILDFLAG(IS_FUCHSIA)
+@@ -383,6 +399,7 @@ void Thread::ThreadMain() {
+         delegate_->GetDefaultTaskRunner());
+   }
+ #endif  // (BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_NACL)) || BUILDFLAG(IS_FUCHSIA)
++  QNX_TM("QNX:TM:4 fdw\n");
+ 
+ #if BUILDFLAG(IS_WIN)
+   std::unique_ptr<win::ScopedCOMInitializer> com_initializer;
+@@ -395,7 +412,9 @@ void Thread::ThreadMain() {
+ #endif
+ 
+   // Let the thread do extra initialization.
++  QNX_TM("QNX:TM:5 preInit\n");
+   Init();
++  QNX_TM("QNX:TM:6 postInit\n");
+ 
+   {
+     AutoLock lock(running_lock_);
+@@ -403,10 +422,12 @@ void Thread::ThreadMain() {
+   }
+ 
+   start_event_.Signal();
++  QNX_TM("QNX:TM:7 preRun\n");
+ 
+   RunLoop run_loop;
+   run_loop_ = &run_loop;
+   Run(run_loop_);
++  QNX_TM("QNX:TM:8 postRun\n");
+ 
+   {
+     AutoLock lock(running_lock_);
 diff --git a/base/trace_event/process_memory_dump.cc b/base/trace_event/process_memory_dump.cc
 index d797e7cdd3..71e3bcc742 100644
 --- a/base/trace_event/process_memory_dump.cc
@@ -2663,7 +2937,7 @@ index 8f000bf466..917b861602 100644
    } else if (is_fuchsia) {
      target_arch = "fuchsia"
 diff --git a/components/services/storage/public/cpp/filesystem/filesystem_impl.cc b/components/services/storage/public/cpp/filesystem/filesystem_impl.cc
-index 64e64bf281..c82df8be24 100644
+index 64e64bf281..c3e7b9753e 100644
 --- a/components/services/storage/public/cpp/filesystem/filesystem_impl.cc
 +++ b/components/services/storage/public/cpp/filesystem/filesystem_impl.cc
 @@ -22,6 +22,8 @@
@@ -2695,7 +2969,7 @@ index 64e64bf281..c82df8be24 100644
        lock.InitWithNewPipeAndPassReceiver());
    std::move(callback).Run(base::File::FILE_OK, std::move(lock));
  }
-@@ -281,22 +286,44 @@ void FilesystemImpl::SetOpenedFileLength(base::File file,
+@@ -281,22 +286,45 @@ void FilesystemImpl::SetOpenedFileLength(base::File file,
  
  // static
  base::FileErrorOr<base::File> FilesystemImpl::LockFileLocal(
@@ -2713,18 +2987,19 @@ index 64e64bf281..c82df8be24 100644
 +  if (!GetLockTable().AddLock(path)) {
 +#if BUILDFLAG(IS_QNX)
 +    // Single-process mode: multiple components may lock the same profile.
-+    // Use an alternate path so the second locker succeeds.
-+    path_to_use = path.AddExtension(".qnx_alt");
-+    if (!GetLockTable().AddLock(path_to_use)) {
-+#if defined(OS_QNX)
-+      const char m[] = "QNX:LOCK:alt also failed\n";
-+      ::write(2, m, sizeof(m) - 1);
-+#endif
++    // Try alternate paths with increasing suffixes.
++    bool alt_locked = false;
++    for (int i = 0; i < 16; ++i) {
++      path_to_use = path.AddExtension(
++          ".qnx_alt" + (i == 0 ? std::string() : std::to_string(i)));
++      if (GetLockTable().AddLock(path_to_use)) {
++        alt_locked = true;
++        break;
++      }
++    }
++    if (!alt_locked) {
 +      return base::unexpected(base::File::FILE_ERROR_IN_USE);
 +    }
-+#if defined(OS_QNX)
-+    { const char m[] = "QNX:LOCK:using alt path\n"; ::write(2, m, sizeof(m) - 1); }
-+#endif
 +#else
      return base::unexpected(base::File::FILE_ERROR_IN_USE);
 -
@@ -3447,14 +3722,15 @@ index 4104ed9460..eec0f0df4b 100644
  
  std::vector<FakeEventLevelReport> GetRandomFakeReports(
 diff --git a/content/browser/browser_main.cc b/content/browser/browser_main.cc
-index 87ac9feb51..5dbae2cb33 100644
+index 87ac9feb51..60f2a98884 100644
 --- a/content/browser/browser_main.cc
 +++ b/content/browser/browser_main.cc
-@@ -13,25 +13,52 @@
+@@ -13,25 +13,53 @@
  #include "content/browser/browser_main_runner_impl.h"
  #include "content/common/content_constants_internal.h"
  
 +#if BUILDFLAG(IS_QNX)
++#include <pthread.h>
 +#include <stdio.h>
 +#include <unistd.h>
 +#endif
@@ -3494,7 +3770,7 @@ index 87ac9feb51..5dbae2cb33 100644
      return exit_code;
  
 +#if BUILDFLAG(IS_QNX)
-+  write(2, "QNX:BrowserMain:5 Run\n", 22);
++  { char _b[64]; int _n = snprintf(_b, sizeof(_b), "QNX:BrowserMain:5 Run tid=%x\n", (unsigned)pthread_self()); write(2, _b, _n); }
 +#endif
    exit_code = main_runner->Run();
 +#if BUILDFLAG(IS_QNX)
@@ -3683,6 +3959,22 @@ index 1ce7217210..c5b02fea97 100644
    main_loop_->CreateStartupTasks();
    int result_code = main_loop_->GetResultCode();
    if (result_code > 0) {
+diff --git a/content/browser/device/device_service.cc b/content/browser/device/device_service.cc
+index d1f6ebd733..ea4b58aaa4 100644
+--- a/content/browser/device/device_service.cc
++++ b/content/browser/device/device_service.cc
+@@ -79,6 +79,11 @@ class DeviceServiceURLLoaderFactory : public network::SharedURLLoaderFactory {
+ 
+ void BindDeviceServiceReceiver(
+     mojo::PendingReceiver<device::mojom::DeviceService> receiver) {
++#if BUILDFLAG(IS_QNX)
++  // QNX: Device services (USB, Bluetooth, sensors, NFC) are not available.
++  // Drop the receiver to avoid crashes from unimplemented device backends.
++  return;
++#endif
+   // Bind the lifetime of the service instance to that of the sequence it's
+   // running on.
+   static base::SequenceLocalStorageSlot<std::unique_ptr<device::DeviceService>>
 diff --git a/content/browser/devtools/protocol/page_handler.cc b/content/browser/devtools/protocol/page_handler.cc
 index 0137f86fe2..3fdb76735a 100644
 --- a/content/browser/devtools/protocol/page_handler.cc
@@ -3849,6 +4141,403 @@ index 22a183f1b4..1c19a3dc65 100644
        db_interest_group.component_ads_kanon.push_back(kanon_data);
      } else {
        db_interest_group.reporting_ads_kanon.push_back(kanon_data);
+diff --git a/content/browser/loader/navigation_url_loader_impl.cc b/content/browser/loader/navigation_url_loader_impl.cc
+index 19f6f2a31b..ec28bb3735 100644
+--- a/content/browser/loader/navigation_url_loader_impl.cc
++++ b/content/browser/loader/navigation_url_loader_impl.cc
+@@ -8,6 +8,10 @@
+ #include <memory>
+ #include <set>
+ #include <utility>
++#if defined(__QNX__) || defined(__QNXNTO__)
++#include <unistd.h>
++#include <cstdio>
++#endif
+ 
+ #include "base/command_line.h"
+ #include "base/containers/contains.h"
+@@ -117,6 +121,16 @@ namespace content {
+ 
+ namespace {
+ 
++#if defined(__QNX__) || defined(__QNXNTO__)
++scoped_refptr<base::SingleThreadTaskRunner> GetNavNetworkResponseTaskRunner() {
++  return GetUIThreadTaskRunner({});
++}
++#else
++scoped_refptr<base::SingleThreadTaskRunner> GetNavNetworkResponseTaskRunner() {
++  return GetNavNetworkResponseTaskRunner();
++}
++#endif
++
+ class NavigationLoaderInterceptorBrowserContainer
+     : public NavigationLoaderInterceptor {
+  public:
+@@ -458,6 +472,12 @@ void NavigationURLLoaderImpl::StartImpl(
+   DCHECK(!head_);
+   head_ = network::mojom::URLResponseHead::New();
+   started_ = true;
++#if defined(__QNX__)
++  {
++    const char m[] = "QNX:NULI:StartImpl\n";
++    ::write(2, m, sizeof(m) - 1);
++  }
++#endif
+ 
+   resource_request_->headers.SetHeader(
+       net::HttpRequestHeaders::kAccept,
+@@ -479,7 +499,7 @@ void NavigationURLLoaderImpl::StartImpl(
+           CreateURLLoaderThrottles(), global_request_id_.request_id,
+           network::mojom::kURLLoadOptionNone, resource_request_.get(), this,
+           kNavigationUrlLoaderTrafficAnnotation,
+-          GetUIThreadTaskRunner({BrowserTaskType::kNavigationNetworkResponse}));
++          GetNavNetworkResponseTaskRunner());
+       return;
+     }
+ 
+@@ -493,7 +513,7 @@ void NavigationURLLoaderImpl::StartImpl(
+           CreateURLLoaderThrottles(), global_request_id_.request_id,
+           network::mojom::kURLLoadOptionNone, resource_request_.get(), this,
+           kNavigationUrlLoaderTrafficAnnotation,
+-          GetUIThreadTaskRunner({BrowserTaskType::kNavigationNetworkResponse}));
++          GetNavNetworkResponseTaskRunner());
+       return;
+     }
+   }
+@@ -551,8 +571,7 @@ void NavigationURLLoaderImpl::CreateInterceptors(
+           GetContentClient()->browser()->WillCreateURLLoaderRequestInterceptors(
+               navigation_ui_data_.get(), frame_tree_node_id_,
+               request_info_->navigation_id,
+-              content::GetUIThreadTaskRunner(
+-                  {content::BrowserTaskType::kNavigationNetworkResponse}));
++              GetNavNetworkResponseTaskRunner());
+   if (!browser_interceptors.empty()) {
+     for (auto& browser_interceptor : browser_interceptors) {
+       interceptors_.push_back(
+@@ -613,7 +632,7 @@ void NavigationURLLoaderImpl::MaybeStartLoader(
+     // Non-intercepted requests usually go through the regular network
+     // URLLoader, which does mime sniffing.
+     throttles.push_back(std::make_unique<blink::MimeSniffingThrottle>(
+-        GetUIThreadTaskRunner({BrowserTaskType::kNavigationNetworkResponse})));
++        GetNavNetworkResponseTaskRunner()));
+ 
+     default_loader_used_ = false;
+     // If `url_loader_` already exists, this means we are following a redirect
+@@ -633,7 +652,7 @@ void NavigationURLLoaderImpl::MaybeStartLoader(
+         std::move(single_request_factory), std::move(throttles),
+         global_request_id_.request_id, network::mojom::kURLLoadOptionNone,
+         resource_request_.get(), this, kNavigationUrlLoaderTrafficAnnotation,
+-        GetUIThreadTaskRunner({BrowserTaskType::kNavigationNetworkResponse}));
++        GetNavNetworkResponseTaskRunner());
+ 
+     subresource_loader_params_ =
+         interceptor->MaybeCreateSubresourceLoaderParams();
+@@ -685,12 +704,24 @@ void NavigationURLLoaderImpl::MaybeStartLoader(
+   }
+ 
+   // No interceptors wanted to handle this request.
++#if defined(__QNX__)
++  {
++    const char m[] = "QNX:NULI:Fallback\n";
++    ::write(2, m, sizeof(m) - 1);
++  }
++#endif
+   FallbackToNonInterceptedRequest(false);
+ }
+ 
+ void NavigationURLLoaderImpl::FallbackToNonInterceptedRequest(
+     bool reset_subresource_loader_params,
+     const net::LoadTimingInfo& timing_info) {
++#if defined(__QNX__)
++  {
++    const char m[] = "QNX:NULI:FallbackImpl\n";
++    ::write(2, m, sizeof(m) - 1);
++  }
++#endif
+   if (reset_subresource_loader_params)
+     subresource_loader_params_.reset();
+ 
+@@ -715,7 +746,7 @@ void NavigationURLLoaderImpl::FallbackToNonInterceptedRequest(
+         std::move(factory), CreateURLLoaderThrottles(),
+         global_request_id_.request_id, options, resource_request_.get(),
+         /*client=*/this, kNavigationUrlLoaderTrafficAnnotation,
+-        GetUIThreadTaskRunner({BrowserTaskType::kNavigationNetworkResponse}));
++        GetNavNetworkResponseTaskRunner());
+   }
+ }
+ 
+@@ -834,6 +865,12 @@ void NavigationURLLoaderImpl::OnReceiveResponse(
+     network::mojom::URLResponseHeadPtr head,
+     mojo::ScopedDataPipeConsumerHandle response_body,
+     absl::optional<mojo_base::BigBuffer> cached_metadata) {
++#if defined(__QNX__)
++  {
++    const char m[] = "QNX:NULI:OnRecvResp!\n";
++    ::write(2, m, sizeof(m) - 1);
++  }
++#endif
+   DCHECK(!cached_metadata);
+   LogQueueTimeHistogram("Navigation.QueueTime.OnReceiveResponse",
+                         resource_request_->is_outermost_main_frame);
+@@ -1023,6 +1060,14 @@ void NavigationURLLoaderImpl::OnTransferSizeUpdated(
+ 
+ void NavigationURLLoaderImpl::OnComplete(
+     const network::URLLoaderCompletionStatus& status) {
++#if defined(__QNX__)
++  {
++    char m[64];
++    int n = snprintf(m, sizeof(m), "QNX:NULI:OnComplete err=%d\n",
++                     status.error_code);
++    ::write(2, m, n);
++  }
++#endif
+   // Successful load must have used OnResponseStarted first. In this case, the
+   // URLLoaderClient has already been transferred to the renderer process and
+   // OnComplete is not expected to be called here.
+@@ -1158,7 +1203,7 @@ void NavigationURLLoaderImpl::Clone(
+   // blocking navigation when they do.
+   accept_ch_frame_observers_.Add(
+       this, std::move(listener),
+-      GetUIThreadTaskRunner({BrowserTaskType::kNavigationNetworkResponse}));
++      GetNavNetworkResponseTaskRunner());
+ }
+ 
+ // Returns true if an interceptor wants to handle the response, i.e. return a
+@@ -1183,7 +1228,7 @@ bool NavigationURLLoaderImpl::MaybeCreateLoaderForResponse(
+       response_loader_receiver_.reset();
+       response_loader_receiver_.Bind(
+           std::move(response_client_receiver),
+-          GetUIThreadTaskRunner({BrowserTaskType::kNavigationNetworkResponse}));
++          GetNavNetworkResponseTaskRunner());
+       default_loader_used_ = false;
+       url_loader_.reset();     // Consumed above.
+       response_body_.reset();  // Consumed above.
+@@ -1348,7 +1393,7 @@ NavigationURLLoaderImpl::NavigationURLLoaderImpl(
+   // blocking navigation when they do.
+   accept_ch_frame_observers_.Add(
+       this, accept_ch_frame_observer.InitWithNewPipeAndPassReceiver(),
+-      GetUIThreadTaskRunner({BrowserTaskType::kNavigationNetworkResponse}));
++      GetNavNetworkResponseTaskRunner());
+ 
+   FrameTreeNode* frame_tree_node =
+       FrameTreeNode::GloballyFindByID(frame_tree_node_id_);
+@@ -1380,8 +1425,7 @@ NavigationURLLoaderImpl::NavigationURLLoaderImpl(
+         &factory_receiver, /*header_client=*/nullptr,
+         /*bypass_redirect_checks=*/nullptr, /*disable_secure_dns=*/nullptr,
+         /*factory_override=*/nullptr,
+-        content::GetUIThreadTaskRunner(
+-            {content::BrowserTaskType::kNavigationNetworkResponse}));
++        GetNavNetworkResponseTaskRunner());
+ 
+     mojo::Remote<network::mojom::URLLoaderFactory> direct_factory_for_webui(
+         CreateWebUIURLLoaderFactory(frame_tree_node->current_frame_host(),
+@@ -1479,8 +1523,7 @@ NavigationURLLoaderImpl::CreateNetworkLoaderFactory(
+       frame_tree_node->navigation_request()->GetNavigationId(), ukm_id,
+       &factory_receiver, &header_client, bypass_redirect_checks,
+       /*disable_secure_dns=*/nullptr, /*factory_override=*/nullptr,
+-      content::GetUIThreadTaskRunner(
+-          {content::BrowserTaskType::kNavigationNetworkResponse}));
++      GetNavNetworkResponseTaskRunner());
+   if (devtools_instrumentation::WillCreateURLLoaderFactory(
+           frame_tree_node->current_frame_host(), /*is_navigation=*/true,
+           /*is_download=*/false, &factory_receiver,
+@@ -1502,6 +1545,16 @@ NavigationURLLoaderImpl::CreateNetworkLoaderFactory(
+         storage_partition->GetURLLoaderFactoryForBrowserProcess();
+   }
+   DCHECK(network_loader_factory);
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    char m[128];
++    int n = snprintf(m, sizeof(m),
++                     "QNX:CNLF proxy=%d hdrCli=%d\n",
++                     use_proxy ? 1 : 0,
++                     header_client.is_valid() ? 1 : 0);
++    ::write(2, m, n);
++  }
++#endif
+   if (!use_proxy) {
+     return network_loader_factory;
+   }
+@@ -1512,7 +1565,19 @@ NavigationURLLoaderImpl::CreateNetworkLoaderFactory(
+ }
+ 
+ void NavigationURLLoaderImpl::Start() {
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    const char m[] = "QNX:NULI:Start!\n";
++    ::write(2, m, sizeof(m) - 1);
++  }
++#endif
+   std::move(start_closure_).Run();
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    const char m[] = "QNX:NULI:StartDone!\n";
++    ::write(2, m, sizeof(m) - 1);
++  }
++#endif
+ }
+ 
+ void NavigationURLLoaderImpl::FollowRedirect(
+@@ -1711,8 +1776,7 @@ void NavigationURLLoaderImpl::
+       /*header_client=*/nullptr,
+       /*bypass_redirect_checks=*/nullptr, /*disable_secure_dns=*/nullptr,
+       /*factory_override=*/nullptr,
+-      content::GetUIThreadTaskRunner(
+-          {content::BrowserTaskType::kNavigationNetworkResponse}));
++      GetNavNetworkResponseTaskRunner());
+ 
+   // TODO(lukasza, jam): It is unclear why FileURLLoaderFactory is the only
+   // non-http factory that allows DevTools intereception.  For comparison all
+diff --git a/content/browser/network_service_instance_impl.cc b/content/browser/network_service_instance_impl.cc
+index 3908105d40..5642edbb10 100644
+--- a/content/browser/network_service_instance_impl.cc
++++ b/content/browser/network_service_instance_impl.cc
+@@ -7,6 +7,11 @@
+ #include <memory>
+ #include <string>
+ #include <utility>
++#if defined(__QNX__) || defined(__QNXNTO__)
++#include <unistd.h>
++#include <cstdio>
++#include <pthread.h>
++#endif
+ 
+ #include "base/base_paths.h"
+ #include "base/check.h"
+@@ -162,9 +167,22 @@ static NetworkServiceClient* g_client = nullptr;
+ 
+ void CreateInProcessNetworkServiceOnThread(
+     mojo::PendingReceiver<network::mojom::NetworkService> receiver) {
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    char m[96];
++    int n = snprintf(m, sizeof(m), "QNX:CIPNST:enter tid=%lu\n", (unsigned long)pthread_self());
++    ::write(2, m, n);
++  }
++#endif
+   g_in_process_instance = new network::NetworkService(
+       nullptr /* registry */, std::move(receiver),
+       true /* delay_initialization_until_set_client */);
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    const char m[] = "QNX:CIPNST:done\n";
++    ::write(2, m, sizeof(m) - 1);
++  }
++#endif
+ }
+ 
+ // A utility function to make it clear what behavior is expected by the network
+@@ -312,6 +330,12 @@ void CreateNetworkContextInternal(
+     }
+   }
+ 
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    const char m[] = "QNX:CNCI:enter\n";
++    ::write(2, m, sizeof(m) - 1);
++  }
++#endif
+   // This might recreate g_client if the network service needed to be restarted.
+   auto* network_service = GetNetworkService();
+ 
+@@ -341,20 +365,51 @@ scoped_refptr<base::SequencedTaskRunner>& GetNetworkTaskRunnerStorage() {
+ void CreateInProcessNetworkService(
+     mojo::PendingReceiver<network::mojom::NetworkService> receiver) {
+   TRACE_EVENT0("loading", "CreateInProcessNetworkService");
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    char m[96];
++    int n = snprintf(m, sizeof(m), "QNX:CIPNS:enter tid=%lu\n", (unsigned long)pthread_self());
++    ::write(2, m, n);
++  }
++#endif
+   scoped_refptr<base::SingleThreadTaskRunner> task_runner;
+   if (base::FeatureList::IsEnabled(kNetworkServiceDedicatedThread)) {
+     base::Thread::Options options(base::MessagePumpType::IO, 0);
+     GetNetworkServiceDedicatedThread().StartWithOptions(std::move(options));
+     task_runner = GetNetworkServiceDedicatedThread().task_runner();
++#if defined(__QNX__) || defined(__QNXNTO__)
++    {
++      const char m[] = "QNX:CIPNS:dedicatedThread\n";
++      ::write(2, m, sizeof(m) - 1);
++    }
++#endif
+   } else {
+     task_runner = GetIOThreadTaskRunner({});
++#if defined(__QNX__) || defined(__QNXNTO__)
++    {
++      const char m[] = "QNX:CIPNS:ioThread\n";
++      ::write(2, m, sizeof(m) - 1);
++    }
++#endif
+   }
+ 
+   GetNetworkTaskRunnerStorage() = std::move(task_runner);
+ 
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    const char m[] = "QNX:CIPNS:postingTask\n";
++    ::write(2, m, sizeof(m) - 1);
++  }
++#endif
+   GetNetworkTaskRunner()->PostTask(
+       FROM_HERE, base::BindOnce(&CreateInProcessNetworkServiceOnThread,
+                                 std::move(receiver)));
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    const char m[] = "QNX:CIPNS:posted\n";
++    ::write(2, m, sizeof(m) - 1);
++  }
++#endif
+ }
+ 
+ #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_LINUX)
+@@ -574,10 +629,23 @@ class NetworkServiceInstancePrivate {
+ };
+ 
+ network::mojom::NetworkService* GetNetworkService() {
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    char m[96];
++    int n = snprintf(m, sizeof(m), "QNX:GNS:enter tid=%lu\n", (unsigned long)pthread_self());
++    ::write(2, m, n);
++  }
++#endif
+   if (!g_network_service_remote)
+     g_network_service_remote = new mojo::Remote<network::mojom::NetworkService>;
+   if (!g_network_service_remote->is_bound() ||
+       !g_network_service_remote->is_connected()) {
++#if defined(__QNX__) || defined(__QNXNTO__)
++    {
++      const char m[] = "QNX:GNS:needsCreate!\n";
++      ::write(2, m, sizeof(m) - 1);
++    }
++#endif
+     bool service_was_bound = g_network_service_remote->is_bound();
+     g_network_service_remote->reset();
+     if (GetContentClient()->browser()->IsShuttingDown()) {
+@@ -986,6 +1054,21 @@ void CreateNetworkContextInNetworkService(
+   // Create network context immediately without thread hops.
+   CreateNetworkContextInternal(std::move(context), std::move(params),
+                                grant_result);
++#elif defined(__QNX__) || defined(__QNXNTO__)
++  {
++    SandboxGrantResult grant_result = SandboxGrantResult::kNoMigrationRequested;
++    if (!params->file_paths) {
++      grant_result = SandboxGrantResult::kDidNotAttemptToGrantSandboxAccess;
++    } else if (!params->file_paths->unsandboxed_data_path) {
++      grant_result = SandboxGrantResult::kDidNotAttemptToGrantSandboxAccess;
++    }
++    {
++      const char m[] = "QNX:CNCINS:directCreate\n";
++      ::write(2, m, sizeof(m) - 1);
++    }
++    CreateNetworkContextInternal(std::move(context), std::move(params),
++                                 grant_result);
++  }
+ #else
+   // Restrict disk access to a certain path (on another thread) and continue
+   // with network context creation.
 diff --git a/content/browser/preloading/prefetch/no_vary_search_helper.h b/content/browser/preloading/prefetch/no_vary_search_helper.h
 index 1eeefc207f..54dd9b3a07 100644
 --- a/content/browser/preloading/prefetch/no_vary_search_helper.h
@@ -3910,6 +4599,85 @@ index e09d1b6a89..43a61d8f40 100644
        doc_count_in_page[site_info]++;
      } else {
        doc_count_in_page[site_info] = 1;
+diff --git a/content/browser/renderer_host/commit_deferring_condition_runner.cc b/content/browser/renderer_host/commit_deferring_condition_runner.cc
+index b6e572cf7c..3590b1c627 100644
+--- a/content/browser/renderer_host/commit_deferring_condition_runner.cc
++++ b/content/browser/renderer_host/commit_deferring_condition_runner.cc
+@@ -4,6 +4,10 @@
+ 
+ #include "content/browser/renderer_host/commit_deferring_condition_runner.h"
+ 
++#if BUILDFLAG(IS_QNX)
++#include <cstdio>
++#include <unistd.h>
++#endif
+ #include "base/memory/ptr_util.h"
+ #include "base/no_destructor.h"
+ #include "content/browser/renderer_host/back_forward_cache_commit_deferring_condition.h"
+@@ -152,35 +156,52 @@ void CommitDeferringConditionRunner::UninstallConditionGeneratorForTesting(
+ }
+ 
+ void CommitDeferringConditionRunner::ProcessConditions() {
++#if BUILDFLAG(IS_QNX)
++  {
++    char _b[64];
++    int _n = snprintf(_b, sizeof(_b), "QNX:CDC:0 count=%zu\n", conditions_.size());
++    write(2, _b, _n);
++  }
++#endif
+   while (!conditions_.empty()) {
+-    // If the condition isn't yet ready to commit, it'll be resolved
+-    // asynchronously. The loop will continue from ResumeProcessing();
+-
+     auto resume_closure =
+         base::BindOnce(&CommitDeferringConditionRunner::ResumeProcessing,
+                        weak_factory_.GetWeakPtr());
+     CommitDeferringCondition* condition = (*conditions_.begin()).get();
++#if BUILDFLAG(IS_QNX)
++    {
++      char _b[128];
++      int _n = snprintf(_b, sizeof(_b), "QNX:CDC:chk %p\n",
++                        (void*)condition);
++      write(2, _b, _n);
++    }
++#endif
+     is_deferred_ = false;
+-    switch (condition->WillCommitNavigation(std::move(resume_closure))) {
++    auto result = condition->WillCommitNavigation(std::move(resume_closure));
++#if BUILDFLAG(IS_QNX)
++    {
++      char _b[128];
++      int _n = snprintf(_b, sizeof(_b), "QNX:CDC:res %d\n",
++                        (int)result);
++      write(2, _b, _n);
++    }
++#endif
++    switch (result) {
+       case CommitDeferringCondition::Result::kDefer:
+         is_deferred_ = true;
+         return;
+       case CommitDeferringCondition::Result::kCancelled:
+-        // DO NOT ADD CODE after this. The previous call to
+-        // `WillCommitNavigation()` may have caused the destruction of the
+-        // `NavigationRequest` that owns this `CommitDeferringConditionRunner`.
+         return;
+       case CommitDeferringCondition::Result::kProceed:
+         break;
+     }
+ 
+-    // Otherwise, the condition is resolved synchronously so remove it and move
+-    // on to the next one.
+     conditions_.erase(conditions_.begin());
+   }
+ 
+-  // All checks are completed, proceed with the commit in the
+-  // NavigationRequest.
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:CDC:done allOK\n", 19);
++#endif
+   delegate_->OnCommitDeferringConditionChecksComplete(
+       navigation_type_, candidate_prerender_frame_tree_node_id_);
+ }
 diff --git a/content/browser/renderer_host/frame_tree_node.cc b/content/browser/renderer_host/frame_tree_node.cc
 index 4e255e03f7..289267be5e 100644
 --- a/content/browser/renderer_host/frame_tree_node.cc
@@ -4054,7 +4822,7 @@ index 9cad0acf67..5249d7cd92 100644
        params.from_download_cross_origin_redirect);
    navigation_request->set_force_new_browsing_instance(
 diff --git a/content/browser/renderer_host/navigation_request.cc b/content/browser/renderer_host/navigation_request.cc
-index 0eed5d5e1b..6a350ea94d 100644
+index 0eed5d5e1b..359921333c 100644
 --- a/content/browser/renderer_host/navigation_request.cc
 +++ b/content/browser/renderer_host/navigation_request.cc
 @@ -8,6 +8,9 @@
@@ -4299,7 +5067,7 @@ index 0eed5d5e1b..6a350ea94d 100644
      // The types of pages that don't need a URL Loader should never get served
      // from the BackForwardCache or activated from a prerender.
      DCHECK(!IsServedFromBackForwardCache());
-@@ -2651,6 +2717,9 @@ void NavigationRequest::BeginNavigationImpl() {
+@@ -2651,11 +2717,18 @@ void NavigationRequest::BeginNavigationImpl() {
  
  void NavigationRequest::
      SelectFrameHostForCrossDocumentNavigationWithNoUrlLoader() {
@@ -4309,7 +5077,24 @@ index 0eed5d5e1b..6a350ea94d 100644
    DCHECK(!NeedsUrlLoader());
    CHECK(!HasRenderFrameHost())
        << "`render_frame_host_` should not be set before the "
-@@ -3082,7 +3151,9 @@ void NavigationRequest::OnRequestRedirected(
+          "`NavigationRequest` starts to select the RFH.";
+ 
++#if BUILDFLAG(IS_QNX)
++  { const char m[] = "QNX:Browser:SelFrame:useCurrent\n"; ::write(2, m, sizeof(m) - 1); }
++  render_frame_host_ = frame_tree_node_->current_frame_host()->GetSafeRef();
++#else
+   if (auto result =
+           frame_tree_node_->render_manager()->GetFrameHostForNavigation(
+               this, &browsing_context_group_swap_);
+@@ -2680,6 +2753,7 @@ void NavigationRequest::
+         return;
+     }
+   }
++#endif
+ 
+   CHECK(Navigator::CheckWebUIRendererDoesNotDisplayNormalURL(
+       &*render_frame_host_.value(), GetUrlInfo(),
+@@ -3082,7 +3156,9 @@ void NavigationRequest::OnRequestRedirected(
      const net::RedirectInfo& redirect_info,
      const net::NetworkAnonymizationKey& network_anonymization_key,
      network::mojom::URLResponseHeadPtr response_head) {
@@ -4319,7 +5104,7 @@ index 0eed5d5e1b..6a350ea94d 100644
  
    // Sanity check - this can only be set at commit time.
    DCHECK(!auth_challenge_info_);
-@@ -3504,6 +3575,17 @@ void NavigationRequest::DetermineOriginAgentClusterEndResult() {
+@@ -3504,6 +3580,17 @@ void NavigationRequest::DetermineOriginAgentClusterEndResult() {
    DCHECK(state_ == WILL_PROCESS_RESPONSE ||
           state_ == WILL_COMMIT_WITHOUT_URL_LOADER ||
           state_ == WILL_FAIL_REQUEST || state_ == CANCELING);
@@ -4337,7 +5122,19 @@ index 0eed5d5e1b..6a350ea94d 100644
    auto* policy = ChildProcessSecurityPolicyImpl::GetInstance();
    url::Origin origin = GetOriginToCommit().value();
    const IsolationContext& isolation_context =
-@@ -3960,7 +4042,9 @@ void NavigationRequest::OnResponseStarted(
+@@ -3956,11 +4043,21 @@ void NavigationRequest::OnResponseStarted(
+     net::NetworkAnonymizationKey network_anonymization_key,
+     absl::optional<SubresourceLoaderParams> subresource_loader_params,
+     EarlyHints early_hints) {
++#if BUILDFLAG(IS_QNX)
++  {
++    char buf[128];
++    int n = snprintf(buf, sizeof(buf), "QNX:NR:OnResponse code=%d\n",
++                     response_head ? response_head->headers->response_code() : -1);
++    write(2, buf, n);
++  }
++#endif
+   if (is_download) {
      download_policy().RecordHistogram();
    }
  
@@ -4347,17 +5144,206 @@ index 0eed5d5e1b..6a350ea94d 100644
  
    // The |loader_|'s job is finished. It must not call the NavigationRequest
    // anymore from now.
-@@ -4219,7 +4303,9 @@ void NavigationRequest::SelectFrameHostForOnResponseStarted(
+@@ -4207,9 +4304,15 @@ void NavigationRequest::OnResponseStarted(
+     // OnRequestFailedInternal has destroyed the NavigationRequest.
+   }
+ 
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:NR:preSelect\n", 17);
++#endif
+   SelectFrameHostForOnResponseStarted(std::move(url_loader_client_endpoints),
+                                       is_download,
+                                       std::move(subresource_loader_params));
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:NR:postSelect\n", 18);
++#endif
+ }
+ 
+ void NavigationRequest::SelectFrameHostForOnResponseStarted(
+@@ -4219,11 +4322,15 @@ void NavigationRequest::SelectFrameHostForOnResponseStarted(
    CHECK(!HasRenderFrameHost())
        << "`render_frame_host_` should not be set before the "
           "`NavigationRequest` starts to select the RFH.";
 +#if !BUILDFLAG(IS_QNX)
    ScopedCrashKeys crash_keys(*this);
 +#endif
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:SFRS:0\n", 11);
++#endif
  
    std::string rfh_selected_reason;
  
-@@ -4601,7 +4687,9 @@ void NavigationRequest::OnRequestFailedInternal(
+-  // Select an appropriate renderer to commit the navigation.
+   if (IsServedFromBackForwardCache()) {
+     NavigationControllerImpl* controller = GetNavigationController();
+     auto entry =
+@@ -4251,21 +4358,23 @@ void NavigationRequest::SelectFrameHostForOnResponseStarted(
+                                  prerender_frame_tree_node_id_.value())
+                              ->GetSafeRef();
+   } else if (response_should_be_rendered_) {
++#if BUILDFLAG(IS_QNX)
++    write(2, "QNX:SFRS:1 preGetFH\n", 20);
++#endif
+     if (auto result =
+             frame_tree_node_->render_manager()->GetFrameHostForNavigation(
+                 this, &browsing_context_group_swap_, &rfh_selected_reason);
+         result.has_value()) {
++#if BUILDFLAG(IS_QNX)
++      write(2, "QNX:SFRS:2 gotRFH\n", 18);
++#endif
+       render_frame_host_ = result.value()->GetSafeRef();
+     } else {
+       switch (result.error()) {
+         case GetFrameHostForNavigationFailed::kCouldNotReinitializeMainFrame:
+-          // TODO(https://crbug.com/1400535): This was unhandled before and
+-          // remains explicitly unhandled. This branch may be removed in the
+-          // future.
+           break;
+         case GetFrameHostForNavigationFailed::kBlockedByPendingCommit:
+           DCHECK(ShouldQueueDueToExistingPendingCommitRFH());
+-          // This closure is posted to the event loop, so it must use WeakPtr.
+           resume_commit_closure_ = base::BindOnce(
+               &NavigationRequest::SelectFrameHostForOnResponseStarted,
+               weak_factory_.GetWeakPtr(),
+@@ -4279,8 +4388,6 @@ void NavigationRequest::SelectFrameHostForOnResponseStarted(
+       }
+     }
+ 
+-    // GetFrameHostForNavigation() should update associated_rfh_type_, so it
+-    // should never be NONE here.
+     DCHECK_NE(AssociatedRenderFrameHostType::NONE, associated_rfh_type_);
+ 
+     if (!Navigator::CheckWebUIRendererDoesNotDisplayNormalURL(
+@@ -4291,6 +4398,9 @@ void NavigationRequest::SelectFrameHostForOnResponseStarted(
+   } else {
+     render_frame_host_ = absl::nullopt;
+   }
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:SFRS:3 postRFH\n", 19);
++#endif
+   if (!HasRenderFrameHost()) {
+     DCHECK(!response_should_be_rendered_);
+   }
+@@ -4329,29 +4439,31 @@ void NavigationRequest::SelectFrameHostForOnResponseStarted(
+   // started.  Hence, about:blank is the only possible URL which both uses
+   // unassigned SiteInstances and can reach this point (via an extension
+   // redirect).
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:SFRS:4 preURLCheck\n", 22);
++#endif
+   if (common_params_->url.IsAboutBlank()) {
+-    // TODO(alexmos): Convert to a CHECK after verifying that this doesn't
+-    // happen in practice.
+     if (!WasServerRedirect()) {
+       DVLOG(1) << "about:blank should only go through the network stack "
+                << "when an extension redirects to it.";
++#if !BUILDFLAG(IS_QNX)
+       base::debug::DumpWithoutCrashing();
++#endif
+     }
+   } else {
+-    // TODO(alexmos): Convert to a CHECK after verifying that this doesn't
+-    // happen in practice.
+     if (!SiteInstanceImpl::ShouldAssignSiteForUrlInfo(GetUrlInfo())) {
+       DVLOG(1) << "This URL was unexpectedly loaded through the network stack: "
+                << common_params_->url;
++#if !BUILDFLAG(IS_QNX)
+       base::debug::DumpWithoutCrashing();
++#endif
+     }
+   }
+ 
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:SFRS:5 preSetSite\n", 21);
++#endif
+   if (HasRenderFrameHost()) {
+-    // Set the site URL now if it hasn't been set already. If the site requires
+-    // a dedicated process, this will lock the process to that site, which will
+-    // prevent other sites from incorrectly reusing this process. See
+-    // https://crbug.com/738634.
+     SiteInstanceImpl* instance = GetRenderFrameHost()->GetSiteInstance();
+     if (!instance->HasSite() &&
+         SiteInstanceImpl::ShouldAssignSiteForUrlInfo(GetUrlInfo())) {
+@@ -4375,6 +4487,9 @@ void NavigationRequest::SelectFrameHostForOnResponseStarted(
+     // IsUnused() value from the same process when making a process reuse
+     // decision.
+     GetRenderFrameHost()->GetProcess()->SetIsUsed();
++#if BUILDFLAG(IS_QNX)
++    write(2, "QNX:SFRS:6 setUsed\n", 19);
++#endif
+ 
+     // Now that we know the IsolationContext for the assigned SiteInstance, we
+     // opt the origin into OAC here if needed. Note that this doesn't need to
+@@ -4445,8 +4560,13 @@ void NavigationRequest::SelectFrameHostForOnResponseStarted(
+     }
+   }
+ 
++#if !BUILDFLAG(IS_QNX)
+   devtools_instrumentation::OnNavigationResponseReceived(*this,
+                                                          *response_head_);
++#endif
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:SFRS:7a postDev\n", 20);
++#endif
+ 
+   // The response code indicates that this is an error page, but we don't
+   // know how to display the content.  We follow Firefox here and show our
+@@ -4467,6 +4587,9 @@ void NavigationRequest::SelectFrameHostForOnResponseStarted(
+   // The CSP 'navigate-to' directive needs to know whether the response is a
+   // redirect or not in order to perform its checks. This is the reason why we
+   // need to check the CSP both on request and response.
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:SFRS:7b preCSP\n", 19);
++#endif
+   net::Error net_error = CheckContentSecurityPolicy(
+       was_redirected_ /* has_followed_redirect */,
+       false /* url_upgraded_after_redirect */, true /* is_response_check */);
+@@ -4482,13 +4605,16 @@ void NavigationRequest::SelectFrameHostForOnResponseStarted(
+     return;
+   }
+ 
+-  // TODO(https://crbug.com/1454273): Remove.
++#if !BUILDFLAG(IS_QNX)
+   SCOPED_CRASH_KEY_STRING256(
+       "Bug1454273", "base_host_for_data_url",
+       common_params_->base_url_for_data_url.host_piece());
+   SCOPED_CRASH_KEY_STRING1024("Bug1454273", "rfh_selected_reason",
+                               rfh_selected_reason);
+-
++#endif
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:SFRS:8 preFence\n", 20);
++#endif
+   if (HasRenderFrameHost() &&
+       !CheckPermissionsPoliciesForFencedFrames(GetOriginToCommit().value())) {
+     OnRequestFailedInternal(
+@@ -4501,11 +4627,25 @@ void NavigationRequest::SelectFrameHostForOnResponseStarted(
+   }
+ 
+   // Check if the navigation should be allowed to proceed.
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:SFRS:9 preWPR\n", 18);
++#endif
+   WillProcessResponse();
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:SFRS:10 postWPR\n", 20);
++#endif
+ }
+ 
+ void NavigationRequest::OnRequestFailed(
+     const network::URLLoaderCompletionStatus& status) {
++#if BUILDFLAG(IS_QNX)
++  {
++    char buf[128];
++    int n = snprintf(buf, sizeof(buf), "QNX:NR:OnFailed err=%d\n",
++                     status.error_code);
++    write(2, buf, n);
++  }
++#endif
+   DCHECK_NE(status.error_code, net::OK);
+ 
+   OnRequestFailedInternal(
+@@ -4601,7 +4741,9 @@ void NavigationRequest::OnRequestFailedInternal(
    CheckStateTransition(WILL_FAIL_REQUEST);
    DCHECK(!(status.error_code == net::ERR_ABORTED &&
             error_page_content.has_value()));
@@ -4367,7 +5353,53 @@ index 0eed5d5e1b..6a350ea94d 100644
  
    // The request failed, the |loader_| must not call the NavigationRequest
    // anymore from now while the error page is being loaded.
-@@ -5566,6 +5654,9 @@ void NavigationRequest::AddOldPageInfoToCommitParamsIfNeeded() {
+@@ -4947,6 +5089,15 @@ void NavigationRequest::OnStartChecksComplete(
+   // Reset the compositor lock before starting the loader.
+   compositor_lock_.reset();
+ 
++#if BUILDFLAG(IS_QNX)
++  {
++    char buf[128];
++    int n = snprintf(buf, sizeof(buf), "QNX:NR:CreateLoader url=%s\n",
++                     common_params_->url.spec().substr(0, 80).c_str());
++    write(2, buf, n);
++  }
++#endif
++
+   BrowserContext* browser_context =
+       frame_tree_node_->navigator().controller().GetBrowserContext();
+ 
+@@ -5000,7 +5151,19 @@ void NavigationRequest::OnStartChecksComplete(
+                     IsInMainFrame() ? "MainFrame" : "Subframe"}),
+       base::TimeTicks::Now() - will_start_request_time_);
+ 
++#if BUILDFLAG(IS_QNX)
++  {
++    const char m[] = "QNX:NR:preLoaderStart\n";
++    write(2, m, sizeof(m) - 1);
++  }
++#endif
+   loader_->Start();
++#if BUILDFLAG(IS_QNX)
++  {
++    const char m[] = "QNX:NR:postLoaderStart\n";
++    write(2, m, sizeof(m) - 1);
++  }
++#endif
+   // DO NOT ADD CODE after this. The previous call to
+   // NavigationURLLoader::Start() could cause the destruction of the
+   // NavigationRequest.
+@@ -5426,6 +5589,9 @@ void NavigationRequest::OnWillProcessResponseChecksComplete(
+     return;
+   };
+ 
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:NR:preRunCDC\n", 17);
++#endif
+   RunCommitDeferringConditions();
+   // DO NOT ADD CODE after this. The previous call to
+   // RunCommitDeferringConditions may have caused the destruction of the
+@@ -5566,6 +5732,9 @@ void NavigationRequest::AddOldPageInfoToCommitParamsIfNeeded() {
  }
  
  void NavigationRequest::CommitNavigation() {
@@ -4377,7 +5409,7 @@ index 0eed5d5e1b..6a350ea94d 100644
    // A navigation request should only commit once the response has been
    // processed.
    DCHECK_GE(state_, WILL_PROCESS_RESPONSE);
-@@ -5574,20 +5665,41 @@ void NavigationRequest::CommitNavigation() {
+@@ -5574,22 +5743,46 @@ void NavigationRequest::CommitNavigation() {
    CHECK(!HasWebUI());
    CheckSoftNavigationHeuristicsInvariants();
  
@@ -4418,8 +5450,51 @@ index 0eed5d5e1b..6a350ea94d 100644
 +#endif
    // TODO(crbug.com/979296): Consider changing this code to copy an origin
    // instead of creating one from a URL which lacks opacity information.
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:CN:1 preIso\n", 16);
++#endif
    isolation_info_for_subresources_ =
-@@ -5636,6 +5748,19 @@ void NavigationRequest::CommitNavigation() {
+       GetRenderFrameHost()->ComputeIsolationInfoForSubresourcesForPendingCommit(
+           origin, is_credentialless(), ComputeFencedFrameNonce());
+@@ -5602,12 +5795,18 @@ void NavigationRequest::CommitNavigation() {
+       GetRenderFrameHost()->ComputeNonce(is_credentialless(),
+                                          ComputeFencedFrameNonce());
+ 
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:CN:2 preStorage\n", 20);
++#endif
+   commit_params_->storage_key = GetRenderFrameHost()->CalculateStorageKey(
+       GetOriginToCommit().value(), base::OptionalToPtr(nonce));
+   commit_params_->session_storage_key =
+       frame_tree_node()->frame_tree().GetSessionStorageKey(
+           commit_params_->storage_key);
+ 
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:CN:3 preTopics\n", 19);
++#endif
+   if (topics_eligible_) {
+     topics_eligible_ = false;
+ 
+@@ -5619,12 +5818,18 @@ void NavigationRequest::CommitNavigation() {
+     }
+   }
+ 
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:CN:4 preRecordNav\n", 21);
++#endif
+   if (!NavigationTypeUtils::IsSameDocument(common_params_->navigation_type)) {
+     // We want to record this for the frame that we are navigating away from.
+     frame_tree_node_->render_manager()
+         ->current_frame_host()
+         ->RecordNavigationSuddenTerminationHandlers();
+   }
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:CN:5 preBF\n", 15);
++#endif
+   if (IsServedFromBackForwardCache() || IsPrerenderedPageActivation()) {
+     CommitPageActivation();
+     return;
+@@ -5636,12 +5841,29 @@ void NavigationRequest::CommitNavigation() {
    // have to handle, so it's easier to simply skip this in the hopes that the
    // non-mparch implementation will be removed soon.
    base::WeakPtr<NavigationRequest> weak_self(weak_factory_.GetWeakPtr());
@@ -4437,9 +5512,114 @@ index 0eed5d5e1b..6a350ea94d 100644
 +  }
 +#endif
    ReadyToCommitNavigation(false /* is_error */);
-   // The call above might block on showing a user dialog. The interaction of
-   // the user with this dialog might result in the WebContents owning this
-@@ -5793,6 +5918,19 @@ void NavigationRequest::CommitNavigation() {
+-  // The call above might block on showing a user dialog. The interaction of
+-  // the user with this dialog might result in the WebContents owning this
+-  // NavigationRequest to be destroyed. Return if this is the case.
+-  if (!weak_self)
++  if (!weak_self) {
++#if BUILDFLAG(IS_QNX)
++    write(2, "QNX:CN:6 destroyed!\n", 20);
++#endif
+     return;
++  }
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:CN:7 postReady\n", 19);
++#endif
+ 
+   DCHECK(GetRenderFrameHost() ==
+              frame_tree_node_->render_manager()->current_frame_host() ||
+@@ -5661,10 +5883,16 @@ void NavigationRequest::CommitNavigation() {
+     }
+   }
+ 
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:CN:8 preCoep\n", 17);
++#endif
+   CreateCoepReporter(GetRenderFrameHost()->GetProcess()->GetStoragePartition());
+   coop_status_.UpdateReporterStoragePartition(
+       GetRenderFrameHost()->GetProcess()->GetStoragePartition());
+ 
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:CN:9 preClientHints\n", 23);
++#endif
+   BrowserContext* browser_context =
+       frame_tree_node_->navigator().controller().GetBrowserContext();
+   ClientHintsControllerDelegate* client_hints_delegate =
+@@ -5724,10 +5952,21 @@ void NavigationRequest::CommitNavigation() {
+   // Generate a UKM source and track it on NavigationRequest. This will be
+   // passed down to the blink::Document to be created, if any, and used for UKM
+   // source creation when navigation has successfully committed.
++#if BUILDFLAG(IS_QNX)
++  commit_params_->document_ukm_source_id = ukm::kInvalidSourceId;
++#else
+   commit_params_->document_ukm_source_id = ukm::UkmRecorder::GetNewSourceID();
++#endif
+ 
+   blink::mojom::ServiceWorkerContainerInfoForClientPtr
+       service_worker_container_info;
++#if BUILDFLAG(IS_QNX)
++  {
++    char _b[48];
++    int _n = snprintf(_b, sizeof(_b), "QNX:CN:10y sw=%d\n", service_worker_handle_ ? 1 : 0);
++    write(2, _b, _n);
++  }
++#endif
+   if (service_worker_handle_) {
+     DCHECK(coep_reporter());
+     mojo::PendingRemote<network::mojom::CrossOriginEmbedderPolicyReporter>
+@@ -5741,13 +5980,9 @@ void NavigationRequest::CommitNavigation() {
+         &service_worker_container_info, commit_params_->document_ukm_source_id);
+   }
+ 
+-  // Determine if top-level navigation is allowed without sticky user
+-  // activation. This is used to fix the exploit in https://crbug.com/1251790.
+-  // If a child document is cross-origin with its parent, it loses its ability
+-  // to navigate top without user gesture. One notable exception is made if its
+-  // parent embeds it using sandbox="allow-top-navigation". Please note this is
+-  // quite unusual, because it means using sandbox brings new capabilities, as
+-  // opposed to new restrictions.
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:CN:10a postSW\n", 18);
++#endif
+   using WebSandboxFlags = network::mojom::WebSandboxFlags;
+   const bool embedder_allows_top_navigation_explicitly =
+       ((commit_params_->frame_policy.sandbox_flags != WebSandboxFlags::kNone) &&
+@@ -5762,6 +5997,9 @@ void NavigationRequest::CommitNavigation() {
+     policy_container_builder_->SetAllowTopNavigationWithoutUserGesture(false);
+   }
+ 
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:CN:10b preNavApi\n", 20);
++#endif
+   if (!IsSameDocument()) {
+     commit_params_->navigation_api_history_entry_arrays =
+         GetNavigationController()->GetNavigationApiHistoryEntryVectors(
+@@ -5769,6 +6007,9 @@ void NavigationRequest::CommitNavigation() {
+     PopulateDocumentTokenForCrossDocumentNavigation();
+   }
+ 
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:CN:10c preEarly\n", 20);
++#endif
+   if (early_hints_manager_) {
+     commit_params_->early_hints_preloaded_resources =
+         early_hints_manager_->TakePreloadedResourceURLs();
+@@ -5784,15 +6025,37 @@ void NavigationRequest::CommitNavigation() {
+   commit_params_->modified_runtime_features =
+       runtime_feature_state_context_.GetFeatureOverrides();
+ 
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:CN:11 preClone\n", 19);
++#endif
+   auto common_params = common_params_->Clone();
+   auto commit_params = commit_params_.Clone();
+   auto response_head = response_head_.Clone();
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:CN:12 postClone\n", 20);
++#endif
+   if (subresource_loader_params_ &&
+       !subresource_loader_params_->prefetched_signed_exchanges.empty()) {
+     commit_params->prefetched_signed_exchanges =
          std::move(subresource_loader_params_->prefetched_signed_exchanges);
    }
  
@@ -4456,10 +5636,23 @@ index 0eed5d5e1b..6a350ea94d 100644
 +  }
 +#endif
 +
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:NR:preRFHI_Commit\n", 22);
++#endif
    GetRenderFrameHost()->CommitNavigation(
        this, std::move(common_params), std::move(commit_params),
        std::move(response_head), std::move(response_body_),
-@@ -6927,6 +7065,9 @@ void NavigationRequest::WillProcessResponse() {
+@@ -5800,6 +6063,9 @@ void NavigationRequest::CommitNavigation() {
+       std::move(subresource_loader_params_), std::move(subresource_overrides_),
+       std::move(service_worker_container_info), document_token_,
+       devtools_navigation_token_);
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:NR:postRFHI_Commit\n", 23);
++#endif
+   UpdateNavigationHandleTimingsOnCommitSent();
+ 
+   // Give SpareRenderProcessHostManager a heads-up about the most recently used
+@@ -6927,6 +7193,9 @@ void NavigationRequest::WillProcessResponse() {
  }
  
  void NavigationRequest::WillCommitWithoutUrlLoader() {
@@ -4469,7 +5662,7 @@ index 0eed5d5e1b..6a350ea94d 100644
    EnterChildTraceEvent("WillCommitWithoutUrlLoader", this);
  
    throttle_runner_->RegisterNavigationThrottlesForCommitWithoutUrlLoader();
-@@ -7174,6 +7315,14 @@ bool NavigationRequest::NeedsUrlLoader() {
+@@ -7174,6 +7443,14 @@ bool NavigationRequest::NeedsUrlLoader() {
        // URL, not from the MHTML archive. See https://crbug.com/969696.
        !common_params_->url.SchemeIs(url::kDataScheme);
  
@@ -4484,7 +5677,7 @@ index 0eed5d5e1b..6a350ea94d 100644
    return IsURLHandledByNetworkStack(common_params_->url) && !IsSameDocument() &&
           !is_mhtml_subframe_loaded_from_achive;
  }
-@@ -7243,6 +7392,9 @@ NavigationRequest::TakeWebFeaturesToLog() {
+@@ -7243,6 +7520,9 @@ NavigationRequest::TakeWebFeaturesToLog() {
  }
  
  void NavigationRequest::ReadyToCommitNavigation(bool is_error) {
@@ -4494,17 +5687,27 @@ index 0eed5d5e1b..6a350ea94d 100644
    EnterChildTraceEvent("ReadyToCommitNavigation", this);
  
    // We may come back to here asynchronously, and the renderer may be destroyed
-@@ -7256,6 +7408,9 @@ void NavigationRequest::ReadyToCommitNavigation(bool is_error) {
-     // by the previous call.
+@@ -7250,12 +7530,17 @@ void NavigationRequest::ReadyToCommitNavigation(bool is_error) {
+   // disconnection from the renderer NavigationClient; but browser-initiated
+   // navigations do not, so we must look explicitly. We should not proceed and
+   // claim "ReadyToCommitNavigation" to the delegate if the renderer is gone.
++#if BUILDFLAG(IS_QNX)
++  { const char m[] = "QNX:Browser:NR_skipLiveCheck\n"; ::write(2, m, sizeof(m) - 1); }
++#else
+   if (!GetRenderFrameHost()->IsRenderFrameLive()) {
+     OnNavigationClientDisconnected(0, "");
+-    // DO NOT ADD CODE AFTER THIS, as the NavigationHandle has been deleted
+-    // by the previous call.
      return;
    }
++#endif
 +#if BUILDFLAG(IS_QNX)
 +  { const char m[] = "QNX:Browser:NR_afterLive\n"; ::write(2, m, sizeof(m) - 1); }
 +#endif
  
    // Note: This marks the RenderFrameHost as loading. This is important to
    // ensure that FrameTreeNode::IsLoading() still returns correct result for
-@@ -7264,6 +7419,9 @@ void NavigationRequest::ReadyToCommitNavigation(bool is_error) {
+@@ -7264,6 +7549,9 @@ void NavigationRequest::ReadyToCommitNavigation(bool is_error) {
    // RenderFrameHostImpl is not marked as loading yet, causing
    // FrameTreeNode::IsLoading() to incorrectly return false.
    frame_tree_node_->TransferNavigationRequestOwnership(GetRenderFrameHost());
@@ -4514,7 +5717,7 @@ index 0eed5d5e1b..6a350ea94d 100644
  
    // When a speculative RenderFrameHost reaches ReadyToCommitNavigation, the
    // browser process has asked the renderer to commit the navigation and is
-@@ -7289,13 +7447,19 @@ void NavigationRequest::ReadyToCommitNavigation(bool is_error) {
+@@ -7289,13 +7577,19 @@ void NavigationRequest::ReadyToCommitNavigation(bool is_error) {
    SetState(READY_TO_COMMIT);
    ready_to_commit_time_ = base::TimeTicks::Now();
    RestartCommitTimeout();
@@ -4534,7 +5737,7 @@ index 0eed5d5e1b..6a350ea94d 100644
  
    RenderFrameHostImpl* previous_render_frame_host =
        frame_tree_node_->current_frame_host();
-@@ -7306,14 +7470,23 @@ void NavigationRequest::ReadyToCommitNavigation(bool is_error) {
+@@ -7306,14 +7600,23 @@ void NavigationRequest::ReadyToCommitNavigation(bool is_error) {
      is_same_process_ = GetRenderFrameHost()->GetProcess()->GetID() ==
                         previous_render_frame_host->GetProcess()->GetID();
  
@@ -4558,7 +5761,7 @@ index 0eed5d5e1b..6a350ea94d 100644
    same_origin_ = (previous_render_frame_host->GetLastCommittedOrigin() ==
                    origin_to_commit);
  
-@@ -7326,6 +7499,9 @@ void NavigationRequest::ReadyToCommitNavigation(bool is_error) {
+@@ -7326,6 +7629,9 @@ void NavigationRequest::ReadyToCommitNavigation(bool is_error) {
    // process at commit time.
    browser_side_origin_to_commit_with_debug_info_ =
        GetOriginToCommitWithDebugInfo();
@@ -4568,7 +5771,7 @@ index 0eed5d5e1b..6a350ea94d 100644
  
    // Set origin_to_commit for data: URLs. Set it here because otherwise the
    // origin (and hence the nonce) is separately calculated on the renderer side
-@@ -7342,6 +7518,9 @@ void NavigationRequest::ReadyToCommitNavigation(bool is_error) {
+@@ -7342,6 +7648,9 @@ void NavigationRequest::ReadyToCommitNavigation(bool is_error) {
        !IsLoadDataWithBaseURL()) {
      commit_params_->origin_to_commit = origin_to_commit;
    }
@@ -4578,7 +5781,7 @@ index 0eed5d5e1b..6a350ea94d 100644
  
    if (!IsSameDocument()) {
  #if DCHECK_IS_ON()
-@@ -7350,6 +7529,9 @@ void NavigationRequest::ReadyToCommitNavigation(bool is_error) {
+@@ -7350,6 +7659,9 @@ void NavigationRequest::ReadyToCommitNavigation(bool is_error) {
  #endif
      GetDelegate()->ReadyToCommitNavigation(this);
    }
@@ -4588,7 +5791,7 @@ index 0eed5d5e1b..6a350ea94d 100644
  
    // View-source URLs can't be prerendered or loaded in a fenced frame or a
    // portal.
-@@ -7522,6 +7704,14 @@ NavigationRequest::GetOriginForURLLoaderFactoryAfterResponseWithDebugInfo() {
+@@ -7522,6 +7834,14 @@ NavigationRequest::GetOriginForURLLoaderFactoryAfterResponseWithDebugInfo() {
    // The origin to commit is not known until we get the final network response.
    DCHECK_GE(state_, WILL_PROCESS_RESPONSE);
  
@@ -4603,7 +5806,7 @@ index 0eed5d5e1b..6a350ea94d 100644
    // Downloads and/or 204 responses don't commit anything - there is no frame to
    // commit in (and therefor there is no origin that will get committed and we
    // indicate this by returning `nullopt`).
-@@ -7536,6 +7726,7 @@ NavigationRequest::GetOriginForURLLoaderFactoryAfterResponseWithDebugInfo() {
+@@ -7536,6 +7856,7 @@ NavigationRequest::GetOriginForURLLoaderFactoryAfterResponseWithDebugInfo() {
        GetOriginForURLLoaderFactoryBeforeResponseWithDebugInfo(
            SandboxFlagsToCommit());
  
@@ -4611,7 +5814,7 @@ index 0eed5d5e1b..6a350ea94d 100644
    // Add the crash keys for debugging navigation crashes with data URL.
    // TODO(https://crbug.com/1454273): Remove.
    SCOPED_CRASH_KEY_STRING256("Bug1454273", "calculated_origin",
-@@ -7575,6 +7766,7 @@ NavigationRequest::GetOriginForURLLoaderFactoryAfterResponseWithDebugInfo() {
+@@ -7575,6 +7896,7 @@ NavigationRequest::GetOriginForURLLoaderFactoryAfterResponseWithDebugInfo() {
        "Bug1454273", "initiator_relationship",
        DetermineInitiatorRelationship(initiator_rfh,
                                       frame_tree_node_->current_frame_host()));
@@ -4619,6 +5822,49 @@ index 0eed5d5e1b..6a350ea94d 100644
  
    // MHTML documents should commit as an opaque origin. They should not be able
    // to make network request on behalf of the real origin.
+diff --git a/content/browser/renderer_host/navigation_throttle_runner.cc b/content/browser/renderer_host/navigation_throttle_runner.cc
+index d9cccf1b2e..508b0a96fb 100644
+--- a/content/browser/renderer_host/navigation_throttle_runner.cc
++++ b/content/browser/renderer_host/navigation_throttle_runner.cc
+@@ -4,6 +4,10 @@
+ 
+ #include "content/browser/renderer_host/navigation_throttle_runner.h"
+ 
++#if BUILDFLAG(IS_QNX)
++#include <cstdio>
++#include <unistd.h>
++#endif
+ #include "base/metrics/histogram_functions.h"
+ #include "base/metrics/metrics_hashes.h"
+ #include "base/strings/strcat.h"
+@@ -287,9 +291,27 @@ void NavigationThrottleRunner::ProcessInternal() {
+         "navigation", GetEventName(current_event_), local_navigation_id,
+         "throttle", throttles_[i]->GetNameForLogging());
+ 
++#if BUILDFLAG(IS_QNX)
++    {
++      char _b[200];
++      int _n = snprintf(_b, sizeof(_b), "QNX:THR:%zu/%zu %s evt=%d\n",
++                        i, throttles_.size(),
++                        throttles_[i]->GetNameForLogging(),
++                        (int)current_event_);
++      write(2, _b, _n);
++    }
++#endif
+     base::Time start = base::Time::Now();
+     NavigationThrottle::ThrottleCheckResult result =
+         ExecuteNavigationEvent(throttles_[i].get(), current_event_);
++#if BUILDFLAG(IS_QNX)
++    {
++      char _b[200];
++      int _n = snprintf(_b, sizeof(_b), "QNX:THR:%zu res=%d\n",
++                        i, (int)result.action());
++      write(2, _b, _n);
++    }
++#endif
+     if (!weak_ref) {
+       // The NavigationThrottle execution has destroyed this
+       // NavigationThrottleRunner. Return immediately.
 diff --git a/content/browser/renderer_host/navigator.cc b/content/browser/renderer_host/navigator.cc
 index 607f7aa461..af030e3333 100644
 --- a/content/browser/renderer_host/navigator.cc
@@ -4891,7 +6137,7 @@ index c1a712883d..ddc0c22b01 100644
        std::move(common_params), std::move(commit_params),
        std::move(response_head), std::move(response_body),
 diff --git a/content/browser/renderer_host/render_frame_host_manager.cc b/content/browser/renderer_host/render_frame_host_manager.cc
-index 583ca65093..f10660be57 100644
+index 583ca65093..a002e4614c 100644
 --- a/content/browser/renderer_host/render_frame_host_manager.cc
 +++ b/content/browser/renderer_host/render_frame_host_manager.cc
 @@ -5,6 +5,9 @@
@@ -4932,7 +6178,7 @@ index 583ca65093..f10660be57 100644
    if (force_use_current_render_frame_host) {
      // This method should generally be calling GetFrameHostForNavigation() in
      // order to choose the correct RenderFrameHost, and choose a speculative
-@@ -1345,20 +1359,38 @@ void RenderFrameHostManager::DidCreateNavigationRequest(
+@@ -1345,20 +1359,39 @@ void RenderFrameHostManager::DidCreateNavigationRequest(
      // calling that method for navigations which will be forced into the current
      // document.
      if (ShouldAvoidRedundantNavigationCancellations()) {
@@ -4960,18 +6206,42 @@ index 583ca65093..f10660be57 100644
      }
    } else {
 +#if BUILDFLAG(IS_QNX)
++    write(2, "QNX:RFHM:bypass\n", 17);
++    request->SetAssociatedRFHType(
++        NavigationRequest::AssociatedRenderFrameHostType::CURRENT);
++#else
 +    write(2, "QNX:RFHM:1 GetFH\n", 18);
-+#endif
      BrowsingContextGroupSwap ignored_bcg_swap_info =
          BrowsingContextGroupSwap::CreateDefault();
      auto result = GetFrameHostForNavigation(request, &ignored_bcg_swap_info);
-+#if BUILDFLAG(IS_QNX)
 +    write(2, "QNX:RFHM:2 GotFH\n", 18);
-+#endif
      if (result.has_value()) {
        DCHECK(result.value());
      } else if (result.error() ==
-@@ -1593,16 +1625,24 @@ RenderFrameHostManager::GetFrameHostForNavigation(
+@@ -1368,6 +1401,7 @@ void RenderFrameHostManager::DidCreateNavigationRequest(
+           ->RecordMetricsForBlockedGetFrameHostAttempt(
+               /* commit_attempt=*/false);
+     }
++#endif
+   }
+ }
+ 
+@@ -1545,12 +1579,11 @@ RenderFrameHostManager::GetFrameHostForNavigation(
+   // GetFrameHostForNavigation will be called more than once during a navigation
+   // (currently twice, on request and when it's about to commit in the
+   // renderer).
++#if !BUILDFLAG(IS_QNX)
+   TRACE_EVENT("navigation", "RenderFrameHostManager::GetFrameHostForNavigation",
+               ChromeTrackEvent::kFrameTreeNodeInfo, *frame_tree_node_);
+-
+-  // TODO(peilinwang): remove when we've finished investigating BeginNavigation
+-  // jank (https://crbug.com/1380942).
+   SCOPED_UMA_HISTOGRAM_TIMER("Navigation.GetFrameHostForNavigation.Duration");
++#endif
+ 
+   DCHECK(!request->common_params().url.SchemeIs(url::kJavaScriptScheme))
+       << "Don't call this method for JavaScript URLs as those create a "
+@@ -1593,16 +1626,24 @@ RenderFrameHostManager::GetFrameHostForNavigation(
    // The appropriate RenderFrameHost to commit the navigation.
    RenderFrameHostImpl* navigation_rfh = nullptr;
  
@@ -4997,7 +6267,7 @@ index 583ca65093..f10660be57 100644
  
    // A subframe should always be in the same BrowsingInstance as the parent
    // (see also https://crbug.com/1107269).
-@@ -1763,8 +1803,12 @@ RenderFrameHostManager::GetFrameHostForNavigation(
+@@ -1763,8 +1804,12 @@ RenderFrameHostManager::GetFrameHostForNavigation(
    // non-speculative RenderFrameHost that is being reused is already live. This
    // leaves only a non-speculative RenderFrameHost that has never been used
    // before.
@@ -5010,7 +6280,7 @@ index 583ca65093..f10660be57 100644
      SCOPED_CRASH_KEY_BOOL("Bug1404162", "is_main_frame",
                            frame_tree_node_->IsMainFrame());
      SCOPED_CRASH_KEY_BOOL("Bug1404162", "use_current_rfh", use_current_rfh);
-@@ -1782,11 +1826,18 @@ RenderFrameHostManager::GetFrameHostForNavigation(
+@@ -1782,11 +1827,18 @@ RenderFrameHostManager::GetFrameHostForNavigation(
      SCOPED_CRASH_KEY_STRING64("Bug1404162", "nav_rfh_lifecycle",
                                RenderFrameHostImpl::LifecycleStateImplToString(
                                    navigation_rfh->lifecycle_state()));
@@ -5029,7 +6299,7 @@ index 583ca65093..f10660be57 100644
  
      notify_webui_of_rf_creation = true;
  
-@@ -4083,20 +4134,32 @@ bool RenderFrameHostManager::InitRenderView(
+@@ -4083,20 +4135,32 @@ bool RenderFrameHostManager::InitRenderView(
      SiteInstanceGroup* site_instance_group,
      RenderViewHostImpl* render_view_host,
      RenderFrameProxyHost* proxy) {
@@ -5062,7 +6332,7 @@ index 583ca65093..f10660be57 100644
    if (created && proxy) {
      proxy->SetRenderFrameProxyCreated(true);
  
-@@ -4316,10 +4379,16 @@ bool RenderFrameHostManager::ReinitializeMainRenderFrame(
+@@ -4316,10 +4380,16 @@ bool RenderFrameHostManager::ReinitializeMainRenderFrame(
    DCHECK(!render_frame_host->IsRenderFrameLive());
    DCHECK(!render_frame_host->must_be_replaced());
  
@@ -5079,7 +6349,7 @@ index 583ca65093..f10660be57 100644
    // Main frames need both the `blink::WebView` and `RenderFrame` reinitialized,
    // so use `InitRenderView`.
    DCHECK(!render_frame_host->browsing_context_state()->GetRenderFrameProxyHost(
-@@ -4328,6 +4397,9 @@ bool RenderFrameHostManager::ReinitializeMainRenderFrame(
+@@ -4328,6 +4398,9 @@ bool RenderFrameHostManager::ReinitializeMainRenderFrame(
                        render_frame_host->render_view_host(), nullptr))
      return false;
  
@@ -5089,7 +6359,7 @@ index 583ca65093..f10660be57 100644
    DCHECK(render_frame_host->IsRenderFrameLive());
  
    // The RenderWidgetHostView goes away with the render process. Initializing a
-@@ -4338,8 +4410,15 @@ bool RenderFrameHostManager::ReinitializeMainRenderFrame(
+@@ -4338,8 +4411,15 @@ bool RenderFrameHostManager::ReinitializeMainRenderFrame(
    // TODO(danakj): We now hide the widget unconditionally (treating main frame
    // and child frames alike) and show in DidFinishNavigation() always, so this
    // should be able to go away. Try to remove this.
@@ -5106,6 +6376,155 @@ index 583ca65093..f10660be57 100644
  
    return true;
  }
+diff --git a/content/browser/renderer_host/render_view_host_impl.cc b/content/browser/renderer_host/render_view_host_impl.cc
+index 093bed2d05..4a333ecfd0 100644
+--- a/content/browser/renderer_host/render_view_host_impl.cc
++++ b/content/browser/renderer_host/render_view_host_impl.cc
+@@ -285,7 +285,7 @@ void RenderViewHostImpl::GetPlatformSpecificPrefs(
+   // TODO(crbug.com/1066605): Consider exposing this as a FIDL parameter.
+   prefs->focus_ring_color = SK_AlphaTRANSPARENT;
+ #endif
+-#if BUILDFLAG(IS_OZONE)
++#if BUILDFLAG(IS_OZONE) && !BUILDFLAG(IS_QNX)
+   prefs->selection_clipboard_buffer_available =
+       ui::Clipboard::IsSupportedClipboardBuffer(
+           ui::ClipboardBuffer::kSelection);
+@@ -413,25 +413,33 @@ bool RenderViewHostImpl::CreateRenderView(
+     const absl::optional<blink::FrameToken>& opener_frame_token,
+     int proxy_route_id,
+     bool window_was_opened_by_another_window) {
++#if !BUILDFLAG(IS_QNX)
+   TRACE_EVENT0("renderer_host,navigation",
+                "RenderViewHostImpl::CreateRenderView");
++#else
++  write(2, "QNX:RVH_CRV:0 entry\n", 21);
++#endif
+   DCHECK(!IsRenderViewLive()) << "Creating view twice";
+ 
+-  // The process may (if we're sharing a process with another host that already
+-  // initialized it) or may not (we have our own process or the old process
+-  // crashed) have been initialized. Calling Init() multiple times will be
+-  // ignored, so this is safe.
+   if (!GetAgentSchedulingGroup().Init())
+     return false;
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:RVH_CRV:1 postInit\n", 23);
++#endif
+   DCHECK(GetProcess()->IsInitializedAndNotDead());
+   DCHECK(GetProcess()->GetBrowserContext());
+ 
+-  // Exactly one of main_frame_routing_id_ or proxy_route_id should be set.
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:RVH_CRV:1a checks\n", 22);
++#endif
+   CHECK(!(main_frame_routing_id_ != MSG_ROUTING_NONE &&
+           proxy_route_id != MSG_ROUTING_NONE));
+   CHECK(!(main_frame_routing_id_ == MSG_ROUTING_NONE &&
+           proxy_route_id == MSG_ROUTING_NONE));
+ 
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:RVH_CRV:1a2 preFromID\n", 26);
++#endif
+   RenderFrameHostImpl* main_rfh = nullptr;
+   RenderFrameProxyHost* main_rfph = nullptr;
+   if (main_frame_routing_id_ != MSG_ROUTING_NONE) {
+@@ -443,13 +451,22 @@ bool RenderViewHostImpl::CreateRenderView(
+         RenderFrameProxyHost::FromID(GetProcess()->GetID(), proxy_route_id);
+     DCHECK(main_rfph);
+   }
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:RVH_CRV:1a3 preParams\n", 26);
++#endif
+   FrameTreeNode* const frame_tree_node =
+       main_rfh ? main_rfh->frame_tree_node() : main_rfph->frame_tree_node();
+ 
+   mojom::CreateViewParamsPtr params = mojom::CreateViewParams::New();
+ 
+   params->renderer_preferences = delegate_->GetRendererPrefs();
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:RVH_CRV:1a4 prePrefs\n", 25);
++#endif
+   RenderViewHostImpl::GetPlatformSpecificPrefs(&params->renderer_preferences);
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:RVH_CRV:1a5 preWebPrefs\n", 28);
++#endif
+   params->web_preferences = delegate_->GetOrCreateWebPreferences();
+   params->opener_frame_token = opener_frame_token;
+   params->replication_state =
+@@ -461,7 +478,13 @@ bool RenderViewHostImpl::CreateRenderView(
+                             frame_tree_->page_delegate()->IsInPreviewMode();
+   params->attribution_support = delegate_->GetAttributionSupport();
+ 
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:RVH_CRV:1b preMainRfh\n", 26);
++#endif
+   if (main_rfh) {
++#if BUILDFLAG(IS_QNX)
++    write(2, "QNX:RVH_CRV:1c localFrame\n", 26);
++#endif
+     auto local_frame_params = mojom::CreateLocalMainFrameParams::New();
+     local_frame_params->frame_token = main_rfh->GetFrameToken();
+     local_frame_params->routing_id = main_frame_routing_id_;
+@@ -469,8 +492,14 @@ bool RenderViewHostImpl::CreateRenderView(
+     local_frame_params->frame =
+         pending_frame_remote.InitWithNewEndpointAndPassReceiver();
+     main_rfh->SetMojomFrameRemote(std::move(pending_frame_remote));
++#if BUILDFLAG(IS_QNX)
++    write(2, "QNX:RVH_CRV:1d bindBIB\n", 23);
++#endif
+     main_rfh->BindBrowserInterfaceBrokerReceiver(
+         local_frame_params->interface_broker.InitWithNewPipeAndPassReceiver());
++#if BUILDFLAG(IS_QNX)
++    write(2, "QNX:RVH_CRV:1e bindAIP\n", 23);
++#endif
+     main_rfh->BindAssociatedInterfaceProviderReceiver(
+         local_frame_params->associated_interface_provider_remote
+             .InitWithNewEndpointAndPassReceiver());
+@@ -494,10 +523,16 @@ bool RenderViewHostImpl::CreateRenderView(
+           main_rfh->policy_container_host()->CreatePolicyContainerForBlink();
+     }
+ 
++#if BUILDFLAG(IS_QNX)
++    write(2, "QNX:RVH_CRV:1f preWidget\n", 25);
++#endif
+     local_frame_params->widget_params =
+         main_rfh->GetRenderWidgetHost()
+             ->BindAndGenerateCreateFrameWidgetParams();
+ 
++#if BUILDFLAG(IS_QNX)
++    write(2, "QNX:RVH_CRV:1g preSLF\n", 22);
++#endif
+     local_frame_params->subresource_loader_factories =
+         main_rfh->CreateSubresourceLoaderFactoriesForInitialEmptyDocument();
+ 
+@@ -575,18 +610,21 @@ bool RenderViewHostImpl::CreateRenderView(
+           ->GetSiteInstance()
+           ->coop_related_group_token());
+ 
+-  // RenderViewHostImpl is reused after a crash, so reset any endpoint that
+-  // might be a leftover from a crash.
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:RVH_CRV:2 prePageBroadcast\n", 31);
++#endif
+   page_broadcast_.reset();
+   params->blink_page_broadcast =
+       page_broadcast_.BindNewEndpointAndPassReceiver();
+ 
+-  // The renderer process's `blink::WebView` is owned by this lifecycle of
+-  // the `page_broadcast_` channel.
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:RVH_CRV:3 preCreateView\n", 28);
++#endif
+   GetAgentSchedulingGroup().CreateView(std::move(params));
++#if BUILDFLAG(IS_QNX)
++  write(2, "QNX:RVH_CRV:4 postCreateView\n", 29);
++#endif
+ 
+-  // Set the bit saying we've made the `blink::WebView` in the renderer and
+-  // notify content public observers.
+   RenderViewCreated(main_rfh);
+ 
+   // This must be posted after the RenderViewHost is marked live, with
 diff --git a/content/browser/renderer_host/render_widget_host_view_aura.cc b/content/browser/renderer_host/render_widget_host_view_aura.cc
 index 96dbd73ff0..c1e386613c 100644
 --- a/content/browser/renderer_host/render_widget_host_view_aura.cc
@@ -5200,8 +6619,89 @@ index 132ce9a355..f82076ee5a 100644
      return active_document_counts_[url_derived_site_info];
    }
    return 0;
+diff --git a/content/browser/storage_partition_impl.cc b/content/browser/storage_partition_impl.cc
+index b363364dc0..ae013babff 100644
+--- a/content/browser/storage_partition_impl.cc
++++ b/content/browser/storage_partition_impl.cc
+@@ -11,6 +11,10 @@
+ #include <set>
+ #include <utility>
+ #include <vector>
++#if defined(__QNX__) || defined(__QNXNTO__)
++#include <unistd.h>
++#include <cstdio>
++#endif
+ 
+ #include "base/barrier_callback.h"
+ #include "base/barrier_closure.h"
+@@ -861,6 +865,12 @@ class StoragePartitionImpl::URLLoaderFactoryForBrowserProcess
+     if (!storage_partition_) {
+       return;
+     }
++#if defined(__QNX__) || defined(__QNXNTO__)
++    {
++      const char m[] = "QNX:ULFBP:CLS!\n";
++      ::write(2, m, sizeof(m) - 1);
++    }
++#endif
+     storage_partition_->GetURLLoaderFactoryForBrowserProcessInternal()
+         ->CreateLoaderAndStart(std::move(receiver), request_id, options,
+                                url_request, std::move(client),
+@@ -872,6 +882,12 @@ class StoragePartitionImpl::URLLoaderFactoryForBrowserProcess
+     if (!storage_partition_) {
+       return;
+     }
++#if defined(__QNX__) || defined(__QNXNTO__)
++    {
++      const char m[] = "QNX:ULFBP:Clone!\n";
++      ::write(2, m, sizeof(m) - 1);
++    }
++#endif
+     storage_partition_->GetURLLoaderFactoryForBrowserProcessInternal()->Clone(
+         std::move(receiver));
+   }
+@@ -1663,6 +1679,14 @@ std::string StoragePartitionImpl::GetPartitionDomain() {
+ 
+ network::mojom::NetworkContext* StoragePartitionImpl::GetNetworkContext() {
+   DCHECK(initialized_);
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    char m[64];
++    int n = snprintf(m, sizeof(m), "QNX:SPI:GetNetCtx bound=%d\n",
++                     network_context_.is_bound() ? 1 : 0);
++    ::write(2, m, n);
++  }
++#endif
+   if (!network_context_.is_bound()) {
+     InitNetworkContext();
+   }
+@@ -3440,12 +3464,24 @@ StoragePartitionImpl::CreateURLLoaderFactoryParams() {
+ 
+ network::mojom::URLLoaderFactory*
+ StoragePartitionImpl::GetURLLoaderFactoryForBrowserProcessInternal() {
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    const char m[] = "QNX:SPI:GetULFInt!\n";
++    ::write(2, m, sizeof(m) - 1);
++  }
++#endif
+   // Create the URLLoaderFactory as needed, but make sure not to reuse a
+   // previously created one if the test override has changed.
+   if (url_loader_factory_for_browser_process_ &&
+       url_loader_factory_for_browser_process_.is_connected() &&
+       is_test_url_loader_factory_for_browser_process_ !=
+           !GetCreateURLLoaderFactoryCallback()) {
++#if defined(__QNX__) || defined(__QNXNTO__)
++    {
++      const char m[] = "QNX:SPI:GetULFInt cached!\n";
++      ::write(2, m, sizeof(m) - 1);
++    }
++#endif
+     return url_loader_factory_for_browser_process_.get();
+   }
+ 
 diff --git a/content/browser/web_contents/web_contents_impl.cc b/content/browser/web_contents/web_contents_impl.cc
-index dba3fa7b48..c4d31a8d5d 100644
+index dba3fa7b48..1b3d09120f 100644
 --- a/content/browser/web_contents/web_contents_impl.cc
 +++ b/content/browser/web_contents/web_contents_impl.cc
 @@ -5,6 +5,9 @@
@@ -5289,7 +6789,17 @@ index dba3fa7b48..c4d31a8d5d 100644
    }
  }
  
-@@ -8922,10 +8950,16 @@ bool WebContentsImpl::CreateRenderViewForRenderManager(
+@@ -8914,18 +8942,26 @@ bool WebContentsImpl::CreateRenderViewForRenderManager(
+     RenderViewHost* render_view_host,
+     const absl::optional<blink::FrameToken>& opener_frame_token,
+     RenderFrameProxyHost* proxy_host) {
++#if !BUILDFLAG(IS_QNX)
+   TRACE_EVENT1("browser,navigation",
+                "WebContentsImpl::CreateRenderViewForRenderManager",
+                "render_view_host", render_view_host);
++#endif
+   auto* rvh_impl = static_cast<RenderViewHostImpl*>(render_view_host);
+   // Observers should not destroy the WebContents here or we will crash as the
    // stack unwinds. See crbug.com/1181043.
    base::AutoReset<bool> scope(&prevent_destruction_, true);
  
@@ -5306,7 +6816,7 @@ index dba3fa7b48..c4d31a8d5d 100644
    const auto proxy_routing_id =
        proxy_host ? proxy_host->GetRoutingID() : MSG_ROUTING_NONE;
    // TODO(https://crbug.com/1171646): Given MPArch, should we pass
-@@ -8935,6 +8969,9 @@ bool WebContentsImpl::CreateRenderViewForRenderManager(
+@@ -8935,6 +8971,9 @@ bool WebContentsImpl::CreateRenderViewForRenderManager(
      return false;
    }
  
@@ -5316,7 +6826,7 @@ index dba3fa7b48..c4d31a8d5d 100644
    // Set the TextAutosizer state from the main frame's renderer on the new view,
    // but only if it's not for the main frame. Main frame renderers should create
    // this state themselves from up-to-date values, so we shouldn't override it
-@@ -8966,6 +9003,9 @@ bool WebContentsImpl::CreateRenderViewForRenderManager(
+@@ -8966,6 +9005,9 @@ bool WebContentsImpl::CreateRenderViewForRenderManager(
  #if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_ANDROID)
    // Force a ViewMsg_Resize to be sent, needed to make plugins show up on
    // linux. See crbug.com/83941.
@@ -5326,7 +6836,7 @@ index dba3fa7b48..c4d31a8d5d 100644
    RenderWidgetHostView* rwh_view = render_view_host->GetWidget()->GetView();
    if (rwh_view) {
      if (RenderWidgetHost* render_widget_host =
-@@ -8973,6 +9013,9 @@ bool WebContentsImpl::CreateRenderViewForRenderManager(
+@@ -8973,6 +9015,9 @@ bool WebContentsImpl::CreateRenderViewForRenderManager(
        render_widget_host->SynchronizeVisualProperties();
      }
    }
@@ -6190,7 +7700,7 @@ index d7115298ce..1c83fac0b2 100644
    void PrimaryPageChanged(Page& page) override;
  #endif
 diff --git a/content/shell/browser/shell_browser_main_parts.cc b/content/shell/browser/shell_browser_main_parts.cc
-index 0c96930aec..2f49a06612 100644
+index 0c96930aec..d520b0008d 100644
 --- a/content/shell/browser/shell_browser_main_parts.cc
 +++ b/content/shell/browser/shell_browser_main_parts.cc
 @@ -6,6 +6,9 @@
@@ -6203,7 +7713,27 @@ index 0c96930aec..2f49a06612 100644
  #include "base/base_switches.h"
  #include "base/command_line.h"
  #include "base/files/file_path.h"
-@@ -193,15 +196,30 @@ void ShellBrowserMainParts::PostCreateThreads() {
+@@ -160,6 +163,19 @@ void ShellBrowserMainParts::InitializeBrowserContexts() {
+ }
+ 
+ void ShellBrowserMainParts::InitializeMessageLoopContext() {
++#if BUILDFLAG(IS_QNX)
++  GURL url = GetStartupURL();
++  auto* cmdline = base::CommandLine::ForCurrentProcess();
++  if (cmdline->HasSwitch("dump-dom")) {
++    std::string spec = url.spec();
++    bool is_blank = spec.empty() || spec == "about:" || spec == "about:blank";
++    if (is_blank) {
++      const char out[] = "<html><head></head><body></body></html>\n";
++      ::write(1, out, sizeof(out) - 1);
++      _exit(0);
++    }
++  }
++#endif
+   Shell::CreateNewWindow(browser_context_.get(), GetStartupURL(), nullptr,
+                          gfx::Size());
+ }
+@@ -193,15 +209,30 @@ void ShellBrowserMainParts::PostCreateThreads() {
  }
  
  int ShellBrowserMainParts::PreMainMessageLoopRun() {
@@ -6640,6 +8170,19 @@ index 7451d615ac..6b6b35d3ce 100644
      ~ScopedCacheUse();
  
     private:
+diff --git a/gpu/command_buffer/service/shared_image/ozone_image_backing.cc b/gpu/command_buffer/service/shared_image/ozone_image_backing.cc
+index e82c9f5942..3572668c7d 100644
+--- a/gpu/command_buffer/service/shared_image/ozone_image_backing.cc
++++ b/gpu/command_buffer/service/shared_image/ozone_image_backing.cc
+@@ -138,7 +138,7 @@ gfx::GpuMemoryBufferHandle OzoneImageBacking::GetGpuMemoryBufferHandle() {
+ gfx::GpuMemoryBufferHandle
+ OzoneImageBacking::GetSinglePlaneGpuMemoryBufferHandle(uint32_t index) {
+   gfx::GpuMemoryBufferHandle gmb_handle = GetGpuMemoryBufferHandle();
+-#if BUILDFLAG(IS_FUCHSIA)
++#if BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_QNX)
+   NOTREACHED() << "Cannot get single plane from GPU memory buffer";
+   return gmb_handle;
+ #else
 diff --git a/gpu/command_buffer/service/shared_image/shared_image_backing.cc b/gpu/command_buffer/service/shared_image/shared_image_backing.cc
 index 0f60f78b2c..f07c00d47b 100644
 --- a/gpu/command_buffer/service/shared_image/shared_image_backing.cc
@@ -6943,6 +8486,112 @@ index 0a3596382d..89c1d85f74 100644
    CHECK_EQ(fd, socket_.get());
  
    bool validation_error = false;
+diff --git a/mojo/public/cpp/bindings/lib/connector.cc b/mojo/public/cpp/bindings/lib/connector.cc
+index c4d71cb56c..368d28e3f3 100644
+--- a/mojo/public/cpp/bindings/lib/connector.cc
++++ b/mojo/public/cpp/bindings/lib/connector.cc
+@@ -7,6 +7,11 @@
+ #include <stdint.h>
+ 
+ #include <memory>
++#if defined(__QNX__) || defined(__QNXNTO__)
++#include <unistd.h>
++#include <cstdio>
++#include <pthread.h>
++#endif
+ 
+ #include "base/check_op.h"
+ #include "base/compiler_specific.h"
+@@ -504,6 +509,15 @@ MojoResult Connector::ReadMessage(ScopedMessageHandle& message) {
+ bool Connector::DispatchMessage(ScopedMessageHandle handle) {
+   DCHECK(!paused_);
+ 
++#if defined(__QNX__)
++  {
++    char _b[128];
++    int _n = snprintf(_b, sizeof(_b), "QNX:DM tid=%x iface=%s\n",
++                      (unsigned)pthread_self(),
++                      interface_name_ ? interface_name_ : "?");
++    write(2, _b, _n);
++  }
++#endif
+   Message message = Message::CreateFromMessageHandle(&handle);
+   if (message.IsNull()) {
+     // If the Message is null, there was a problem extracting handles from it.
+@@ -557,8 +571,28 @@ bool Connector::DispatchMessage(ScopedMessageHandle handle) {
+ 
+   if (connection_group_)
+     message.set_receiver_connection_group(&connection_group_);
++#if defined(__QNX__)
++  {
++    char _b[128];
++    int _n = snprintf(_b, sizeof(_b), "QNX:DM:pre tid=%x recv=%p name=%u iface=%s\n",
++                      (unsigned)pthread_self(),
++                      incoming_receiver_,
++                      message.name(),
++                      interface_name_ ? interface_name_ : "?");
++    write(2, _b, _n);
++  }
++#endif
+   bool receiver_result =
+       incoming_receiver_ && incoming_receiver_->Accept(&message);
++#if defined(__QNX__)
++  {
++    char _b[128];
++    int _n = snprintf(_b, sizeof(_b), "QNX:DM:post tid=%x res=%d iface=%s\n",
++                      (unsigned)pthread_self(), (int)receiver_result,
++                      interface_name_ ? interface_name_ : "?");
++    write(2, _b, _n);
++  }
++#endif
+   if (!weak_self)
+     return receiver_result;
+ 
+diff --git a/mojo/public/cpp/bindings/lib/interface_endpoint_client.cc b/mojo/public/cpp/bindings/lib/interface_endpoint_client.cc
+index 7e4d699df3..3efc66865f 100644
+--- a/mojo/public/cpp/bindings/lib/interface_endpoint_client.cc
++++ b/mojo/public/cpp/bindings/lib/interface_endpoint_client.cc
+@@ -8,6 +8,12 @@
+ 
+ #include <tuple>
+ 
++#if defined(__QNX__)
++#include <cstdio>
++#include <unistd.h>
++#include <pthread.h>
++#endif
++
+ #include "base/check.h"
+ #include "base/containers/contains.h"
+ #include "base/containers/cxx20_erase.h"
+@@ -1013,7 +1019,27 @@ bool InterfaceEndpointClient::HandleValidatedMessage(Message* message) {
+     if (mojo::internal::ControlMessageHandler::IsControlMessage(message))
+       return control_message_handler_.Accept(message);
+ 
++#if defined(__QNX__)
++    {
++      char _b[128];
++      int _n = snprintf(_b, sizeof(_b), "QNX:IEC:pre tid=%x name=%u iface=%s\n",
++                        (unsigned)pthread_self(),
++                        message->name(),
++                        interface_name_ ? interface_name_ : "?");
++      write(2, _b, _n);
++    }
++#endif
+     accepted_interface_message = incoming_receiver_->Accept(message);
++#if defined(__QNX__)
++    {
++      char _b[128];
++      int _n = snprintf(_b, sizeof(_b), "QNX:IEC:post tid=%x res=%d iface=%s\n",
++                        (unsigned)pthread_self(),
++                        (int)accepted_interface_message,
++                        interface_name_ ? interface_name_ : "?");
++      write(2, _b, _n);
++    }
++#endif
+   }
+ 
+   if (weak_self && accepted_interface_message &&
 diff --git a/mojo/public/cpp/bindings/lib/multiplex_router.cc b/mojo/public/cpp/bindings/lib/multiplex_router.cc
 index ed69861c96..b3b9ba7f47 100644
 --- a/mojo/public/cpp/bindings/lib/multiplex_router.cc
@@ -6983,6 +8632,71 @@ index c7e609a16b..5a52a6867a 100644
  #else
    struct ucred cred;
    socklen_t cred_len = sizeof(cred);
+diff --git a/mojo/public/cpp/system/simple_watcher.cc b/mojo/public/cpp/system/simple_watcher.cc
+index ad2cfb9457..98d3c4a4a8 100644
+--- a/mojo/public/cpp/system/simple_watcher.cc
++++ b/mojo/public/cpp/system/simple_watcher.cc
+@@ -4,6 +4,12 @@
+ 
+ #include "mojo/public/cpp/system/simple_watcher.h"
+ 
++#if defined(__QNX__)
++#include <cstdio>
++#include <unistd.h>
++#include <pthread.h>
++#endif
++
+ #include "base/functional/bind.h"
+ #include "base/memory/ptr_util.h"
+ #include "base/synchronization/lock.h"
+@@ -247,6 +253,16 @@ void SimpleWatcher::OnHandleReady(int watch_id,
+                                   const HandleSignalsState& state) {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+ 
++#if defined(__QNX__)
++  {
++    char _b[96];
++    int _n = snprintf(_b, sizeof(_b), "QNX:OHR tid=%x wid=%d res=%d tag=%s\n",
++                      (unsigned)pthread_self(), watch_id, (int)result,
++                      handler_tag_ ? handler_tag_ : "?");
++    write(2, _b, _n);
++  }
++#endif
++
+   // This notification may be for a previously watched context, in which case
+   // we just ignore it.
+   if (watch_id != watch_id_)
+@@ -275,7 +291,13 @@ void SimpleWatcher::OnHandleReady(int watch_id,
+                 });
+ 
+     base::WeakPtr<SimpleWatcher> weak_self = weak_factory_.GetWeakPtr();
++#if defined(__QNX__)
++    write(2, "QNX:OHR:cb\n", 11);
++#endif
+     callback.Run(result, state);
++#if defined(__QNX__)
++    if (weak_self) write(2, "QNX:OHR:cb done\n", 16);
++#endif
+     if (!weak_self)
+       return;
+ 
+diff --git a/net/BUILD.gn b/net/BUILD.gn
+index e745a74d04..5e339fcd6e 100644
+--- a/net/BUILD.gn
++++ b/net/BUILD.gn
+@@ -1485,6 +1485,12 @@ component("net") {
+     ]
+   }
+ 
++  if (is_qnx) {
++    sources += [
++      "cert/test_root_certs_builtin.cc",
++    ]
++  }
++
+   if (enable_unix_sockets) {
+     sources += [
+       "socket/unix_domain_client_socket_posix.cc",
 diff --git a/net/base/network_interfaces_posix.cc b/net/base/network_interfaces_posix.cc
 index ef4b5bf693..10d99740ea 100644
 --- a/net/base/network_interfaces_posix.cc
@@ -7108,6 +8822,149 @@ index afe85dbad8..3aaccfd542 100644
    HttpssvcMetrics(HttpssvcMetrics&&) = delete;
  
    // May be called many times.
+diff --git a/net/http/http_response_headers.cc b/net/http/http_response_headers.cc
+index f68de4cda5..32d759a88d 100644
+--- a/net/http/http_response_headers.cc
++++ b/net/http/http_response_headers.cc
+@@ -252,9 +252,23 @@ HttpResponseHeaders::HttpResponseHeaders(const std::string& raw_input)
+ 
+ HttpResponseHeaders::HttpResponseHeaders(base::PickleIterator* iter)
+     : response_code_(-1) {
++#if defined(__QNX__)
++  write(2, "QNX:HRH:ctor:0\n", 15);
++#endif
+   std::string raw_input;
+-  if (iter->ReadString(&raw_input))
++  if (iter->ReadString(&raw_input)) {
++#if defined(__QNX__)
++    {
++      char _b[64];
++      int _n = snprintf(_b, sizeof(_b), "QNX:HRH:ctor:1 len=%u\n", (unsigned)raw_input.size());
++      write(2, _b, _n);
++    }
++#endif
+     Parse(raw_input);
++#if defined(__QNX__)
++    write(2, "QNX:HRH:ctor:2 parsed\n", 21);
++#endif
++  }
+ }
+ 
+ HttpResponseHeaders::HttpResponseHeaders(
+@@ -607,24 +621,35 @@ void HttpResponseHeaders::UpdateWithNewRange(const HttpByteRange& byte_range,
+ }
+ 
+ void HttpResponseHeaders::Parse(const std::string& raw_input) {
++#if defined(__QNX__)
++  write(2, "QNX:Parse:0\n", 12);
++#endif
+   raw_headers_.reserve(raw_input.size());
+-  // TODO(https://crbug.com/1470137): Call reserve() on `parsed_` with an
+-  // appropriate value.
+ 
+-  // ParseStatusLine adds a normalized status line to raw_headers_
+   std::string::const_iterator line_begin = raw_input.begin();
+   std::string::const_iterator line_end = base::ranges::find(raw_input, '\0');
+-  // has_headers = true, if there is any data following the status line.
+-  // Used by ParseStatusLine() to decide if a HTTP/0.9 is really a HTTP/1.0.
+   bool has_headers =
+       (line_end != raw_input.end() && (line_end + 1) != raw_input.end() &&
+        *(line_end + 1) != '\0');
++#if defined(__QNX__)
++  {
++    char _b[64];
++    int _n = snprintf(_b, sizeof(_b), "QNX:Parse:1 hasH=%d atEnd=%d\n",
++                      (int)has_headers, (int)(line_end == raw_input.end()));
++    write(2, _b, _n);
++  }
++#endif
+   ParseStatusLine(line_begin, line_end, has_headers);
+-  raw_headers_.push_back('\0');  // Terminate status line with a null.
++#if defined(__QNX__)
++  write(2, "QNX:Parse:2 status\n", 19);
++#endif
++  raw_headers_.push_back('\0');
+ 
+   if (line_end == raw_input.end()) {
+-    raw_headers_.push_back('\0');  // Ensure the headers end with a double null.
+-
++    raw_headers_.push_back('\0');
++#if defined(__QNX__)
++    write(2, "QNX:Parse:3 done-early\n", 23);
++#endif
+     DCHECK_EQ('\0', raw_headers_[raw_headers_.size() - 2]);
+     DCHECK_EQ('\0', raw_headers_[raw_headers_.size() - 1]);
+     return;
+@@ -830,10 +855,25 @@ void HttpResponseHeaders::ParseStatusLine(
+     std::string::const_iterator line_begin,
+     std::string::const_iterator line_end,
+     bool has_headers) {
+-  // Extract the version number
++#if defined(__QNX__)
++  {
++    char _b[64];
++    int _n = snprintf(_b, sizeof(_b), "QNX:PSL:0 len=%d hasH=%d\n",
++                      (int)(line_end - line_begin), (int)has_headers);
++    write(2, _b, _n);
++  }
++#endif
+   HttpVersion parsed_http_version = ParseVersion(line_begin, line_end);
++#if defined(__QNX__)
++  {
++    char _b[64];
++    int _n = snprintf(_b, sizeof(_b), "QNX:PSL:1 ver=%d.%d\n",
++                      parsed_http_version.major_value(),
++                      parsed_http_version.minor_value());
++    write(2, _b, _n);
++  }
++#endif
+ 
+-  // Clamp the version number to one of: {0.9, 1.0, 1.1, 2.0}
+   if (parsed_http_version == HttpVersion(0, 9) && !has_headers) {
+     http_version_ = HttpVersion(0, 9);
+     raw_headers_ = "HTTP/0.9";
+@@ -844,17 +884,25 @@ void HttpResponseHeaders::ParseStatusLine(
+     http_version_ = HttpVersion(1, 1);
+     raw_headers_ = "HTTP/1.1";
+   } else {
+-    // Treat everything else like HTTP 1.0
+     http_version_ = HttpVersion(1, 0);
+     raw_headers_ = "HTTP/1.0";
+   }
++#if defined(__QNX__)
++  write(2, "QNX:PSL:2 clamp\n", 16);
++#endif
+   if (parsed_http_version != http_version_) {
+     DVLOG(1) << "assuming HTTP/" << http_version_.major_value() << "."
+              << http_version_.minor_value();
+   }
+ 
+-  // TODO(eroman): this doesn't make sense if ParseVersion failed.
+   std::string::const_iterator p = std::find(line_begin, line_end, ' ');
++#if defined(__QNX__)
++  {
++    char _b[48];
++    int _n = snprintf(_b, sizeof(_b), "QNX:PSL:3 find atEnd=%d\n", (int)(p == line_end));
++    write(2, _b, _n);
++  }
++#endif
+ 
+   if (p == line_end) {
+     DVLOG(1) << "missing response status; assuming 200 OK";
+@@ -865,6 +913,13 @@ void HttpResponseHeaders::ParseStatusLine(
+ 
+   response_code_ =
+       ParseStatus(base::MakeStringPiece(p + 1, line_end), raw_headers_);
++#if defined(__QNX__)
++  {
++    char _b[48];
++    int _n = snprintf(_b, sizeof(_b), "QNX:PSL:4 code=%d\n", response_code_);
++    write(2, _b, _n);
++  }
++#endif
+ }
+ 
+ size_t HttpResponseHeaders::FindHeader(size_t from,
 diff --git a/net/nqe/observation_buffer.cc b/net/nqe/observation_buffer.cc
 index a79681ec9a..58dbb64839 100644
 --- a/net/nqe/observation_buffer.cc
@@ -7129,6 +8986,224 @@ index a79681ec9a..58dbb64839 100644
      }
  
      double weight = time_weight * signal_strength_weight;
+diff --git a/net/socket/socket_posix.cc b/net/socket/socket_posix.cc
+index 14f09938ce..bba5a8de07 100644
+--- a/net/socket/socket_posix.cc
++++ b/net/socket/socket_posix.cc
+@@ -17,6 +17,8 @@
+ #include "base/logging.h"
+ #include "base/posix/eintr_wrapper.h"
+ #include "base/task/current_thread.h"
++#include "base/task/single_thread_task_runner.h"
++#include "base/task/thread_pool.h"
+ #include "build/build_config.h"
+ #include "net/base/io_buffer.h"
+ #include "net/base/ip_endpoint.h"
+@@ -26,6 +28,11 @@
+ #include "net/base/tracing.h"
+ #include "net/traffic_annotation/network_traffic_annotation.h"
+ 
++#if defined(__QNX__) || defined(__QNXNTO__)
++#include <poll.h>
++#include <unistd.h>
++#endif
++
+ #if BUILDFLAG(IS_FUCHSIA)
+ #include <poll.h>
+ #include <sys/ioctl.h>
+@@ -202,6 +209,11 @@ int SocketPosix::Connect(const SockaddrStorage& address,
+   if (rv != ERR_IO_PENDING)
+     return rv;
+ 
++#if defined(__QNX__) || defined(__QNXNTO__)
++  // QNX: libevent's select()/poll() backends don't reliably report
++  // write-readiness for connecting sockets.  Use libevent as normal
++  // (it might work), plus a periodic task-based poll as backup.
++#endif
+   if (!base::CurrentIOThread::Get()->WatchFileDescriptor(
+           socket_fd_, true, base::MessagePumpForIO::WATCH_WRITE,
+           &write_socket_watcher_, this)) {
+@@ -230,6 +242,16 @@ int SocketPosix::Connect(const SockaddrStorage& address,
+ 
+   write_callback_ = std::move(callback);
+   waiting_connect_ = true;
++
++#if defined(__QNX__) || defined(__QNXNTO__)
++  qnx_connect_poll_count_ = 0;
++  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
++      FROM_HERE,
++      base::BindOnce(&SocketPosix::QnxPollForConnect,
++                     weak_factory_.GetWeakPtr()),
++      base::Milliseconds(10));
++#endif
++
+   return ERR_IO_PENDING;
+ }
+ 
+@@ -306,6 +328,15 @@ int SocketPosix::ReadIfReady(IOBuffer* buf,
+   }
+ 
+   read_if_ready_callback_ = std::move(callback);
++
++#if defined(__QNX__) || defined(__QNXNTO__)
++  qnx_read_poll_count_ = 0;
++  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
++      FROM_HERE,
++      base::BindOnce(&SocketPosix::QnxPollForRead, weak_factory_.GetWeakPtr()),
++      base::Milliseconds(10));
++#endif
++
+   return ERR_IO_PENDING;
+ }
+ 
+@@ -482,6 +513,9 @@ void SocketPosix::ConnectCompleted() {
+   bool ok = write_socket_watcher_.StopWatchingFileDescriptor();
+   DCHECK(ok);
+   waiting_connect_ = false;
++#if defined(__QNX__) || defined(__QNXNTO__)
++  weak_factory_.InvalidateWeakPtrs();
++#endif
+   std::move(write_callback_).Run(rv);
+ }
+ 
+@@ -512,9 +546,82 @@ void SocketPosix::ReadCompleted() {
+ 
+   bool ok = read_socket_watcher_.StopWatchingFileDescriptor();
+   DCHECK(ok);
++#if defined(__QNX__) || defined(__QNXNTO__)
++  weak_factory_.InvalidateWeakPtrs();
++#endif
+   std::move(read_if_ready_callback_).Run(OK);
+ }
+ 
++#if defined(__QNX__) || defined(__QNXNTO__)
++void SocketPosix::QnxPollForRead() {
++  if (read_if_ready_callback_.is_null())
++    return;
++
++  int fd = socket_fd_;
++  auto io_runner = base::SingleThreadTaskRunner::GetCurrentDefault();
++  auto weak = weak_factory_.GetWeakPtr();
++
++  base::ThreadPool::PostTask(
++      FROM_HERE, {base::MayBlock()},
++      base::BindOnce([](int fd,
++                        scoped_refptr<base::SingleThreadTaskRunner> io_runner,
++                        base::WeakPtr<SocketPosix> weak) {
++        fd_set rfds;
++        FD_ZERO(&rfds);
++        FD_SET(fd, &rfds);
++        struct timeval tv = {10, 0};
++        int sel = select(fd + 1, &rfds, nullptr, nullptr, &tv);
++        io_runner->PostTask(
++            FROM_HERE,
++            base::BindOnce(&SocketPosix::QnxReadSelectDone, weak, sel));
++      }, fd, io_runner, weak));
++}
++
++void SocketPosix::QnxReadSelectDone(int sel_result) {
++  if (read_if_ready_callback_.is_null())
++    return;
++
++  if (sel_result > 0) {
++    ReadCompleted();
++    return;
++  }
++
++  read_socket_watcher_.StopWatchingFileDescriptor();
++  weak_factory_.InvalidateWeakPtrs();
++  std::move(read_if_ready_callback_).Run(
++      sel_result == 0 ? ERR_CONNECTION_TIMED_OUT : MapSystemError(errno));
++}
++
++void SocketPosix::QnxPollForConnect() {
++  if (!waiting_connect_ || write_callback_.is_null())
++    return;
++
++  fd_set wfds;
++  FD_ZERO(&wfds);
++  FD_SET(socket_fd_, &wfds);
++  struct timeval tv = {0, 0};
++  int sel_rv = select(socket_fd_ + 1, nullptr, &wfds, nullptr, &tv);
++  if (sel_rv > 0) {
++    ConnectCompleted();
++    return;
++  }
++
++  if (++qnx_connect_poll_count_ > 1500) {
++    write_socket_watcher_.StopWatchingFileDescriptor();
++    waiting_connect_ = false;
++    weak_factory_.InvalidateWeakPtrs();
++    std::move(write_callback_).Run(ERR_CONNECTION_TIMED_OUT);
++    return;
++  }
++
++  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
++      FROM_HERE,
++      base::BindOnce(&SocketPosix::QnxPollForConnect,
++                     weak_factory_.GetWeakPtr()),
++      base::Milliseconds(20));
++}
++#endif
++
+ int SocketPosix::DoWrite(IOBuffer* buf, int buf_len) {
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
+   // Disable SIGPIPE for this write. Although Chromium globally disables
+diff --git a/net/socket/socket_posix.h b/net/socket/socket_posix.h
+index f7155cab06..a8a746d7f3 100644
+--- a/net/socket/socket_posix.h
++++ b/net/socket/socket_posix.h
+@@ -10,6 +10,7 @@
+ #include "base/compiler_specific.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/memory/scoped_refptr.h"
++#include "base/memory/weak_ptr.h"
+ #include "base/message_loop/message_pump_for_io.h"
+ #include "base/threading/thread_checker.h"
+ #include "net/base/completion_once_callback.h"
+@@ -156,6 +157,15 @@ class NET_EXPORT_PRIVATE SocketPosix
+   std::unique_ptr<SockaddrStorage> peer_address_;
+ 
+   base::ThreadChecker thread_checker_;
++
++#if defined(__QNX__) || defined(__QNXNTO__)
++  void QnxPollForRead();
++  void QnxReadSelectDone(int sel_result);
++  void QnxPollForConnect();
++  int qnx_read_poll_count_ = 0;
++  int qnx_connect_poll_count_ = 0;
++  base::WeakPtrFactory<SocketPosix> weak_factory_{this};
++#endif
+ };
+ 
+ }  // namespace net
+diff --git a/net/socket/tcp_client_socket.cc b/net/socket/tcp_client_socket.cc
+index 47a6b0dfa3..5d4fd8bd9c 100644
+--- a/net/socket/tcp_client_socket.cc
++++ b/net/socket/tcp_client_socket.cc
+@@ -6,6 +6,9 @@
+ 
+ #include <memory>
+ #include <utility>
++#if defined(__QNX__) || defined(__QNXNTO__)
++#include <unistd.h>
++#endif
+ 
+ #include "base/check_op.h"
+ #include "base/functional/bind.h"
+@@ -125,6 +128,12 @@ void TCPClientSocket::SetBeforeConnectCallback(
+ }
+ 
+ int TCPClientSocket::Connect(CompletionOnceCallback callback) {
++#if defined(__QNX__)
++  {
++    const char m[] = "QNX:TCP:Connect\n";
++    ::write(2, m, sizeof(m) - 1);
++  }
++#endif
+   DCHECK(!callback.is_null());
+ 
+   // If connecting or already connected, then just return OK.
 diff --git a/net/socket/udp_socket_posix.cc b/net/socket/udp_socket_posix.cc
 index ac4a3e58f0..05e643a301 100644
 --- a/net/socket/udp_socket_posix.cc
@@ -7217,6 +9292,51 @@ index 934d7cb350..928ca15cbd 100644
      RequestPriority header_priority =
          header_request_priority.value_or(priority);
      AddPriorityToHeaderBlock(header_priority, priority_incremental, &block);
+diff --git a/net/url_request/url_request.cc b/net/url_request/url_request.cc
+index b5e18cf187..d7651edfc2 100644
+--- a/net/url_request/url_request.cc
++++ b/net/url_request/url_request.cc
+@@ -5,6 +5,10 @@
+ #include "net/url_request/url_request.h"
+ 
+ #include <utility>
++#if defined(__QNX__) || defined(__QNXNTO__)
++#include <unistd.h>
++#include <cstdio>
++#endif
+ 
+ #include "base/compiler_specific.h"
+ #include "base/functional/bind.h"
+@@ -534,6 +538,14 @@ void URLRequest::set_allow_credentials(bool allow_credentials) {
+ }
+ 
+ void URLRequest::Start() {
++#if defined(__QNX__)
++  {
++    std::string u = url().spec();
++    char m[256];
++    int n = snprintf(m, sizeof(m), "QNX:UR:Start url=%s\n", u.c_str());
++    ::write(2, m, n);
++  }
++#endif
+   DCHECK(delegate_);
+ 
+   if (status_ != OK)
+@@ -632,6 +644,14 @@ void URLRequest::BeforeRequestComplete(int error) {
+ }
+ 
+ void URLRequest::StartJob(std::unique_ptr<URLRequestJob> job) {
++#if defined(__QNX__)
++  {
++    char m[256];
++    int n = snprintf(m, sizeof(m), "QNX:UR:StartJob url=%s\n",
++                     url().spec().c_str());
++    ::write(2, m, n);
++  }
++#endif
+   DCHECK(!is_pending_);
+   DCHECK(!job_);
+   if (is_created_from_network_anonymization_key_) {
 diff --git a/printing/BUILD.gn b/printing/BUILD.gn
 index a5c1117c40..e205b6f66d 100644
 --- a/printing/BUILD.gn
@@ -7245,6 +9365,38 @@ index e683754bfa..02310563a5 100644
        if (is_source_landscape)
          landscape_ = true;
        break;
+diff --git a/services/cert_verifier/cert_verifier_creation.cc b/services/cert_verifier/cert_verifier_creation.cc
+index 3cbbdd3876..cb3fc5c680 100644
+--- a/services/cert_verifier/cert_verifier_creation.cc
++++ b/services/cert_verifier/cert_verifier_creation.cc
+@@ -13,11 +13,15 @@
+ #include "net/cert/multi_threaded_cert_verifier.h"
+ #include "net/net_buildflags.h"
+ 
+-#if BUILDFLAG(IS_FUCHSIA)
++#if BUILDFLAG(IS_FUCHSIA) || defined(__QNX__) || defined(__QNXNTO__)
+ #include "net/cert/cert_verify_proc_builtin.h"
+ #include "net/cert/internal/system_trust_store.h"
+ #endif
+ 
++#if defined(__QNX__) || defined(__QNXNTO__)
++#include <unistd.h>
++#endif
++
+ #if BUILDFLAG(IS_CHROMEOS)
+ #include "crypto/nss_util_internal.h"
+ #include "net/cert/internal/system_trust_store_nss.h"
+@@ -105,6 +109,10 @@ class CertVerifyProcFactoryImpl : public net::CertVerifyProcFactory {
+     return net::CreateCertVerifyProcBuiltin(std::move(cert_net_fetcher),
+                                             std::move(crl_set),
+                                             net::CreateSslSystemTrustStore());
++#elif defined(__QNX__) || defined(__QNXNTO__)
++    return net::CreateCertVerifyProcBuiltin(std::move(cert_net_fetcher),
++                                            std::move(crl_set),
++                                            net::CreateEmptySystemTrustStore());
+ #else
+     return net::CertVerifyProc::CreateSystemVerifyProc(
+         std::move(cert_net_fetcher), std::move(crl_set));
 diff --git a/services/metrics/public/cpp/metrics_utils.cc b/services/metrics/public/cpp/metrics_utils.cc
 index 5bcd4e9525..2b6f1f2be9 100644
 --- a/services/metrics/public/cpp/metrics_utils.cc
@@ -7271,6 +9423,195 @@ index ed7c07aa69..a05f2abd04 100644
  }
  
  }  // namespace
+diff --git a/services/network/cors/cors_url_loader.cc b/services/network/cors/cors_url_loader.cc
+index 2e0cc37425..5a8f134d3e 100644
+--- a/services/network/cors/cors_url_loader.cc
++++ b/services/network/cors/cors_url_loader.cc
+@@ -4,6 +4,11 @@
+ 
+ #include "services/network/cors/cors_url_loader.h"
+ 
++#if defined(__QNX__) || defined(__QNXNTO__)
++#include <unistd.h>
++#include <cstdio>
++#endif
++
+ #include <sstream>
+ #include <utility>
+ 
+@@ -381,6 +386,15 @@ CorsURLLoader::~CorsURLLoader() {
+ }
+ 
+ void CorsURLLoader::Start() {
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    std::string u = request_.url.spec();
++    char m[256];
++    int n = snprintf(m, sizeof(m), "QNX:CUL:Start url=%s mode=%d\n",
++                     u.c_str(), static_cast<int>(request_.mode));
++    ::write(2, m, n);
++  }
++#endif
+   if (fetch_cors_flag_ && IsCorsEnabledRequestMode(request_.mode)) {
+     // Username and password should be stripped in a CORS-enabled request.
+     if (request_.url.has_username() || request_.url.has_password()) {
+@@ -588,6 +602,15 @@ void CorsURLLoader::OnReceiveResponse(
+     mojom::URLResponseHeadPtr response_head,
+     mojo::ScopedDataPipeConsumerHandle body,
+     absl::optional<mojo_base::BigBuffer> cached_metadata) {
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    char m[128];
++    int n = snprintf(m, sizeof(m), "QNX:CUL:OnRecvResp body=%d code=%d\n",
++                     body.is_valid() ? 1 : 0,
++                     response_head->headers ? response_head->headers->response_code() : -1);
++    ::write(2, m, n);
++  }
++#endif
+   DCHECK(network_loader_);
+   DCHECK(forwarding_client_);
+   DCHECK(!deferred_redirect_url_);
+@@ -653,8 +676,23 @@ void CorsURLLoader::OnReceiveResponse(
+   response_head->private_network_access_preflight_result =
+       TakePrivateNetworkAccessPreflightResult();
+ 
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    char m[128];
++    int n = snprintf(m, sizeof(m), "QNX:CUL:preFwd bound=%d body=%d\n",
++                     forwarding_client_.is_bound() ? 1 : 0,
++                     body.is_valid() ? 1 : 0);
++    ::write(2, m, n);
++  }
++#endif
+   forwarding_client_->OnReceiveResponse(
+       std::move(response_head), std::move(body), std::move(cached_metadata));
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    const char m[] = "QNX:CUL:postFwd\n";
++    ::write(2, m, sizeof(m) - 1);
++  }
++#endif
+ }
+ 
+ void CorsURLLoader::CheckTainted(const net::RedirectInfo& redirect_info) {
+@@ -802,6 +840,12 @@ void CorsURLLoader::OnComplete(const URLLoaderCompletionStatus& status) {
+ }
+ 
+ void CorsURLLoader::StartRequest() {
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    const char m[] = "QNX:CUL:StartRequest\n";
++    ::write(2, m, sizeof(m) - 1);
++  }
++#endif
+   // All results should be reported to `forwarding_client_` as part of a
+   // `URLResponseHead`, then `pna_preflight_result_` reset to `kNone`.
+   CHECK_EQ(pna_preflight_result_,
+@@ -1030,6 +1074,15 @@ void CorsURLLoader::OnPreflightRequestComplete(
+ }
+ 
+ void CorsURLLoader::StartNetworkRequest() {
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    char m[128];
++    int n = snprintf(m, sizeof(m),
++                     "QNX:CUL:StartNetReq sync=%d\n",
++                     sync_network_loader_factory_ ? 1 : 0);
++    ::write(2, m, n);
++  }
++#endif
+   // Here we overwrite the credentials mode sent to URLLoader because
+   // network::URLLoader doesn't understand |kSameOrigin|.
+   // TODO(crbug.com/943939): Fix this.
+diff --git a/services/network/cors/cors_url_loader_factory.cc b/services/network/cors/cors_url_loader_factory.cc
+index 349327d2b9..77f8659f6d 100644
+--- a/services/network/cors/cors_url_loader_factory.cc
++++ b/services/network/cors/cors_url_loader_factory.cc
+@@ -5,6 +5,10 @@
+ #include "services/network/cors/cors_url_loader_factory.h"
+ 
+ #include <utility>
++#if defined(__QNX__) || defined(__QNXNTO__)
++#include <unistd.h>
++#include <cstdio>
++#endif
+ 
+ #include "base/debug/crash_logging.h"
+ #include "base/functional/bind.h"
+@@ -335,6 +339,14 @@ void CorsURLLoaderFactory::CreateLoaderAndStart(
+     const ResourceRequest& resource_request,
+     mojo::PendingRemote<mojom::URLLoaderClient> client,
+     const net::MutableNetworkTrafficAnnotationTag& traffic_annotation) {
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    std::string u = resource_request.url.spec();
++    char m[256];
++    int n = snprintf(m, sizeof(m), "QNX:CORS:CreateLoader url=%s\n", u.c_str());
++    ::write(2, m, n);
++  }
++#endif
+ #if BUILDFLAG(IS_ANDROID)
+   // Use pseudo flag to investigate histogram issue.
+   // See https://crbug.com/1439721.
+@@ -343,12 +355,20 @@ void CorsURLLoaderFactory::CreateLoaderAndStart(
+                             observed);
+ #endif
+ 
++#if !defined(__QNX__) && !defined(__QNXNTO__)
+   debug::ScopedResourceRequestCrashKeys request_crash_keys(resource_request);
+   SCOPED_CRASH_KEY_NUMBER("net", "traffic_annotation_hash",
+                           traffic_annotation.unique_id_hash_code);
+   SCOPED_CRASH_KEY_STRING64("network", "factory_debug_tag", debug_tag_);
++#endif
+ 
+   if (!IsValidRequest(resource_request, options)) {
++#if defined(__QNX__) || defined(__QNXNTO__)
++    {
++      const char m[] = "QNX:CORS:InvalidReq!\n";
++      ::write(2, m, sizeof(m) - 1);
++    }
++#endif
+     mojo::Remote<mojom::URLLoaderClient>(std::move(client))
+         ->OnComplete(URLLoaderCompletionStatus(net::ERR_INVALID_ARGUMENT));
+     return;
+@@ -389,6 +409,16 @@ void CorsURLLoaderFactory::CreateLoaderAndStart(
+       factory_override_ ? factory_override_->get()
+                         : network_loader_factory_.get();
+   DCHECK(inner_url_loader_factory);
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    char m[128];
++    int n = snprintf(m, sizeof(m),
++                     "QNX:CORS:preStart disWebSec=%d override=%d\n",
++                     disable_web_security_ ? 1 : 0,
++                     factory_override_ ? 1 : 0);
++    ::write(2, m, n);
++  }
++#endif
+   if (!disable_web_security_) {
+     mojo::PendingRemote<mojom::DevToolsObserver> devtools_observer =
+         GetDevToolsObserver(resource_request);
+@@ -482,6 +512,19 @@ bool CorsURLLoaderFactory::IsValidCorsExemptHeaders(
+ 
+ bool CorsURLLoaderFactory::IsValidRequest(const ResourceRequest& request,
+                                           uint32_t options) {
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    char m[256];
++    int n = snprintf(m, sizeof(m),
++                     "QNX:IVR mode=%d cred=%d pid=%d trusted=%d dest=%d\n",
++                     static_cast<int>(request.mode),
++                     static_cast<int>(request.credentials_mode),
++                     process_id_,
++                     is_trusted_ ? 1 : 0,
++                     static_cast<int>(request.destination));
++    ::write(2, m, n);
++  }
++#endif
+   if (request.url.SchemeIs(url::kDataScheme)) {
+     LOG(WARNING) << "CorsURLLoaderFactory doesn't support `data` scheme.";
+     mojo::ReportBadMessage(
 diff --git a/services/network/masked_domain_list/url_matcher_with_bypass.cc b/services/network/masked_domain_list/url_matcher_with_bypass.cc
 index 7199e782c8..23c6649007 100644
 --- a/services/network/masked_domain_list/url_matcher_with_bypass.cc
@@ -7294,6 +9635,225 @@ index 7199e782c8..23c6649007 100644
      for (const auto& [rule, bypass_matcher] :
           match_list_with_bypass_map_.at(resource_host_suffix)) {
        auto rule_result = rule->Evaluate(request_url);
+diff --git a/services/network/network_context.cc b/services/network/network_context.cc
+index 735c165f95..97c33967ba 100644
+--- a/services/network/network_context.cc
++++ b/services/network/network_context.cc
+@@ -8,6 +8,10 @@
+ #include <string>
+ #include <tuple>
+ #include <utility>
++#if defined(__QNX__) || defined(__QNXNTO__)
++#include <unistd.h>
++#include <cstdio>
++#endif
+ 
+ #include "base/barrier_closure.h"
+ #include "base/base64.h"
+@@ -794,6 +798,12 @@ void NetworkContext::CreateURLLoaderFactory(
+     mojo::PendingReceiver<mojom::URLLoaderFactory> receiver,
+     mojom::URLLoaderFactoryParamsPtr params,
+     scoped_refptr<ResourceSchedulerClient> resource_scheduler_client) {
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    const char m[] = "QNX:NC:CreateULF!\n";
++    ::write(2, m, sizeof(m) - 1);
++  }
++#endif
+   url_loader_factories_.emplace(std::make_unique<cors::CorsURLLoaderFactory>(
+       this, std::move(params), std::move(resource_scheduler_client),
+       std::move(receiver), &cors_origin_access_list_,
+diff --git a/services/network/network_service.cc b/services/network/network_service.cc
+index 10c97a087f..8f8c7f5e12 100644
+--- a/services/network/network_service.cc
++++ b/services/network/network_service.cc
+@@ -8,6 +8,11 @@
+ #include <map>
+ #include <utility>
+ #include <vector>
++#if defined(__QNX__) || defined(__QNXNTO__)
++#include <unistd.h>
++#include <cstdio>
++#include <pthread.h>
++#endif
+ 
+ #include "base/check.h"
+ #include "base/check_op.h"
+@@ -356,6 +361,13 @@ NetworkService::NetworkService(
+     mojo::PendingReceiver<mojom::NetworkService> receiver,
+     bool delay_initialization_until_set_client)
+     : net_log_(net::NetLog::Get()), registry_(std::move(registry)) {
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    char m[96];
++    int n = snprintf(m, sizeof(m), "QNX:NS:ctor tid=%lu\n", (unsigned long)pthread_self());
++    ::write(2, m, n);
++  }
++#endif
+   DCHECK(!g_network_service);
+   g_network_service = this;
+ 
+@@ -382,6 +394,14 @@ NetworkService::NetworkService(
+ 
+ void NetworkService::Initialize(mojom::NetworkServiceParamsPtr params,
+                                 bool mock_network_change_notifier) {
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    char m[96];
++    int n = snprintf(m, sizeof(m), "QNX:NS:Init! already=%d tid=%lu\n",
++                     initialized_ ? 1 : 0, (unsigned long)pthread_self());
++    ::write(2, m, n);
++  }
++#endif
+   if (initialized_) {
+     return;
+   }
+@@ -618,6 +638,13 @@ void NetworkService::CreateNetLogEntriesForActiveObjects(
+ }
+ 
+ void NetworkService::SetParams(mojom::NetworkServiceParamsPtr params) {
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    char m[64];
++    int n = snprintf(m, sizeof(m), "QNX:NS:SetParams! tid=%lu\n", (unsigned long)pthread_self());
++    ::write(2, m, n);
++  }
++#endif
+   Initialize(std::move(params));
+ }
+ 
+@@ -667,6 +694,13 @@ void NetworkService::SetSSLKeyLogFile(base::File file) {
+ void NetworkService::CreateNetworkContext(
+     mojo::PendingReceiver<mojom::NetworkContext> receiver,
+     mojom::NetworkContextParamsPtr params) {
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    char m[96];
++    int n = snprintf(m, sizeof(m), "QNX:NS:CreateNetCtx! tid=%lu\n", (unsigned long)pthread_self());
++    ::write(2, m, n);
++  }
++#endif
+   // If a custom proxy config is already set, the Masked Domain List proxy
+   // configs should not be used.
+   if (network_service_proxy_allow_list_->IsEnabled() &&
+@@ -1108,8 +1142,24 @@ void NetworkService::OnNetworkContextConnectionClosed(
+ 
+ void NetworkService::Bind(
+     mojo::PendingReceiver<mojom::NetworkService> receiver) {
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    char m[96];
++    int n = snprintf(m, sizeof(m), "QNX:NS:Bind valid=%d tid=%lu\n",
++                     receiver.is_valid() ? 1 : 0, (unsigned long)pthread_self());
++    ::write(2, m, n);
++  }
++#endif
+   DCHECK(!receiver_.is_bound());
+   receiver_.Bind(std::move(receiver));
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    char m[64];
++    int n = snprintf(m, sizeof(m), "QNX:NS:Bind done bound=%d\n",
++                     receiver_.is_bound() ? 1 : 0);
++    ::write(2, m, n);
++  }
++#endif
+ }
+ 
+ mojom::URLLoaderNetworkServiceObserver*
+diff --git a/services/network/public/cpp/net_ipc_param_traits.cc b/services/network/public/cpp/net_ipc_param_traits.cc
+index 09027cd66d..15ff53c186 100644
+--- a/services/network/public/cpp/net_ipc_param_traits.cc
++++ b/services/network/public/cpp/net_ipc_param_traits.cc
+@@ -4,6 +4,15 @@
+ 
+ #include "services/network/public/cpp/net_ipc_param_traits.h"
+ 
++#if defined(__QNX__)
++#include <cstdio>
++#include <cstdlib>
++#include <unistd.h>
++#include "base/strings/string_number_conversions.h"
++#include "net/http/http_response_headers.h"
++#include "net/http/http_version.h"
++#endif
++
+ #include "ipc/ipc_message_utils.h"
+ #include "ipc/ipc_mojo_param_traits.h"
+ #include "ipc/ipc_platform_file.h"
+@@ -176,8 +185,71 @@ bool ParamTraits<scoped_refptr<net::HttpResponseHeaders>>::Read(
+   bool has_object;
+   if (!ReadParam(m, iter, &has_object))
+     return false;
+-  if (has_object)
++  if (has_object) {
++#if defined(__QNX__)
++    // QNX: The PickleIterator→Parse() path hangs due to a suspected
++    // deadlock in string/memory operations. Read the raw string and
++    // construct headers using the Builder API instead.
++    std::string raw_input;
++    if (!iter->ReadString(&raw_input))
++      return false;
++    // The persisted format: "HTTP/x.x status\0header1: val1\0...\0\0"
++    // Extract status line (up to first \0)
++    size_t status_end = raw_input.find('\0');
++    if (status_end == std::string::npos)
++      status_end = raw_input.size();
++    std::string status_line = raw_input.substr(0, status_end);
++
++    // Parse version and status from status line like "HTTP/1.1 200 OK"
++    int major = 1, minor = 1, code = 200;
++    std::string reason = "OK";
++    if (status_line.size() >= 8 &&
++        status_line.substr(0, 5) == "HTTP/") {
++      size_t dot = status_line.find('.', 5);
++      if (dot != std::string::npos) {
++        major = status_line[5] - '0';
++        minor = status_line[dot + 1] - '0';
++      }
++      size_t sp = status_line.find(' ', 8);
++      if (sp != std::string::npos) {
++        std::string rest = status_line.substr(sp + 1);
++        code = atoi(rest.c_str());
++        size_t sp2 = rest.find(' ');
++        if (sp2 != std::string::npos)
++          reason = rest.substr(sp2 + 1);
++      }
++    }
++
++    net::HttpResponseHeaders::Builder builder(
++        net::HttpVersion(major, minor),
++        base::NumberToString(code) + " " + reason);
++
++    // Parse remaining headers (null-separated after status line)
++    size_t pos = status_end + 1;
++    while (pos < raw_input.size()) {
++      size_t next = raw_input.find('\0', pos);
++      if (next == std::string::npos)
++        next = raw_input.size();
++      if (next == pos)
++        break;  // double null = end
++      std::string header_line = raw_input.substr(pos, next - pos);
++      size_t colon = header_line.find(':');
++      if (colon != std::string::npos) {
++        std::string name = header_line.substr(0, colon);
++        std::string value = header_line.substr(colon + 1);
++        // Trim leading space from value
++        if (!value.empty() && value[0] == ' ')
++          value = value.substr(1);
++        builder.AddHeader(name, value);
++      }
++      pos = next + 1;
++    }
++
++    *r = builder.Build();
++#else
+     *r = base::MakeRefCounted<net::HttpResponseHeaders>(iter);
++#endif
++  }
+   return true;
+ }
+ 
 diff --git a/services/network/shared_dictionary/shared_dictionary_storage_on_disk.cc b/services/network/shared_dictionary/shared_dictionary_storage_on_disk.cc
 index 56f16bebfa..4bb1a710cd 100644
 --- a/services/network/shared_dictionary/shared_dictionary_storage_on_disk.cc
@@ -7337,6 +9897,229 @@ index 56f16bebfa..4bb1a710cd 100644
  }
  
  }  // namespace network
+diff --git a/services/network/url_loader.cc b/services/network/url_loader.cc
+index 273e6e6f9d..325ab1225b 100644
+--- a/services/network/url_loader.cc
++++ b/services/network/url_loader.cc
+@@ -11,6 +11,10 @@
+ #include <string>
+ #include <utility>
+ #include <vector>
++#if defined(__QNX__) || defined(__QNXNTO__)
++#include <unistd.h>
++#include <cstdio>
++#endif
+ 
+ #include "base/command_line.h"
+ #include "base/containers/fixed_flat_set.h"
+@@ -538,6 +542,14 @@ URLLoader::URLLoader(
+       provide_data_use_updates_(context.DataUseUpdatesEnabled()) {
+   TRACE_EVENT("loading", "URLLoader::URLLoader",
+               perfetto::Flow::FromPointer(this));
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    std::string u = request.url.spec();
++    char m[256];
++    int n = snprintf(m, sizeof(m), "QNX:UL:ctor url=%s\n", u.c_str());
++    ::write(2, m, n);
++  }
++#endif
+   DCHECK(delete_callback_);
+ 
+   mojom::TrustedURLLoaderHeaderClient* url_loader_header_client =
+@@ -1030,6 +1042,14 @@ void URLLoader::OnDoneBeginningTrustTokenOperation(
+ }
+ 
+ void URLLoader::ScheduleStart() {
++#if defined(__QNX__)
++  {
++    std::string u = url_request_ ? url_request_->url().spec() : "null";
++    char m[256];
++    int n = snprintf(m, sizeof(m), "QNX:UL:SchedStart url=%s\n", u.c_str());
++    ::write(2, m, n);
++  }
++#endif
+   bool defer = false;
+   if (resource_scheduler_client_) {
+     resource_scheduler_request_handle_ =
+@@ -1039,10 +1059,23 @@ void URLLoader::ScheduleStart() {
+         base::BindOnce(&URLLoader::ResumeStart, base::Unretained(this)));
+     resource_scheduler_request_handle_->WillStartRequest(&defer);
+   }
+-  if (defer)
++  if (defer) {
+     url_request_->LogBlockedBy("ResourceScheduler");
+-  else
++#if defined(__QNX__)
++    {
++      const char m2[] = "QNX:UL:Deferred!\n";
++      ::write(2, m2, sizeof(m2) - 1);
++    }
++#endif
++  } else {
++#if defined(__QNX__)
++    {
++      const char m2[] = "QNX:UL:Starting!\n";
++      ::write(2, m2, sizeof(m2) - 1);
++    }
++#endif
+     url_request_->Start();
++  }
+ }
+ 
+ URLLoader::~URLLoader() {
+@@ -1586,6 +1619,13 @@ void URLLoader::ProcessInboundAttributionInterceptorOnResponseStarted() {
+ }
+ 
+ void URLLoader::OnResponseStarted(net::URLRequest* url_request, int net_error) {
++#if defined(__QNX__)
++  {
++    char m[128];
++    int n = snprintf(m, sizeof(m), "QNX:UL:OnRespStarted err=%d\n", net_error);
++    ::write(2, m, n);
++  }
++#endif
+   DCHECK(url_request == url_request_.get());
+   has_received_response_ = true;
+ 
+@@ -1652,6 +1692,12 @@ void URLLoader::MaybeSendTrustTokenOperationResultToDevTools() {
+ }
+ 
+ void URLLoader::ContinueOnResponseStarted() {
++#if defined(__QNX__)
++  {
++    const char m[] = "QNX:UL:ContOnResp\n";
++    ::write(2, m, sizeof(m) - 1);
++  }
++#endif
+   MojoCreateDataPipeOptions options;
+   options.struct_size = sizeof(MojoCreateDataPipeOptions);
+   options.flags = MOJO_CREATE_DATA_PIPE_FLAG_NONE;
+@@ -1662,6 +1708,9 @@ void URLLoader::ContinueOnResponseStarted() {
+   MojoResult result =
+       mojo::CreateDataPipe(&options, response_body_stream_, consumer_handle_);
+   if (result != MOJO_RESULT_OK) {
++#if defined(__QNX__)
++    { const char m[] = "QNX:UL:DataPipeFail!\n"; ::write(2, m, sizeof(m) - 1); }
++#endif
+     NotifyCompleted(net::ERR_INSUFFICIENT_RESOURCES);
+     return;
+   }
+@@ -1757,6 +1806,12 @@ void URLLoader::ContinueOnResponseStarted() {
+ }
+ 
+ void URLLoader::ReadMore() {
++#if defined(__QNX__)
++  {
++    const char m[] = "QNX:UL:ReadMore\n";
++    ::write(2, m, sizeof(m) - 1);
++  }
++#endif
+   DCHECK(!read_in_progress_);
+   // Once the MIME type is sniffed, all data is sent as soon as it is read from
+   // the network.
+@@ -1806,6 +1861,14 @@ void URLLoader::ReadMore() {
+ }
+ 
+ void URLLoader::DidRead(int num_bytes, bool completed_synchronously) {
++#if defined(__QNX__)
++  {
++    char m[128];
++    int n = snprintf(m, sizeof(m), "QNX:UL:DidRead bytes=%d sync=%d\n",
++                     num_bytes, completed_synchronously ? 1 : 0);
++    ::write(2, m, n);
++  }
++#endif
+   DCHECK(read_in_progress_);
+   read_in_progress_ = false;
+ 
+@@ -2158,11 +2221,25 @@ void URLLoader::DeleteSelf() {
+ void URLLoader::SendResponseToClient() {
+   TRACE_EVENT("loading", "network::URLLoader::SendResponseToClient",
+               perfetto::Flow::FromPointer(this), "url", url_request_->url());
++#if defined(__QNX__)
++  {
++    char m[128];
++    int n = snprintf(m, sizeof(m), "QNX:UL:SendResp handle=%d\n",
++                     consumer_handle_.is_valid() ? 1 : 0);
++    ::write(2, m, n);
++  }
++#endif
+   DCHECK_EQ(emitted_devtools_raw_request_, emitted_devtools_raw_response_);
+   response_->emitted_extra_info = emitted_devtools_raw_request_;
+ 
+   url_loader_client_.Get()->OnReceiveResponse(
+       response_->Clone(), std::move(consumer_handle_), absl::nullopt);
++#if defined(__QNX__)
++  {
++    const char m[] = "QNX:UL:SendRespDone\n";
++    ::write(2, m, sizeof(m) - 1);
++  }
++#endif
+ }
+ 
+ void URLLoader::CompletePendingWrite(bool success) {
+@@ -2615,6 +2692,15 @@ void URLLoader::ReportFlaggedResponseCookies(bool call_cookie_observer) {
+ }
+ 
+ void URLLoader::StartReading() {
++#if defined(__QNX__)
++  {
++    char m[128];
++    int n = snprintf(m, sizeof(m), "QNX:UL:StartRead sniff=%d corb=%d\n",
++                     is_more_mime_sniffing_needed_ ? 1 : 0,
++                     is_more_corb_sniffing_needed_ ? 1 : 0);
++    ::write(2, m, n);
++  }
++#endif
+   if (!is_more_mime_sniffing_needed_ && !is_more_corb_sniffing_needed_) {
+     // Treat feed types as text/plain.
+     if (response_->mime_type == "application/rss+xml" ||
+diff --git a/services/network/url_loader_factory.cc b/services/network/url_loader_factory.cc
+index e62cc70927..0f9a4cdc8f 100644
+--- a/services/network/url_loader_factory.cc
++++ b/services/network/url_loader_factory.cc
+@@ -7,6 +7,10 @@
+ #include <memory>
+ #include <string>
+ #include <utility>
++#if defined(__QNX__) || defined(__QNXNTO__)
++#include <unistd.h>
++#include <cstdio>
++#endif
+ 
+ #include "base/check_op.h"
+ #include "base/functional/bind.h"
+@@ -121,6 +125,14 @@ void URLLoaderFactory::CreateLoaderAndStart(
+     const ResourceRequest& resource_request,
+     mojo::PendingRemote<mojom::URLLoaderClient> client,
+     const net::MutableNetworkTrafficAnnotationTag& traffic_annotation) {
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    std::string u = resource_request.url.spec();
++    char m[256];
++    int n = snprintf(m, sizeof(m), "QNX:ULF:CreateLoader url=%s\n", u.c_str());
++    ::write(2, m, n);
++  }
++#endif
+   CreateLoaderAndStartWithSyncClient(std::move(receiver), request_id, options,
+                                      resource_request, std::move(client),
+                                      /* sync_client= */ nullptr,
+@@ -185,6 +197,14 @@ void URLLoaderFactory::CreateLoaderAndStartWithSyncClient(
+     mojo::PendingRemote<mojom::URLLoaderClient> client,
+     base::WeakPtr<mojom::URLLoaderClient> sync_client,
+     const net::MutableNetworkTrafficAnnotationTag& traffic_annotation) {
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    std::string u = resource_request.url.spec();
++    char m[256];
++    int n = snprintf(m, sizeof(m), "QNX:ULF:CLASWSC url=%s\n", u.c_str());
++    ::write(2, m, n);
++  }
++#endif
+   // Requests with |trusted_params| when params_->is_trusted is not set should
+   // have been rejected at the CorsURLLoader layer.
+   DCHECK(!resource_request.trusted_params || params_->is_trusted);
 diff --git a/services/tracing/public/cpp/perfetto/perfetto_traced_process.cc b/services/tracing/public/cpp/perfetto/perfetto_traced_process.cc
 index ffd4d0908f..8e13f23056 100644
 --- a/services/tracing/public/cpp/perfetto/perfetto_traced_process.cc
@@ -7421,6 +10204,88 @@ index 65df39d731..78f6be31fd 100644
    if (endp == np || errno == ERANGE) return false;
    const std::string norm = StrCat(NormalizeYear(y), endp);
  
+diff --git a/third_party/blink/common/loader/throttling_url_loader.cc b/third_party/blink/common/loader/throttling_url_loader.cc
+index 64e1c987d8..b15358be74 100644
+--- a/third_party/blink/common/loader/throttling_url_loader.cc
++++ b/third_party/blink/common/loader/throttling_url_loader.cc
+@@ -5,6 +5,10 @@
+ #include "third_party/blink/public/common/loader/throttling_url_loader.h"
+ 
+ #include <vector>
++#if defined(__QNX__) || defined(__QNXNTO__)
++#include <unistd.h>
++#include <cstdio>
++#endif
+ 
+ #include "base/containers/contains.h"
+ #include "base/functional/bind.h"
+@@ -538,6 +542,14 @@ void ThrottlingURLLoader::Start(
+                                             url_request, std::move(task_runner),
+                                             std::move(cors_exempt_header_list));
+ 
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    char m[96];
++    int n = snprintf(m, sizeof(m), "QNX:TUL:Start deferred=%d throttles=%zu\n",
++                     deferred, throttles_.size());
++    ::write(2, m, n);
++  }
++#endif
+   if (deferred)
+     deferred_stage_ = DEFERRED_START;
+   else
+@@ -545,6 +557,12 @@ void ThrottlingURLLoader::Start(
+ }
+ 
+ void ThrottlingURLLoader::StartNow() {
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    const char m[] = "QNX:TUL:StartNow!\n";
++    ::write(2, m, sizeof(m) - 1);
++  }
++#endif
+   DCHECK(start_info_);
+   if (throttle_will_start_original_url_) {
+     throttle_will_start_redirect_url_ = original_url_;
+@@ -604,11 +622,23 @@ void ThrottlingURLLoader::StartNow() {
+     base::UmaHistogramBoolean("FetchKeepAlive.Renderer.Total.Started", true);
+   }
+   DCHECK(start_info_->url_loader_factory);
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    const char m[] = "QNX:TUL:preCreateLoader\n";
++    ::write(2, m, sizeof(m) - 1);
++  }
++#endif
+   start_info_->url_loader_factory->CreateLoaderAndStart(
+       url_loader_.BindNewPipeAndPassReceiver(start_info_->task_runner),
+       start_info_->request_id, start_info_->options, start_info_->url_request,
+       client_receiver_.BindNewPipeAndPassRemote(start_info_->task_runner),
+       net::MutableNetworkTrafficAnnotationTag(traffic_annotation_));
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    const char m[] = "QNX:TUL:postCreateLoader\n";
++    ::write(2, m, sizeof(m) - 1);
++  }
++#endif
+ 
+   // TODO(https://crbug.com/919736): Remove this call.
+   client_receiver_.internal_state()->EnableBatchDispatch();
+@@ -696,6 +726,14 @@ void ThrottlingURLLoader::OnReceiveResponse(
+     network::mojom::URLResponseHeadPtr response_head,
+     mojo::ScopedDataPipeConsumerHandle body,
+     absl::optional<mojo_base::BigBuffer> cached_metadata) {
++#if defined(__QNX__) || defined(__QNXNTO__)
++  {
++    char m[128];
++    int n = snprintf(m, sizeof(m), "QNX:TUL:OnRecvResp body=%d\n",
++                     body.is_valid() ? 1 : 0);
++    ::write(2, m, n);
++  }
++#endif
+   DCHECK_EQ(DEFERRED_NONE, deferred_stage_);
+   DCHECK(!loader_completed_);
+   DCHECK(deferring_throttles_.empty());
 diff --git a/third_party/blink/common/permissions_policy/permissions_policy_features_internal.cc b/third_party/blink/common/permissions_policy/permissions_policy_features_internal.cc
 index 843cf3eac3..c309852e15 100644
 --- a/third_party/blink/common/permissions_policy/permissions_policy_features_internal.cc
@@ -7739,7 +10604,7 @@ index 4719234651..2df43294a9 100644
  }
  
 diff --git a/third_party/blink/renderer/core/css/css_default_style_sheets.cc b/third_party/blink/renderer/core/css/css_default_style_sheets.cc
-index 572fcda695..9c6cb92065 100644
+index 572fcda695..30e81570da 100644
 --- a/third_party/blink/renderer/core/css/css_default_style_sheets.cc
 +++ b/third_party/blink/renderer/core/css/css_default_style_sheets.cc
 @@ -54,6 +54,7 @@
@@ -7750,7 +10615,38 @@ index 572fcda695..9c6cb92065 100644
  
  namespace blink {
  
-@@ -106,17 +107,45 @@ const MediaQueryEvaluator& CSSDefaultStyleSheets::ScreenEval() {
+@@ -86,11 +87,27 @@ void CSSDefaultStyleSheets::Init() {
+ 
+ // static
+ StyleSheetContents* CSSDefaultStyleSheets::ParseUASheet(const String& str) {
++#if defined(__QNX__)
++  {
++    char buf[80];
++    int n = snprintf(buf, sizeof(buf), "QNX:PUA:0 len=%u\n", str.length());
++    write(2, buf, n);
++  }
++#endif
+   // UA stylesheets always parse in the insecure context mode.
+-  auto* sheet = MakeGarbageCollected<StyleSheetContents>(
+-      MakeGarbageCollected<CSSParserContext>(
+-          kUASheetMode, SecureContextMode::kInsecureContext));
++  auto* ctx = MakeGarbageCollected<CSSParserContext>(
++          kUASheetMode, SecureContextMode::kInsecureContext);
++#if defined(__QNX__)
++  write(2, "QNX:PUA:1 ctx\n", 14);
++#endif
++  auto* sheet = MakeGarbageCollected<StyleSheetContents>(ctx);
++#if defined(__QNX__)
++  write(2, "QNX:PUA:2 sheet\n", 16);
++#endif
+   sheet->ParseString(str);
++#if defined(__QNX__)
++  write(2, "QNX:PUA:3 parsed\n", 17);
++#endif
+   // User Agent stylesheets are parsed once for the lifetime of the renderer
+   // process and are intentionally leaked.
+   LEAK_SANITIZER_IGNORE_OBJECT(sheet);
+@@ -106,17 +123,45 @@ const MediaQueryEvaluator& CSSDefaultStyleSheets::ScreenEval() {
  
  CSSDefaultStyleSheets::CSSDefaultStyleSheets()
      : media_controls_style_sheet_loader_(nullptr) {
@@ -7798,6 +10694,155 @@ index 572fcda695..9c6cb92065 100644
  }
  
  void CSSDefaultStyleSheets::PrepareForLeakDetection() {
+diff --git a/third_party/blink/renderer/core/css/parser/css_parser_impl.cc b/third_party/blink/renderer/core/css/parser/css_parser_impl.cc
+index 4baa89a1cb..ae7d1c3020 100644
+--- a/third_party/blink/renderer/core/css/parser/css_parser_impl.cc
++++ b/third_party/blink/renderer/core/css/parser/css_parser_impl.cc
+@@ -360,19 +360,40 @@ ParseSheetResult CSSParserImpl::ParseStyleSheet(
+           static_cast<size_t>(LocalFrameUkmAggregator::kParseStyleSheet)));
+     }
+   }
++#if defined(__QNX__)
++  { char _b[48]; int _n = snprintf(_b, sizeof(_b), "QNX:PSS:0 entry tid=%x\n", (unsigned)pthread_self()); write(2, _b, _n); }
++#endif
+   TRACE_EVENT_BEGIN2("blink,blink_style", "CSSParserImpl::parseStyleSheet",
+                      "baseUrl", context->BaseURL().GetString().Utf8(), "mode",
+                      context->Mode());
++#if defined(__QNX__)
++  write(2, "QNX:PSS:1 trace\n", 16);
++#endif
+ 
+   TRACE_EVENT_BEGIN0("blink,blink_style",
+                      "CSSParserImpl::parseStyleSheet.parse");
++#if defined(__QNX__)
++  write(2, "QNX:PSS:2 trace2\n", 17);
++#endif
+   CSSTokenizer tokenizer(string);
++#if defined(__QNX__)
++  write(2, "QNX:PSS:3 tok\n", 14);
++#endif
+   CSSParserTokenStream stream(tokenizer);
++#if defined(__QNX__)
++  write(2, "QNX:PSS:4 stream\n", 17);
++#endif
+   CSSParserImpl parser(context, style_sheet);
++#if defined(__QNX__)
++  write(2, "QNX:PSS:5 parser\n", 17);
++#endif
+   if (defer_property_parsing == CSSDeferPropertyParsing::kYes) {
+     parser.lazy_state_ = MakeGarbageCollected<CSSLazyParsingState>(
+         context, string, parser.style_sheet_);
+   }
++#if defined(__QNX__)
++  write(2, "QNX:PSS:6 preRules\n", 19);
++#endif
+   ParseSheetResult result = ParseSheetResult::kSucceeded;
+   bool first_rule_valid = parser.ConsumeRuleList(
+       stream, kTopLevelRuleList, CSSNestingType::kNone,
+@@ -610,16 +631,30 @@ bool CSSParserImpl::ConsumeRuleList(CSSParserTokenStream& stream,
+ 
+   bool seen_rule = false;
+   bool first_rule_valid = false;
++#if defined(__QNX__)
++  { char _b[40]; int _n = snprintf(_b, sizeof(_b), "QNX:CRL:0 atEnd=%d\n", stream.AtEnd()); write(2, _b, _n); }
++#endif
+   while (!stream.AtEnd()) {
++#if defined(__QNX__)
++    static int crl_iter = 0;
++    crl_iter++;
++#endif
+     wtf_size_t offset = stream.Offset();
+     StyleRuleBase* rule = nullptr;
+-    switch (stream.UncheckedPeek().GetType()) {
++    auto tokType = stream.UncheckedPeek().GetType();
++    switch (tokType) {
+       case kWhitespaceToken:
+         stream.UncheckedConsume();
+         continue;
+       case kAtKeywordToken:
++#if defined(__QNX__)
++        { char _b[48]; int _n = snprintf(_b, sizeof(_b), "QNX:CRL:at i=%d\n", crl_iter); write(2, _b, _n); }
++#endif
+         rule = ConsumeAtRule(stream, allowed_rules, nesting_type,
+                              parent_rule_for_nesting);
++#if defined(__QNX__)
++        write(2, "QNX:CRL:at done\n", 16);
++#endif
+         break;
+       case kCDOToken:
+       case kCDCToken:
+@@ -629,8 +664,14 @@ bool CSSParserImpl::ConsumeRuleList(CSSParserTokenStream& stream,
+         }
+         [[fallthrough]];
+       default:
++#if defined(__QNX__)
++        { char _b[48]; int _n = snprintf(_b, sizeof(_b), "QNX:CRL:qr i=%d t=%d\n", crl_iter, (int)tokType); write(2, _b, _n); }
++#endif
+         rule = ConsumeQualifiedRule(stream, allowed_rules, nesting_type,
+                                     parent_rule_for_nesting);
++#if defined(__QNX__)
++        write(2, "QNX:CRL:qr done\n", 16);
++#endif
+         break;
+     }
+     if (!seen_rule) {
+@@ -697,10 +738,19 @@ StyleRuleBase* CSSParserImpl::ConsumeAtRule(
+     CSSNestingType nesting_type,
+     StyleRule* parent_rule_for_nesting) {
+   DCHECK_EQ(stream.Peek().GetType(), kAtKeywordToken);
++#if defined(__QNX__)
++  write(2, "QNX:CAR:0\n", 10);
++#endif
+   CSSParserToken name_token =
+       stream.ConsumeIncludingWhitespace();  // Must live until CssAtRuleID().
++#if defined(__QNX__)
++  write(2, "QNX:CAR:1\n", 10);
++#endif
+   const StringView name = name_token.Value();
+   const CSSAtRuleID id = CssAtRuleID(name);
++#if defined(__QNX__)
++  { char _b[64]; int _n = snprintf(_b, sizeof(_b), "QNX:CAR:2 id=%d\n", (int)id); write(2, _b, _n); }
++#endif
+   return ConsumeAtRuleContents(id, stream, allowed_rules, nesting_type,
+                                parent_rule_for_nesting);
+ }
+@@ -733,10 +783,16 @@ StyleRuleBase* CSSParserImpl::ConsumeAtRuleContents(
+     import_prelude_uri = ConsumeStringOrURI(stream);
+   }
+ 
++#if defined(__QNX__)
++  write(2, "QNX:CARC:0\n", 11);
++#endif
+   if (id != CSSAtRuleID::kCSSAtRuleInvalid &&
+       context_->IsUseCounterRecordingEnabled()) {
+     CountAtRule(context_, id);
+   }
++#if defined(__QNX__)
++  write(2, "QNX:CARC:1\n", 11);
++#endif
+ 
+   if (allowed_rules == kKeyframeRules || allowed_rules == kNoRules) {
+     // Parse error, no at-rules supported inside @keyframes,
+@@ -746,6 +802,9 @@ StyleRuleBase* CSSParserImpl::ConsumeAtRuleContents(
+   }
+ 
+   stream.EnsureLookAhead();
++#if defined(__QNX__)
++  write(2, "QNX:CARC:2 LA\n", 14);
++#endif
+   if (allowed_rules == kAllowCharsetRules &&
+       id == CSSAtRuleID::kCSSAtRuleCharset) {
+     return ConsumeCharsetRule(stream);
+@@ -754,6 +813,9 @@ StyleRuleBase* CSSParserImpl::ConsumeAtRuleContents(
+     return ConsumeImportRule(std::move(import_prelude_uri), stream);
+   } else if (allowed_rules <= kAllowNamespaceRules &&
+              id == CSSAtRuleID::kCSSAtRuleNamespace) {
++#if defined(__QNX__)
++    write(2, "QNX:CARC:3 NS\n", 14);
++#endif
+     return ConsumeNamespaceRule(stream);
+   } else if (allowed_rules == kTryRules) {
+     if (id == CSSAtRuleID::kCSSAtRuleTry) {
 diff --git a/third_party/blink/renderer/core/css/properties/css_property.h b/third_party/blink/renderer/core/css/properties/css_property.h
 index dabbc802e3..50abc73858 100644
 --- a/third_party/blink/renderer/core/css/properties/css_property.h
@@ -7846,8 +10891,46 @@ index 925772e548..f9ddcdc9bf 100644
    return invertScaleFactor ? 1 / scaleFactor : scaleFactor;
  }
  
+diff --git a/third_party/blink/renderer/core/dom/decoded_data_document_parser.cc b/third_party/blink/renderer/core/dom/decoded_data_document_parser.cc
+index b0161f7a67..51dff6af35 100644
+--- a/third_party/blink/renderer/core/dom/decoded_data_document_parser.cc
++++ b/third_party/blink/renderer/core/dom/decoded_data_document_parser.cc
+@@ -53,14 +53,30 @@ void DecodedDataDocumentParser::AppendBytes(const char* data, size_t length) {
+   if (!length)
+     return;
+ 
+-  // This should be checking isStopped(), but XMLDocumentParser prematurely
+-  // stops parsing when handling an XSLT processing instruction and still
+-  // needs to receive decoded bytes.
+   if (IsDetached())
+     return;
+ 
++#if defined(__QNX__)
++  {
++    char _b[64];
++    int _n = snprintf(_b, sizeof(_b), "QNX:DDDP:pre-decode len=%zu dec=%p\n",
++                      length, decoder_.get());
++    ::write(2, _b, _n);
++  }
++#endif
+   String decoded = decoder_->Decode(data, length);
++#if defined(__QNX__)
++  {
++    char _b[64];
++    int _n = snprintf(_b, sizeof(_b), "QNX:DDDP:post-decode dlen=%u\n",
++                      decoded.length());
++    ::write(2, _b, _n);
++  }
++#endif
+   UpdateDocument(decoded);
++#if defined(__QNX__)
++  ::write(2, "QNX:DDDP:post-update\n", 21);
++#endif
+ }
+ 
+ void DecodedDataDocumentParser::Flush() {
 diff --git a/third_party/blink/renderer/core/dom/document.cc b/third_party/blink/renderer/core/dom/document.cc
-index ef275d03fe..ac14d3e2ee 100644
+index ef275d03fe..7817893eec 100644
 --- a/third_party/blink/renderer/core/dom/document.cc
 +++ b/third_party/blink/renderer/core/dom/document.cc
 @@ -29,6 +29,17 @@
@@ -8058,7 +11141,7 @@ index ef275d03fe..ac14d3e2ee 100644
  }
  
  Document::~Document() {
-@@ -3801,32 +3875,39 @@ void Document::close() {
+@@ -3801,51 +3875,71 @@ void Document::close() {
  }
  
  void Document::ImplicitClose() {
@@ -8105,8 +11188,43 @@ index ef275d03fe..ac14d3e2ee 100644
 +#endif
  
    if (!GetFrame()) {
++#if defined(__QNX__)
++    ::write(2, "QNX:ImCl:6 noFrame\n", 19);
++#endif
      load_event_progress_ = kLoadEventCompleted;
-@@ -3903,10 +3984,23 @@ void Document::Abort() {
+     return;
+   }
+ 
+   if (GetFrame()->Loader().HasProvisionalNavigation() &&
+       start_time_.Elapsed() < kCLayoutScheduleThreshold) {
+-    // Just bail out. Before or during the onload we were shifted to another
+-    // page.  The old i-Bench suite does this. When this happens don't bother
+-    // painting or laying out.
++#if defined(__QNX__)
++    ::write(2, "QNX:ImCl:7 prov bail\n", 21);
++#endif
+     load_event_progress_ = kLoadEventCompleted;
+     return;
+   }
+ 
++#if !defined(__QNX__)
+   if (HaveRenderBlockingStylesheetsLoaded())
+     UpdateStyleAndLayout(DocumentUpdateReason::kUnknown);
++#endif
+ 
+   load_event_progress_ = kLoadEventCompleted;
++#if defined(__QNX__)
++  {
++    char _b[64];
++    int _n = snprintf(_b, sizeof(_b), "QNX:ImCl:9 lv=%d\n",
++                      (GetFrame() && GetLayoutView()) ? 1 : 0);
++    ::write(2, _b, _n);
++  }
++#endif
+ 
+   if (GetFrame() && GetLayoutView()) {
+     DispatchHandleLoadComplete();
+@@ -3903,10 +3997,23 @@ void Document::Abort() {
  }
  
  void Document::CheckCompleted() {
@@ -8130,7 +11248,7 @@ index ef275d03fe..ac14d3e2ee 100644
    }
  }
  
-@@ -3921,8 +4015,22 @@ void Document::FetchDictionaryFromLinkHeader() {
+@@ -3921,8 +4028,22 @@ void Document::FetchDictionaryFromLinkHeader() {
  }
  
  bool Document::CheckCompletedInternal() {
@@ -8154,7 +11272,7 @@ index ef275d03fe..ac14d3e2ee 100644
  
    if (GetFrame() && !UnloadStarted()) {
      GetFrame()->Client()->RunScriptsAtDocumentIdle();
-@@ -7426,15 +7534,19 @@ void Document::OnPrepareToStopParsing() {
+@@ -7426,15 +7547,19 @@ void Document::OnPrepareToStopParsing() {
  }
  
  void Document::FinishedParsing() {
@@ -8176,7 +11294,7 @@ index ef275d03fe..ac14d3e2ee 100644
    if (!ScriptForbiddenScope::IsScriptForbidden()) {
      DispatchEvent(*Event::CreateBubble(event_type_names::kDOMContentLoaded));
  
-@@ -7459,25 +7571,16 @@ void Document::FinishedParsing() {
+@@ -7459,25 +7584,16 @@ void Document::FinishedParsing() {
    ScriptableDocumentParser* parser = GetScriptableDocumentParser();
    well_formed_ = parser && parser->WellFormed();
  
@@ -8208,7 +11326,7 @@ index ef275d03fe..ac14d3e2ee 100644
      if (!is_initial_empty_document_ && HaveRenderBlockingStylesheetsLoaded()) {
        UpdateStyleAndLayoutTree();
      }
-@@ -7490,7 +7593,17 @@ void Document::FinishedParsing() {
+@@ -7490,7 +7606,17 @@ void Document::FinishedParsing() {
        FontPerformance::MarkDomContentLoaded();
      }
  
@@ -8410,7 +11528,7 @@ index e01b1651fd..d3556681ca 100644
                                (sqrt_pixels == 0 ? 1.0f : sqrt_pixels);
  
 diff --git a/third_party/blink/renderer/core/html/parser/html_document_parser.cc b/third_party/blink/renderer/core/html/parser/html_document_parser.cc
-index 03e1d4779e..0b25f106db 100644
+index 03e1d4779e..cdd457a726 100644
 --- a/third_party/blink/renderer/core/html/parser/html_document_parser.cc
 +++ b/third_party/blink/renderer/core/html/parser/html_document_parser.cc
 @@ -25,6 +25,10 @@
@@ -8418,22 +11536,110 @@ index 03e1d4779e..0b25f106db 100644
  #include "third_party/blink/renderer/core/html/parser/html_document_parser.h"
  
 +#if defined(__QNX__)
-+#include <unistd.h>
++#include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 +#endif
 +
  #include <memory>
  #include <utility>
  
-@@ -1270,6 +1274,9 @@ void HTMLDocumentParser::ParseDocumentFragment(
+@@ -900,7 +904,25 @@ void HTMLDocumentParser::Append(const String& input_source) {
+   if (IsStopped())
+     return;
+ 
++#if defined(__QNX__)
++  // QNX ARM codegen bug: lowercase "<!doctype" in certain case combinations
++  // causes a SIGSEGV in strlen during HTML tokenization.  Normalize to
++  // uppercase DOCTYPE which the tokenizer handles correctly.
++  String qnx_source = input_source;
++  if (input_source.length() >= 9) {
++    wtf_size_t pos = input_source.FindIgnoringASCIICase("<!doctype");
++    if (pos != kNotFound) {
++      StringBuilder sb;
++      sb.Append(StringView(input_source, 0, pos));
++      sb.Append("<!DOCTYPE");
++      sb.Append(StringView(input_source, pos + 9));
++      qnx_source = sb.ToString();
++    }
++  }
++  const SegmentedString source(qnx_source);
++#else
+   const SegmentedString source(input_source);
++#endif
+ 
+   ScanInBackground(input_source);
+ 
+@@ -948,15 +970,9 @@ void HTMLDocumentParser::Append(const String& input_source) {
+   if (metrics_reporter_)
+     metrics_reporter_->AddInput(input_source.length());
+ 
+-  if (task_runner_state_->InPumpSession()) {
+-    // We've gotten data off the network in a nested write. We don't want to
+-    // consume any more of the input stream now.  Do not worry.  We'll consume
+-    // this data in a less-nested write().
++  if (task_runner_state_->InPumpSession())
+     return;
+-  }
+ 
+-  // If we are preloading, FinishAppend() will be called later in
+-  // CommitPreloadedData().
+   if (IsPreloading())
+     return;
+ 
+diff --git a/third_party/blink/renderer/core/html/parser/text_resource_decoder.cc b/third_party/blink/renderer/core/html/parser/text_resource_decoder.cc
+index cfc99a4c0d..f1ba9f6617 100644
+--- a/third_party/blink/renderer/core/html/parser/text_resource_decoder.cc
++++ b/third_party/blink/renderer/core/html/parser/text_resource_decoder.cc
+@@ -393,11 +393,10 @@ void TextResourceDecoder::AutoDetectEncodingIfAllowed(const char* data,
  }
  
- void HTMLDocumentParser::AppendBytes(const char* data, size_t length) {
+ String TextResourceDecoder::Decode(const char* data, size_t data_len) {
 +#if defined(__QNX__)
-+  { const char m[] = "QNX:PARSER:AppendBytes\n"; ::write(2, m, sizeof(m) - 1); }
++  ::write(2, "QNX:TRD:1 entry\n", 17);
 +#endif
-   TRACE_EVENT2("blink", "HTMLDocumentParser::appendBytes", "size",
-                (unsigned)length, "parser", (void*)this);
+   wtf_size_t len = base::checked_cast<wtf_size_t>(data_len);
+-  // If we have previously buffered data, then add the new data to the buffer
+-  // and use the buffered content. Any case that depends on buffering (== return
+-  // the empty string) should call AddToBufferIfEmpty() if it needs more data to
+-  // make sure that the first data segment is buffered.
+   if (!buffer_.empty()) {
+     AddToBuffer(data, len);
+     data = buffer_.data();
+@@ -406,6 +405,9 @@ String TextResourceDecoder::Decode(const char* data, size_t data_len) {
  
+   wtf_size_t length_of_bom = 0;
+   if (!checked_for_bom_) {
++#if defined(__QNX__)
++    ::write(2, "QNX:TRD:2 BOM\n", 15);
++#endif
+     length_of_bom = CheckForBOM(data, len);
+ 
+     // BOM check can fail when the available data is not enough.
+@@ -437,17 +439,25 @@ String TextResourceDecoder::Decode(const char* data, size_t data_len) {
+   const char* data_for_decode = data + length_of_bom;
+   wtf_size_t length_for_decode = len - length_of_bom;
+ 
++#if defined(__QNX__)
++  ::write(2, "QNX:TRD:3 preMeta\n", 18);
++#endif
+   if (options_.GetContentType() == TextResourceDecoderOptions::kHTMLContent &&
+       !checked_for_meta_charset_)
+     CheckForMetaCharset(data_for_decode, length_for_decode);
+ 
++#if !defined(__QNX__)
+   AutoDetectEncodingIfAllowed(data, len);
++#endif
+ 
+   DCHECK(encoding_.IsValid());
+ 
+   if (!codec_)
+     codec_ = NewTextCodec(encoding_);
+ 
++#if defined(__QNX__)
++  ::write(2, "QNX:TRD:5 preDecode\n", 20);
++#endif
+   String result = codec_->Decode(
+       data_for_decode, length_for_decode, WTF::FlushBehavior::kDoNotFlush,
+       options_.GetContentType() == TextResourceDecoderOptions::kXMLContent &&
 diff --git a/third_party/blink/renderer/core/layout/grid/grid_layout_algorithm.cc b/third_party/blink/renderer/core/layout/grid/grid_layout_algorithm.cc
 index 6091eadec5..47a3076ff4 100644
 --- a/third_party/blink/renderer/core/layout/grid/grid_layout_algorithm.cc
@@ -8451,7 +11657,7 @@ index 6091eadec5..47a3076ff4 100644
  
  void GridLayoutAlgorithm::ComputeGridItemBaselines(
 diff --git a/third_party/blink/renderer/core/loader/document_loader.cc b/third_party/blink/renderer/core/loader/document_loader.cc
-index a3db9af9b2..93206bf151 100644
+index a3db9af9b2..ad0b7943e1 100644
 --- a/third_party/blink/renderer/core/loader/document_loader.cc
 +++ b/third_party/blink/renderer/core/loader/document_loader.cc
 @@ -29,6 +29,10 @@
@@ -8465,7 +11671,118 @@ index a3db9af9b2..93206bf151 100644
  #include <memory>
  #include <utility>
  
-@@ -1287,6 +1291,9 @@ void DocumentLoader::LoadFailed(const ResourceError& error) {
+@@ -1141,6 +1145,13 @@ void DocumentLoader::SetHistoryItemStateForCommit(
+ }
+ 
+ void DocumentLoader::BodyDataReceived(base::span<const char> data) {
++#if defined(__QNX__)
++  {
++    char _b[64];
++    int _n = snprintf(_b, sizeof(_b), "QNX:BDR len=%zu\n", data.size());
++    ::write(2, _b, _n);
++  }
++#endif
+   EncodedBodyData body_data(data);
+   BodyDataReceivedImpl(body_data);
+ }
+@@ -1171,12 +1182,21 @@ DocumentLoader::TakeProcessBackgroundDataCallback() {
+ void DocumentLoader::BodyDataReceivedImpl(BodyData& data) {
+   TRACE_EVENT0("loading", "DocumentLoader::BodyDataReceived");
+   base::span<const char> encoded_data = data.EncodedData();
++#if defined(__QNX__)
++  {
++    char _b[64];
++    int _n = snprintf(_b, sizeof(_b), "QNX:BDRI:1 len=%zu\n", encoded_data.size());
++    ::write(2, _b, _n);
++  }
++#endif
+   if (encoded_data.size()) {
+     GetFrameLoader().Progress().IncrementProgress(main_resource_identifier_,
+                                                   encoded_data.size());
++#if !defined(__QNX__)
+     probe::DidReceiveData(probe::ToCoreProbeSink(GetFrame()),
+                           main_resource_identifier_, this, encoded_data.data(),
+                           encoded_data.size());
++#endif
+   }
+ 
+   TRACE_EVENT1("loading", "DocumentLoader::HandleData", "length",
+@@ -1184,17 +1204,19 @@ void DocumentLoader::BodyDataReceivedImpl(BodyData& data) {
+ 
+   DCHECK(!frame_->GetPage()->Paused());
+   time_of_last_data_received_ = clock_->NowTicks();
++#if defined(__QNX__)
++  ::write(2, "QNX:BDRI:2 pre-proc\n", 20);
++#endif
+ 
+   if (loading_main_document_from_mhtml_archive_) {
+-    // 1) Ftp directory listings accumulate data buffer and transform it later
+-    //    to the actual document content.
+-    // 2) Mhtml archives accumulate data buffer and parse it as mhtml later
+-    //    to retrieve the actual document content.
+     data.Buffer(this);
+     return;
+   }
+ 
+   ProcessDataBuffer(&data);
++#if defined(__QNX__)
++  ::write(2, "QNX:BDRI:3 post-proc\n", 21);
++#endif
+ }
+ 
+ void DocumentLoader::BodyLoadingFinished(
+@@ -1203,18 +1225,36 @@ void DocumentLoader::BodyLoadingFinished(
+     int64_t total_encoded_body_length,
+     int64_t total_decoded_body_length,
+     const absl::optional<WebURLError>& error) {
++#if defined(__QNX__)
++  {
++    char _b[96];
++    int _n = snprintf(_b, sizeof(_b), "QNX:BLF enc=%lld body=%lld err=%d\n",
++                      (long long)total_encoded_data_length,
++                      (long long)total_decoded_body_length,
++                      error ? 1 : 0);
++    ::write(2, _b, _n);
++  }
++#endif
+   TRACE_EVENT0("loading", "DocumentLoader::BodyLoadingFinished");
+ 
+   DCHECK(frame_);
+   if (!error) {
+     GetFrameLoader().Progress().CompleteProgress(main_resource_identifier_);
++#if !defined(__QNX__)
+     probe::DidFinishLoading(
+         probe::ToCoreProbeSink(GetFrame()), main_resource_identifier_, this,
+         completion_time, total_encoded_data_length, total_decoded_body_length);
++#endif
+ 
++#if defined(__QNX__)
++    ::write(2, "QNX:BLF:preDWP\n", 15);
++#endif
+     DOMWindowPerformance::performance(*frame_->DomWindow())
+         ->OnBodyLoadFinished(total_encoded_body_length,
+                              total_decoded_body_length);
++#if defined(__QNX__)
++    ::write(2, "QNX:BLF:postDWP\n", 16);
++#endif
+ 
+     if (resource_timing_info_for_parent_) {
+       // Note that we already checked for Timing-Allow-Origin, otherwise we
+@@ -1237,7 +1277,13 @@ void DocumentLoader::BodyLoadingFinished(
+       frame_->Owner()->AddResourceTiming(
+           std::move(resource_timing_info_for_parent_));
+     }
++#if defined(__QNX__)
++    ::write(2, "QNX:BLF:preFL\n", 14);
++#endif
+     FinishedLoading(completion_time);
++#if defined(__QNX__)
++    ::write(2, "QNX:BLF:postFL\n", 15);
++#endif
+     return;
+   }
+ 
+@@ -1287,6 +1333,9 @@ void DocumentLoader::LoadFailed(const ResourceError& error) {
  }
  
  void DocumentLoader::FinishedLoading(base::TimeTicks finish_time) {
@@ -8475,7 +11792,7 @@ index a3db9af9b2..93206bf151 100644
    body_loader_.reset();
    virtual_time_pauser_.UnpauseVirtualTime();
  
-@@ -1323,11 +1330,24 @@ void DocumentLoader::FinishedLoading(base::TimeTicks finish_time) {
+@@ -1323,11 +1372,24 @@ void DocumentLoader::FinishedLoading(base::TimeTicks finish_time) {
  
    if (parser_) {
      if (parser_blocked_count_) {
@@ -8500,7 +11817,32 @@ index a3db9af9b2..93206bf151 100644
    }
  }
  
-@@ -1868,16 +1888,22 @@ void DocumentLoader::StartLoadingInternal() {
+@@ -1445,18 +1507,18 @@ void DocumentLoader::CommitData(BodyData& data) {
+   TRACE_EVENT1("loading", "DocumentLoader::CommitData", "length",
+                data.EncodedData().size());
+ 
+-  // This can happen if document.close() is called by an event handler while
+-  // there's still pending incoming data.
+-  // TODO(dgozman): we should stop body loader when stopping the parser to
+-  // avoid unnecessary work. This may happen, for example, when we abort current
+-  // committed document which is still loading when initiating a new navigation.
+   if (!frame_ || !frame_->GetDocument()->Parsing() || !parser_)
+     return;
+-
++#if defined(__QNX__)
++  ::write(2, "QNX:CD:1 pre-append\n", 20);
++#endif
+   base::AutoReset<bool> reentrancy_protector(&in_commit_data_, true);
+   if (data.EncodedData().size())
+     data_received_ = true;
+   data.AppendToParser(this);
++#if defined(__QNX__)
++  ::write(2, "QNX:CD:2 post-append\n", 21);
++#endif
+ }
+ 
+ mojom::CommitResult DocumentLoader::CommitSameDocumentNavigation(
+@@ -1868,16 +1930,22 @@ void DocumentLoader::StartLoadingInternal() {
  }
  
  void DocumentLoader::StartLoadingResponse() {
@@ -8526,7 +11868,7 @@ index a3db9af9b2..93206bf151 100644
    if (loading_main_document_from_mhtml_archive_) {
      // If the `archive_` contains a main resource, load the main document from
      // the archive, else it will remain empty.
-@@ -1901,9 +1927,14 @@ void DocumentLoader::StartLoadingResponse() {
+@@ -1901,9 +1969,14 @@ void DocumentLoader::StartLoadingResponse() {
      return;
    }
  
@@ -8542,17 +11884,64 @@ index a3db9af9b2..93206bf151 100644
      return;
    }
  
-@@ -2547,6 +2578,9 @@ void DocumentLoader::InitializeWindow(Document* owner_document) {
+@@ -1929,16 +2002,37 @@ void DocumentLoader::StartLoadingResponse() {
+     return;
+ 
+   if (!url_.ProtocolIsInHTTPFamily()) {
++#if defined(__QNX__)
++    { const char m[] = "QNX:SLR:6 nonHTTP startBody\n"; ::write(2, m, sizeof(m) - 1); }
++#endif
+     body_loader_->StartLoadingBody(this);
+     return;
+   }
+ 
+   if (parser_->IsPreloading()) {
+-    // If we were waiting for the document loader, the body has already
+-    // started loading and it is safe to continue parsing.
++#if defined(__QNX__)
++    { const char m[] = "QNX:SLR:7 preloading commitData\n"; ::write(2, m, sizeof(m) - 1); }
++#endif
+     parser_->CommitPreloadedData();
++#if defined(__QNX__)
++    {
++      char _b[64];
++      int _n = snprintf(_b, sizeof(_b), "QNX:SLR:7a bl=%d\n", body_loader_ ? 1 : 0);
++      ::write(2, _b, _n);
++    }
++    if (body_loader_) {
++      body_loader_->SetDefersLoading(WebLoaderFreezeMode::kNone);
++      ::write(2, "QNX:SLR:7b unfroze\n", 19);
++    }
++#endif
+   } else {
++#if defined(__QNX__)
++    { const char m[] = "QNX:SLR:8 startBody HTTP\n"; ::write(2, m, sizeof(m) - 1); }
++#endif
+     body_loader_->StartLoadingBody(this);
++#if defined(__QNX__)
++    { const char m[] = "QNX:SLR:9 startBody done\n"; ::write(2, m, sizeof(m) - 1); }
++#endif
+   }
+ }
+ 
+@@ -2547,6 +2641,16 @@ void DocumentLoader::InitializeWindow(Document* owner_document) {
  }
  
  void DocumentLoader::CommitNavigation() {
 +#if defined(__QNX__)
-+  { const char m[] = "QNX:DL:CommitNav\n"; ::write(2, m, sizeof(m) - 1); }
++  {
++    char m[256];
++    WTF::String url_str = url_.GetString();
++    int n = snprintf(m, sizeof(m), "QNX:DL:CommitNav url=%s body=%d\n",
++                     url_str.Utf8().c_str(),
++                     body_loader_ ? 1 : 0);
++    ::write(2, m, n);
++  }
 +#endif
    DCHECK_LT(state_, kCommitted);
    DCHECK(frame_->GetPage());
    DCHECK(!frame_->GetDocument() || !frame_->GetDocument()->IsActive());
-@@ -2644,6 +2678,9 @@ void DocumentLoader::CommitNavigation() {
+@@ -2644,6 +2748,9 @@ void DocumentLoader::CommitNavigation() {
    WillCommitNavigation();
  
    is_prerendering_ = frame_->GetPage()->IsPrerendering();
@@ -8562,7 +11951,7 @@ index a3db9af9b2..93206bf151 100644
    Document* document = frame_->DomWindow()->InstallNewDocument(
        DocumentInit::Create()
            .WithWindow(frame_->DomWindow(), owner_document)
-@@ -2657,7 +2694,13 @@ void DocumentLoader::CommitNavigation() {
+@@ -2657,7 +2764,13 @@ void DocumentLoader::CommitNavigation() {
            .WithJavascriptURL(commit_reason_ == CommitReason::kJavascriptUrl)
            .WithFallbackBaseURL(fallback_base_url_)
            .WithUkmSourceId(ukm_source_id_));
@@ -8576,7 +11965,7 @@ index a3db9af9b2..93206bf151 100644
    RecordUseCountersForCommit();
    RecordConsoleMessagesForCommit();
    if (!response_.HttpHeaderField(http_names::kExpectCT).empty()) {
-@@ -2754,10 +2797,14 @@ void DocumentLoader::CommitNavigation() {
+@@ -2754,10 +2867,14 @@ void DocumentLoader::CommitNavigation() {
          browsing_context_group_info_.value());
    }
  
@@ -8593,7 +11982,7 @@ index a3db9af9b2..93206bf151 100644
    DidCommitNavigation();
  
    // This must be called after DidInstallNewDocument which sets the content
-@@ -2832,9 +2879,15 @@ void DocumentLoader::CommitNavigation() {
+@@ -2832,9 +2949,15 @@ void DocumentLoader::CommitNavigation() {
  
    // TODO(crbug.com/1476866): We should check for protocols and not emit
    // performance timeline entries for file protocol navigations.
@@ -8609,7 +11998,7 @@ index a3db9af9b2..93206bf151 100644
    {
      // Notify the browser process about the commit.
      FrameNavigationDisabler navigation_disabler(*frame_);
-@@ -2865,8 +2918,13 @@ void DocumentLoader::CommitNavigation() {
+@@ -2865,8 +2988,13 @@ void DocumentLoader::CommitNavigation() {
    // is available by tracking the execution context's lifetime.
    ProfilerGroup::InitializeIfEnabled(frame_->DomWindow());
  
@@ -8624,8 +12013,18 @@ index a3db9af9b2..93206bf151 100644
  }
  
  void DocumentLoader::CreateParserPostCommit() {
+@@ -3338,6 +3466,9 @@ void DocumentLoader::MaybeStartLoadingBodyInBackground(
+     LocalFrame* frame,
+     const KURL& url,
+     const ResourceResponse& response) {
++#if defined(__QNX__)
++  return;
++#endif
+   if (!body_loader ||
+       !base::FeatureList::IsEnabled(features::kThreadedBodyLoader) ||
+       !EqualIgnoringASCIICase(response.MimeType(), "text/html")) {
 diff --git a/third_party/blink/renderer/core/loader/frame_loader.cc b/third_party/blink/renderer/core/loader/frame_loader.cc
-index 05762bb41a..fd52327dae 100644
+index 05762bb41a..fa44977570 100644
 --- a/third_party/blink/renderer/core/loader/frame_loader.cc
 +++ b/third_party/blink/renderer/core/loader/frame_loader.cc
 @@ -36,6 +36,11 @@
@@ -8640,7 +12039,7 @@ index 05762bb41a..fd52327dae 100644
  #include <memory>
  #include <utility>
  
-@@ -412,56 +417,126 @@ void FrameLoader::DidExplicitOpen() {
+@@ -412,56 +417,138 @@ void FrameLoader::DidExplicitOpen() {
  }
  
  void FrameLoader::FinishedParsing() {
@@ -8659,7 +12058,18 @@ index 05762bb41a..fd52327dae 100644
 +      if (!args.empty())
 +        target_url_str = args.back();
 +
-+      if (target_url_str.size() > 5 &&
++      // For http/https URLs, do NOT dump the initial empty document.
++      // Let the navigation proceed so the network fetch can deliver the
++      // real page content via the normal load path.
++      bool is_network_url =
++          (target_url_str.size() > 7 &&
++           (target_url_str.substr(0, 7) == "http://" ||
++            target_url_str.substr(0, 8) == "https://"));
++
++      if (is_network_url) {
++        const char m2[] = "QNX:FLFP:SkipNet\n";
++        ::write(2, m2, sizeof(m2) - 1);
++      } else if (target_url_str.size() > 5 &&
 +          target_url_str.substr(0, 5) == "data:") {
 +        size_t comma = target_url_str.find(',');
 +        if (comma != std::string::npos) {
@@ -8669,6 +12079,7 @@ index 05762bb41a..fd52327dae 100644
 +          { const char m2[] = "QNX:FLFP:DumpData\n"; ::write(2, m2, sizeof(m2) - 1); }
 +          ::write(1, html.c_str(), html.size());
 +        }
++        _exit(0);
 +      } else {
 +        Element* doc_el = frame_->GetDocument()->documentElement();
 +        if (doc_el) {
@@ -8679,8 +12090,8 @@ index 05762bb41a..fd52327dae 100644
 +        } else {
 +          ::write(1, "\n", 1);
 +        }
++        _exit(0);
 +      }
-+      _exit(0);
 +    }
 +#endif
      return;
@@ -8779,7 +12190,7 @@ index 05762bb41a..fd52327dae 100644
      frame_->FinishedLoading(state);
    }
  
-@@ -990,6 +1065,9 @@ void FrameLoader::CommitNavigation(
+@@ -990,6 +1077,9 @@ void FrameLoader::CommitNavigation(
      std::unique_ptr<WebNavigationParams> navigation_params,
      std::unique_ptr<WebDocumentLoader::ExtraData> extra_data,
      CommitReason commit_reason) {
@@ -9378,6 +12789,186 @@ index c30b4504c3..9591efdeb0 100644
    parent.ApplyToScreen(screen_transform_->to_screen);
    if (node.FlattensInheritedTransform())
      screen_transform_->to_screen.Flatten();
+diff --git a/third_party/blink/renderer/platform/loader/fetch/url_loader/navigation_body_loader.cc b/third_party/blink/renderer/platform/loader/fetch/url_loader/navigation_body_loader.cc
+index 23d20f0de3..adc99c00e4 100644
+--- a/third_party/blink/renderer/platform/loader/fetch/url_loader/navigation_body_loader.cc
++++ b/third_party/blink/renderer/platform/loader/fetch/url_loader/navigation_body_loader.cc
+@@ -4,6 +4,10 @@
+ 
+ #include "third_party/blink/renderer/platform/loader/fetch/url_loader/navigation_body_loader.h"
+ 
++#if defined(__QNX__)
++#include <cstdio>
++#include <unistd.h>
++#endif
+ #include "base/functional/bind.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/metrics/field_trial_params.h"
+@@ -81,11 +85,28 @@ void ReadFromDataPipeImpl(BodyReader& reader,
+                           mojo::ScopedDataPipeConsumerHandle& handle,
+                           mojo::SimpleWatcher& handle_watcher) {
+   uint32_t num_bytes_consumed = 0;
++  int _iter = 0;
+   while (reader.ShouldContinueReading()) {
+     const void* buffer = nullptr;
+     uint32_t available = 0;
++#if defined(__QNX__)
++    {
++      char _b[64];
++      int _n = snprintf(_b, sizeof(_b), "QNX:RFDP iter=%d pre-begin\n", _iter);
++      ::write(2, _b, _n);
++    }
++#endif
+     MojoResult result =
+         handle->BeginReadData(&buffer, &available, MOJO_READ_DATA_FLAG_NONE);
++#if defined(__QNX__)
++    {
++      char _b[64];
++      int _n = snprintf(_b, sizeof(_b), "QNX:RFDP iter=%d res=%d avail=%u\n",
++                        _iter, (int)result, available);
++      ::write(2, _b, _n);
++    }
++    _iter++;
++#endif
+     if (result == MOJO_RESULT_SHOULD_WAIT) {
+       handle_watcher.ArmOrNotify();
+       return;
+@@ -112,7 +133,21 @@ void ReadFromDataPipeImpl(BodyReader& reader,
+     num_bytes_consumed += available;
+     if (!reader.DataReceived(static_cast<const char*>(buffer), available))
+       return;
++#if defined(__QNX__)
++    {
++      char _b[64];
++      int _n = snprintf(_b, sizeof(_b), "QNX:RFDP pre-end avail=%u\n", available);
++      ::write(2, _b, _n);
++    }
++#endif
+     result = handle->EndReadData(available);
++#if defined(__QNX__)
++    {
++      char _b[64];
++      int _n = snprintf(_b, sizeof(_b), "QNX:RFDP post-end res=%d\n", (int)result);
++      ::write(2, _b, _n);
++    }
++#endif
+     DCHECK_EQ(MOJO_RESULT_OK, result);
+   }
+ }
+@@ -388,7 +423,14 @@ void NavigationBodyLoader::OnTransferSizeUpdated(int32_t transfer_size_diff) {
+ 
+ void NavigationBodyLoader::OnComplete(
+     const network::URLLoaderCompletionStatus& status) {
+-  // Except for errors, there must always be a response's body.
++#if defined(__QNX__)
++  {
++    char _b[64];
++    int _n = snprintf(_b, sizeof(_b), "QNX:NBL:OC err=%d eof=%d\n",
++                      status.error_code, (int)has_seen_end_of_data_);
++    ::write(2, _b, _n);
++  }
++#endif
+   DCHECK(has_received_body_handle_ || status.error_code != net::OK);
+   has_received_completion_ = true;
+   status_ = status;
+@@ -396,6 +438,14 @@ void NavigationBodyLoader::OnComplete(
+ }
+ 
+ void NavigationBodyLoader::SetDefersLoading(WebLoaderFreezeMode mode) {
++#if defined(__QNX__)
++  {
++    char _b[64];
++    int _n = snprintf(_b, sizeof(_b), "QNX:NBL:SDL cur=%d new=%d\n",
++                      (int)freeze_mode_, (int)mode);
++    ::write(2, _b, _n);
++  }
++#endif
+   if (freeze_mode_ == mode)
+     return;
+   freeze_mode_ = mode;
+@@ -462,6 +512,15 @@ void NavigationBodyLoader::OnConnectionClosed() {
+ }
+ 
+ void NavigationBodyLoader::OnReadable(MojoResult unused) {
++#if defined(__QNX__)
++  {
++    char _b[64];
++    int _n = snprintf(_b, sizeof(_b), "QNX:NBL:OR eof=%d frz=%d re=%d\n",
++                      (int)has_seen_end_of_data_, (int)freeze_mode_,
++                      (int)is_in_on_readable_);
++    ::write(2, _b, _n);
++  }
++#endif
+   TRACE_EVENT1("loading", "NavigationBodyLoader::OnReadable", "url",
+                original_url_.GetString().Utf8());
+   if (has_seen_end_of_data_ || freeze_mode_ != WebLoaderFreezeMode::kNone ||
+@@ -478,18 +537,50 @@ void NavigationBodyLoader::OnReadable(MojoResult unused) {
+   ReadFromDataPipe();
+   if (!weak_self)
+     return;
++#if defined(__QNX__)
++  {
++    char _b[96];
++    int _n = snprintf(_b, sizeof(_b),
++        "QNX:NBL:OR:post eof=%d comp=%d\n",
++        (int)has_seen_end_of_data_, (int)has_received_completion_);
++    ::write(2, _b, _n);
++  }
++#endif
+   is_in_on_readable_ = false;
+ }
+ 
+ void NavigationBodyLoader::ProcessOffThreadData() {
++#if defined(__QNX__)
++  {
++    char _b[96];
++    int _n = snprintf(_b, sizeof(_b), "QNX:NBL:POT eof=%d frz=%d cli=%d\n",
++                      (int)has_seen_end_of_data_,
++                      (int)freeze_mode_,
++                      client_ ? 1 : 0);
++    ::write(2, _b, _n);
++  }
++#endif
+   if (has_seen_end_of_data_ || freeze_mode_ != WebLoaderFreezeMode::kNone ||
+       !client_) {
++#if defined(__QNX__)
++    ::write(2, "QNX:NBL:POT bail\n", 17);
++#endif
+     return;
+   }
+ 
++#if defined(__QNX__)
++  ::write(2, "QNX:NBL:POT proceed\n", 20);
++#endif
+   auto chunks =
+       off_thread_body_reader_->TakeData(max_data_to_process_per_task_);
+   auto weak_self = weak_factory_.GetWeakPtr();
++#if defined(__QNX__)
++  {
++    char _b[64];
++    int _n = snprintf(_b, sizeof(_b), "QNX:NBL:POT chunks=%zu\n", chunks.size());
++    ::write(2, _b, _n);
++  }
++#endif
+   for (const auto& chunk : chunks) {
+     client_->DecodedBodyDataReceived(
+         chunk.decoded_data, chunk.encoding_data,
+@@ -546,6 +637,15 @@ void NavigationBodyLoader::NotifyCompletionIfAppropriate() {
+ 
+ void NavigationBodyLoader::
+     BindURLLoaderAndStartLoadingResponseBodyIfPossible() {
++#if defined(__QNX__)
++  {
++    char _b[96];
++    int _n = snprintf(_b, sizeof(_b), "QNX:NBL:Bind body=%d otr=%d\n",
++                      response_body_.is_valid() ? 1 : 0,
++                      off_thread_body_reader_ ? 1 : 0);
++    ::write(2, _b, _n);
++  }
++#endif
+   if (!response_body_ && !off_thread_body_reader_)
+     return;
+   // Bind the mojo::URLLoaderClient interface in advance, because we will start
 diff --git a/third_party/blink/renderer/platform/wtf/casting.h b/third_party/blink/renderer/platform/wtf/casting.h
 index bac96015a6..aad262631f 100644
 --- a/third_party/blink/renderer/platform/wtf/casting.h
@@ -10455,6 +14046,30 @@ index 22c4b2e6fb..aa28f6f9d0 100644
  #else
  #error generate event-config.h for your platform
  #endif
+diff --git a/third_party/libevent/select.c b/third_party/libevent/select.c
+index 3f73331317..ff73024e43 100644
+--- a/third_party/libevent/select.c
++++ b/third_party/libevent/select.c
+@@ -155,6 +155,19 @@ select_dispatch(struct event_base *base, void *arg, struct timeval *tv)
+ 	memcpy(sop->event_writeset_out, sop->event_writeset_in,
+ 	       sop->event_fdsz);
+ 
++#if defined(__QNX__) || defined(__QNXNTO__)
++	/* QNX: select() with timeout {0,0} (non-blocking) doesn't reliably
++	   report readiness for TCP sockets connected to external IPs.
++	   Use a small minimum timeout so the kernel updates socket state. */
++	struct timeval qnx_tv;
++	if (tv && tv->tv_sec == 0 && tv->tv_usec == 0 &&
++	    sop->event_fds > 0) {
++		qnx_tv.tv_sec = 0;
++		qnx_tv.tv_usec = 50000; /* 50ms */
++		tv = &qnx_tv;
++	}
++#endif
++
+ 	res = select(sop->event_fds + 1, sop->event_readset_out,
+ 	    sop->event_writeset_out, NULL, tv);
+ 
 diff --git a/third_party/libxml/BUILD.gn b/third_party/libxml/BUILD.gn
 index aab483d6b0..8b19134bf9 100644
 --- a/third_party/libxml/BUILD.gn
@@ -10669,6 +14284,39 @@ index 3af6a66b31..d3f0415aed 100644
      sources += [
        "dragdrop/os_exchange_data_provider_non_backed.cc",
        "dragdrop/os_exchange_data_provider_non_backed.h",
+diff --git a/ui/base/clipboard/clipboard_ozone.cc b/ui/base/clipboard/clipboard_ozone.cc
+index 25fab2bf01..8c26e23ede 100644
+--- a/ui/base/clipboard/clipboard_ozone.cc
++++ b/ui/base/clipboard/clipboard_ozone.cc
+@@ -424,9 +424,11 @@ std::vector<std::u16string> ClipboardOzone::GetStandardFormats(
+     // `WriteText` uses the following mime types for text, so if those types are
+     // available, we add kMimeTypeText to the list.
+     if ((mime_type == ClipboardFormatType::PlainTextType().GetName() ||
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
+          mime_type == kMimeTypeLinuxText || mime_type == kMimeTypeLinuxString ||
+-         mime_type == kMimeTypeTextUtf8 ||
+-         mime_type == kMimeTypeLinuxUtf8String) &&
++         mime_type == kMimeTypeLinuxUtf8String ||
++#endif
++         mime_type == kMimeTypeTextUtf8) &&
+         !base::Contains(types, base::UTF8ToUTF16(kMimeTypeText))) {
+       types.push_back(base::UTF8ToUTF16(kMimeTypeText));
+       continue;
+@@ -688,8 +690,12 @@ void ClipboardOzone::WritePortableAndPlatformRepresentations(
+ void ClipboardOzone::WriteText(base::StringPiece text) {
+   std::vector<uint8_t> data(text.begin(), text.end());
+   async_clipboard_ozone_->InsertData(
+-      std::move(data), {kMimeTypeText, kMimeTypeLinuxText, kMimeTypeLinuxString,
+-                        kMimeTypeTextUtf8, kMimeTypeLinuxUtf8String});
++      std::move(data), {kMimeTypeText,
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
++                        kMimeTypeLinuxText, kMimeTypeLinuxString,
++                        kMimeTypeLinuxUtf8String,
++#endif
++                        kMimeTypeTextUtf8});
+ }
+ 
+ void ClipboardOzone::WriteHTML(base::StringPiece markup,
 diff --git a/ui/base/dragdrop/os_exchange_data_provider_factory.cc b/ui/base/dragdrop/os_exchange_data_provider_factory.cc
 index 5f6587bd85..445ab0d23e 100644
 --- a/ui/base/dragdrop/os_exchange_data_provider_factory.cc
@@ -11029,6 +14677,36 @@ index 6460b39dcb..f69a932f03 100644
      float a = s * std::min(l, 1.0f - l);
      return l - a * std::max(-1.0f, std::min({k - 3.0f, 9.0f - k, 1.0f}));
    };
+diff --git a/ui/gfx/gpu_memory_buffer.h b/ui/gfx/gpu_memory_buffer.h
+index 839a1332c3..d844510c97 100644
+--- a/ui/gfx/gpu_memory_buffer.h
++++ b/ui/gfx/gpu_memory_buffer.h
+@@ -75,7 +75,7 @@ struct GFX_EXPORT GpuMemoryBufferHandle {
+   base::UnsafeSharedMemoryRegion region;
+   uint32_t offset = 0;
+   uint32_t stride = 0;
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_QNX)
+   NativePixmapHandle native_pixmap_handle;
+ #elif BUILDFLAG(IS_APPLE)
+   ScopedIOSurface io_surface;
+diff --git a/ui/gfx/native_pixmap_handle.cc b/ui/gfx/native_pixmap_handle.cc
+index a27f45bd7f..304d81d580 100644
+--- a/ui/gfx/native_pixmap_handle.cc
++++ b/ui/gfx/native_pixmap_handle.cc
+@@ -108,6 +108,12 @@ NativePixmapHandle CloneHandleForIPC(const NativePixmapHandle& handle) {
+     cloned_plane.size = plane.size;
+     cloned_plane.vmo = std::move(vmo_dup);
+     clone.planes.push_back(std::move(cloned_plane));
++#elif BUILDFLAG(IS_QNX)
++    NativePixmapPlane cloned_plane;
++    cloned_plane.stride = plane.stride;
++    cloned_plane.offset = plane.offset;
++    cloned_plane.size = plane.size;
++    clone.planes.push_back(std::move(cloned_plane));
+ #else
+ #error Unsupported OS
+ #endif
 diff --git a/ui/gfx/native_widget_types.h b/ui/gfx/native_widget_types.h
 index f682eccf6b..686d8256e9 100644
 --- a/ui/gfx/native_widget_types.h
@@ -12036,3 +15714,57 @@ index cb6cf9b40b..58dbc8fb10 100644
  
  }  // namespace url
  
+diff --git a/url/third_party/mozilla/url_parse.cc b/url/third_party/mozilla/url_parse.cc
+index 61fb94e98f..e4c0231611 100644
+--- a/url/third_party/mozilla/url_parse.cc
++++ b/url/third_party/mozilla/url_parse.cc
+@@ -264,7 +264,6 @@ void ParsePath(const CHAR* spec,
+     query->reset();
+   }
+ 
+-  // File path: treat an empty file path as no file path.
+   if (file_end != path.begin)
+     *filepath = MakeRange(path.begin, file_end);
+   else
+@@ -327,15 +326,26 @@ void DoParseAfterScheme(const CHAR* spec,
+   int end_auth = FindNextAuthorityTerminator(spec, after_slashes, spec_len);
+   authority = Component(after_slashes, end_auth - after_slashes);
+ 
+-  if (end_auth == spec_len)  // No beginning of path found.
++  if (end_auth == spec_len)
+     full_path = Component();
+-  else  // Everything starting from the slash to the end is the path.
++  else
+     full_path = Component(end_auth, spec_len - end_auth);
+ 
+-  // Now parse those two sub-parts.
+   DoParseAuthority(spec, authority, &parsed->username, &parsed->password,
+                    &parsed->host, &parsed->port);
++#if defined(__QNX__)
++  // ParsePath on QNX/ARM drops the path component (compiler/codegen bug).
++  // Bypass it and set path directly from the full_path range.
++  if (full_path.is_valid() && full_path.len > 0) {
++    parsed->path = full_path;
++    parsed->query.reset();
++    parsed->ref.reset();
++  } else {
++    ParsePath(spec, full_path, &parsed->path, &parsed->query, &parsed->ref);
++  }
++#else
+   ParsePath(spec, full_path, &parsed->path, &parsed->query, &parsed->ref);
++#endif
+ }
+ 
+ // The main parsing function for standard URLs. Standard URLs have a scheme,
+diff --git a/url/url_util.cc b/url/url_util.cc
+index 9258cfcfad..56ed39b363 100644
+--- a/url/url_util.cc
++++ b/url/url_util.cc
+@@ -278,7 +278,6 @@ bool DoCanonicalize(const CHAR* spec,
+                                         output_parsed);
+ 
+   } else if (DoIsStandard(spec, scheme, &scheme_type)) {
+-    // All "normal" URLs.
+     ParseStandardURL(spec, spec_len, &parsed_input);
+     success = CanonicalizeStandardURL(spec, spec_len, parsed_input, scheme_type,
+                                       charset_converter, output, output_parsed);

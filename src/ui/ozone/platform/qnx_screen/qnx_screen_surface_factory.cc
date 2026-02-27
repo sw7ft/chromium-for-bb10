@@ -13,6 +13,7 @@
 #include "ui/gfx/vsync_provider.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_window.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_window_manager.h"
+#include "ui/ozone/platform/qnx_screen/qnx_screen_overlay_callback.h"
 #include "ui/ozone/public/surface_ozone_canvas.h"
 
 namespace ui {
@@ -23,22 +24,33 @@ class QnxScreenCanvas : public SurfaceOzoneCanvas {
  public:
   explicit QnxScreenCanvas(QnxScreenWindow* window)
       : window_(window) {
-    ResizeCanvas(gfx::Size(window->GetBoundsInPixels().width(),
-                           window->GetBoundsInPixels().height()));
+    ResizeCanvasInternal(gfx::Size(window->GetBoundsInPixels().width(),
+                                   window->GetBoundsInPixels().height()));
   }
 
   ~QnxScreenCanvas() override = default;
 
-  // SurfaceOzoneCanvas:
-  sk_sp<SkSurface> GetSurface() override { return surface_; }
+  SkCanvas* GetCanvas() override {
+    return surface_ ? surface_->getCanvas() : nullptr;
+  }
 
   void ResizeCanvas(const gfx::Size& viewport_size, float scale) override {
-    ResizeCanvas(viewport_size);
+    ResizeCanvasInternal(viewport_size);
   }
 
   void PresentCanvas(const gfx::Rect& damage) override {
     if (!window_ || !window_->screen_window())
       return;
+
+    auto overlay_cb = GetQnxScreenOverlayPaintCallback();
+    if (overlay_cb && surface_) {
+      SkCanvas* canvas = surface_->getCanvas();
+      if (canvas) {
+        canvas->save();
+        overlay_cb(canvas);
+        canvas->restore();
+      }
+    }
 
     screen_buffer_t buf[2];
     int rc = screen_get_window_property_pv(window_->screen_window(),
@@ -79,7 +91,7 @@ class QnxScreenCanvas : public SurfaceOzoneCanvas {
   }
 
  private:
-  void ResizeCanvas(const gfx::Size& size) {
+  void ResizeCanvasInternal(const gfx::Size& size) {
     SkImageInfo info = SkImageInfo::MakeN32Premul(size.width(), size.height());
     surface_ = SkSurfaces::Raster(info);
   }

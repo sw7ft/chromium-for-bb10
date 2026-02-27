@@ -22,4 +22,8 @@ QnxScreenWindow* QnxScreenWindowManager::GetWindow(
   return it != windows_.end() ? it->second : nullptr;
 }
 
+QnxScreenWindow* QnxScreenWindowManager::GetFirstWindow() {
+  return windows_.empty() ? nullptr : windows_.begin()->second;
+}
+
 }  // namespace ui

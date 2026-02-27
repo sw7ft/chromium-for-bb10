@@ -84,11 +84,9 @@
 /* Define to 1 if you have the <netinet/in6.h> header file. */
 /* #undef _EVENT_HAVE_NETINET_IN6_H */
 
-/* Define to 1 if you have the `poll' function. */
-#define _EVENT_HAVE_POLL 1
-
-/* Define to 1 if you have the <poll.h> header file. */
-#define _EVENT_HAVE_POLL_H 1
+/* QNX: poll() is broken for external TCP sockets.  Use select(). */
+/* #undef _EVENT_HAVE_POLL */
+/* #undef _EVENT_HAVE_POLL_H */
 
 /* Define to 1 if you have the `port_create' function. */
 /* #undef _EVENT_HAVE_PORT_CREATE */
