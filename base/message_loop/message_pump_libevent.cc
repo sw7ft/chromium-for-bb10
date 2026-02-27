@@ -202,9 +202,11 @@ bool MessagePumpLibevent::WatchFileDescriptor(int fd,
   }
 #endif
 
+#if !BUILDFLAG(IS_QNX)
   TRACE_EVENT("base", "MessagePumpLibevent::WatchFileDescriptor", "fd", fd,
               "persistent", persistent, "watch_read", mode & WATCH_READ,
               "watch_write", mode & WATCH_WRITE);
+#endif
   DCHECK_GE(fd, 0);
   DCHECK(controller);
   DCHECK(delegate);

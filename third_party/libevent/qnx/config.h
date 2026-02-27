@@ -40,11 +40,10 @@
 /* Define to 1 if you have the <memory.h> header file. */
 #define HAVE_MEMORY_H 1
 
-/* Define to 1 if you have the `poll' function. */
-#define HAVE_POLL 1
-
-/* Define to 1 if you have the <poll.h> header file. */
-#define HAVE_POLL_H 1
+/* QNX: poll() is broken for TCP sockets connected to external IPs -
+   it blocks indefinitely ignoring its timeout.  Use select() instead. */
+/* #undef HAVE_POLL */
+/* #undef HAVE_POLL_H */
 
 /* Define to 1 if you have the `select' function. */
 #define HAVE_SELECT 1

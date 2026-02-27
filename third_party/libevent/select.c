@@ -155,6 +155,19 @@ select_dispatch(struct event_base *base, void *arg, struct timeval *tv)
 	memcpy(sop->event_writeset_out, sop->event_writeset_in,
 	       sop->event_fdsz);
 
+#if defined(__QNX__) || defined(__QNXNTO__)
+	/* QNX: select() with timeout {0,0} (non-blocking) doesn't reliably
+	   report readiness for TCP sockets connected to external IPs.
+	   Use a small minimum timeout so the kernel updates socket state. */
+	struct timeval qnx_tv;
+	if (tv && tv->tv_sec == 0 && tv->tv_usec == 0 &&
+	    sop->event_fds > 0) {
+		qnx_tv.tv_sec = 0;
+		qnx_tv.tv_usec = 50000; /* 50ms */
+		tv = &qnx_tv;
+	}
+#endif
+
 	res = select(sop->event_fds + 1, sop->event_readset_out,
 	    sop->event_writeset_out, NULL, tv);
 

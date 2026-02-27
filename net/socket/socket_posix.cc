@@ -17,6 +17,8 @@
 #include "base/logging.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/task/current_thread.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/task/thread_pool.h"
 #include "build/build_config.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
@@ -25,6 +27,11 @@
 #include "net/base/trace_constants.h"
 #include "net/base/tracing.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
+
+#if defined(__QNX__) || defined(__QNXNTO__)
+#include <poll.h>
+#include <unistd.h>
+#endif
 
 #if BUILDFLAG(IS_FUCHSIA)
 #include <poll.h>
@@ -202,6 +209,11 @@ int SocketPosix::Connect(const SockaddrStorage& address,
   if (rv != ERR_IO_PENDING)
     return rv;
 
+#if defined(__QNX__) || defined(__QNXNTO__)
+  // QNX: libevent's select()/poll() backends don't reliably report
+  // write-readiness for connecting sockets.  Use libevent as normal
+  // (it might work), plus a periodic task-based poll as backup.
+#endif
   if (!base::CurrentIOThread::Get()->WatchFileDescriptor(
           socket_fd_, true, base::MessagePumpForIO::WATCH_WRITE,
           &write_socket_watcher_, this)) {
@@ -230,6 +242,16 @@ int SocketPosix::Connect(const SockaddrStorage& address,
 
   write_callback_ = std::move(callback);
   waiting_connect_ = true;
+
+#if defined(__QNX__) || defined(__QNXNTO__)
+  qnx_connect_poll_count_ = 0;
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
+      FROM_HERE,
+      base::BindOnce(&SocketPosix::QnxPollForConnect,
+                     weak_factory_.GetWeakPtr()),
+      base::Milliseconds(10));
+#endif
+
   return ERR_IO_PENDING;
 }
 
@@ -306,6 +328,15 @@ int SocketPosix::ReadIfReady(IOBuffer* buf,
   }
 
   read_if_ready_callback_ = std::move(callback);
+
+#if defined(__QNX__) || defined(__QNXNTO__)
+  qnx_read_poll_count_ = 0;
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
+      FROM_HERE,
+      base::BindOnce(&SocketPosix::QnxPollForRead, weak_factory_.GetWeakPtr()),
+      base::Milliseconds(10));
+#endif
+
   return ERR_IO_PENDING;
 }
 
@@ -482,6 +513,9 @@ void SocketPosix::ConnectCompleted() {
   bool ok = write_socket_watcher_.StopWatchingFileDescriptor();
   DCHECK(ok);
   waiting_connect_ = false;
+#if defined(__QNX__) || defined(__QNXNTO__)
+  weak_factory_.InvalidateWeakPtrs();
+#endif
   std::move(write_callback_).Run(rv);
 }
 
@@ -512,8 +546,81 @@ void SocketPosix::ReadCompleted() {
 
   bool ok = read_socket_watcher_.StopWatchingFileDescriptor();
   DCHECK(ok);
+#if defined(__QNX__) || defined(__QNXNTO__)
+  weak_factory_.InvalidateWeakPtrs();
+#endif
   std::move(read_if_ready_callback_).Run(OK);
 }
+
+#if defined(__QNX__) || defined(__QNXNTO__)
+void SocketPosix::QnxPollForRead() {
+  if (read_if_ready_callback_.is_null())
+    return;
+
+  int fd = socket_fd_;
+  auto io_runner = base::SingleThreadTaskRunner::GetCurrentDefault();
+  auto weak = weak_factory_.GetWeakPtr();
+
+  base::ThreadPool::PostTask(
+      FROM_HERE, {base::MayBlock()},
+      base::BindOnce([](int fd,
+                        scoped_refptr<base::SingleThreadTaskRunner> io_runner,
+                        base::WeakPtr<SocketPosix> weak) {
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(fd, &rfds);
+        struct timeval tv = {10, 0};
+        int sel = select(fd + 1, &rfds, nullptr, nullptr, &tv);
+        io_runner->PostTask(
+            FROM_HERE,
+            base::BindOnce(&SocketPosix::QnxReadSelectDone, weak, sel));
+      }, fd, io_runner, weak));
+}
+
+void SocketPosix::QnxReadSelectDone(int sel_result) {
+  if (read_if_ready_callback_.is_null())
+    return;
+
+  if (sel_result > 0) {
+    ReadCompleted();
+    return;
+  }
+
+  read_socket_watcher_.StopWatchingFileDescriptor();
+  weak_factory_.InvalidateWeakPtrs();
+  std::move(read_if_ready_callback_).Run(
+      sel_result == 0 ? ERR_CONNECTION_TIMED_OUT : MapSystemError(errno));
+}
+
+void SocketPosix::QnxPollForConnect() {
+  if (!waiting_connect_ || write_callback_.is_null())
+    return;
+
+  fd_set wfds;
+  FD_ZERO(&wfds);
+  FD_SET(socket_fd_, &wfds);
+  struct timeval tv = {0, 0};
+  int sel_rv = select(socket_fd_ + 1, nullptr, &wfds, nullptr, &tv);
+  if (sel_rv > 0) {
+    ConnectCompleted();
+    return;
+  }
+
+  if (++qnx_connect_poll_count_ > 1500) {
+    write_socket_watcher_.StopWatchingFileDescriptor();
+    waiting_connect_ = false;
+    weak_factory_.InvalidateWeakPtrs();
+    std::move(write_callback_).Run(ERR_CONNECTION_TIMED_OUT);
+    return;
+  }
+
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
+      FROM_HERE,
+      base::BindOnce(&SocketPosix::QnxPollForConnect,
+                     weak_factory_.GetWeakPtr()),
+      base::Milliseconds(20));
+}
+#endif
 
 int SocketPosix::DoWrite(IOBuffer* buf, int buf_len) {
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)

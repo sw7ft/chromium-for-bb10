@@ -10,6 +10,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_pump_for_io.h"
 #include "base/threading/thread_checker.h"
 #include "net/base/completion_once_callback.h"
@@ -156,6 +157,15 @@ class NET_EXPORT_PRIVATE SocketPosix
   std::unique_ptr<SockaddrStorage> peer_address_;
 
   base::ThreadChecker thread_checker_;
+
+#if defined(__QNX__) || defined(__QNXNTO__)
+  void QnxPollForRead();
+  void QnxReadSelectDone(int sel_result);
+  void QnxPollForConnect();
+  int qnx_read_poll_count_ = 0;
+  int qnx_connect_poll_count_ = 0;
+  base::WeakPtrFactory<SocketPosix> weak_factory_{this};
+#endif
 };
 
 }  // namespace net
