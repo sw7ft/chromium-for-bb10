@@ -4070,6 +4070,9 @@ void NavigationRequest::OnResponseStarted(
   ScopedCrashKeys crash_keys(*this);
 #endif
 
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:ORS:1 preReset\n"; write(2, m, sizeof(m)-1); }
+#endif
   // The |loader_|'s job is finished. It must not call the NavigationRequest
   // anymore from now.
   loader_.reset();
@@ -4080,16 +4083,35 @@ void NavigationRequest::OnResponseStarted(
     RecordDownloadUseCountersPostPolicyCheck();
   request_id_ = request_id;
 
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:ORS:2 preTrace\n"; write(2, m, sizeof(m)-1); }
+#endif
   DCHECK(IsNavigationStarted());
   DCHECK(response_head);
   DCHECK(response_head->parsed_headers);
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:ORS:3 preSetState\n"; write(2, m, sizeof(m)-1); }
+#else
   EnterChildTraceEvent("OnResponseStarted", this);
+#endif
   SetState(WILL_PROCESS_RESPONSE);
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:ORS:4 preMove\n"; write(2, m, sizeof(m)-1); }
+#endif
   response_head_ = std::move(response_head);
   response_body_ = std::move(response_body);
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:ORS:5 preSSL\n"; write(2, m, sizeof(m)-1); }
+#endif
   ssl_info_ = response_head_->ssl_info;
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:ORS:6 preAuth\n"; write(2, m, sizeof(m)-1); }
+#endif
   auth_challenge_info_ = response_head_->auth_challenge_info;
 
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:ORS:7 preEarlyHints\n"; write(2, m, sizeof(m)-1); }
+#endif
   // TODO(https://crbug.com/1305896): Store the whole EarlyHints struct instead
   // of duplicating all of its fields.
   was_resource_hints_received_ = early_hints.was_resource_hints_received;
@@ -4106,6 +4128,9 @@ void NavigationRequest::OnResponseStarted(
             *early_hints_manager_->first_early_hints_receive_time());
   }
 
+#if BUILDFLAG(IS_QNX)
+  { const char m[] = "QNX:ORS:8 preAddrSpace\n"; write(2, m, sizeof(m)-1); }
+#endif
   // A request was made. Record it before we decide to block this response for
   // a reason or another.
   RecordAddressSpaceFeature();

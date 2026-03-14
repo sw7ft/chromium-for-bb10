@@ -74,3 +74,30 @@ LD_LIBRARY_PATH=. ./content_shell --no-sandbox --disable-gpu --no-zygote \
 **Additional fixes required (beyond Milestone 2)**:
 - `base::StringPiece::find()` bug in HttpChunkedDecoder: QnxFindChar helper
 - All cumulative stdlib workarounds functioning end-to-end for real-world HTTP responses
+
+---
+
+## Milestone 4 - HTTPS rendering (2026-03-14)
+
+**URL**: `https://example.com`
+
+**Result**: SUCCESS - Full DOM dump produced. Zero crashes, clean exit.
+
+**Extra flags**: `--ignore-certificate-errors --disable-http2`
+
+**Output**:
+```
+<html><head><title>Example Domain</title>...
+<h1>Example Domain</h1>
+<p>This domain is for use in documentation examples...</p>
+...</html>
+```
+
+**Files**: `milestone4_https_stdout.txt`, `milestone4_https_stderr.txt`
+
+**Additional fixes required (beyond Milestone 3)**:
+- `--disable-http2` to force HTTP/1.1 (HTTP/2 ALPN negotiation causes 400 from Cloudflare)
+- `--ignore-certificate-errors` to bypass cert validation (no root CA store on device)
+- Guard `EnterChildTraceEvent("OnResponseStarted", ...)` with `#if !BUILDFLAG(IS_QNX)` to prevent SIGSEGV in strlen from trace event string handling
+- TLS 1.3 handshake and BoringSSL work correctly on QNX ARM
+- `CertVerifierServiceFactory` Mojo IPC works end-to-end
