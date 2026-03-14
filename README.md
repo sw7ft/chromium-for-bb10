@@ -7,13 +7,14 @@ A port of Chromium's `content_shell` to QNX, targeting the **BlackBerry Passport
 - **Headless browser** running in single-process mode on the BlackBerry Passport
 - **HTML parsing and DOM construction** via Blink
 - **V8 JavaScript engine** initialized and running on ARM32 QNX
-- **`--dump-dom` output** for `about:blank`, `data:`, local HTTP, and **external HTTP** with clean exit
+- **`--dump-dom` output** for `about:blank`, `data:`, local HTTP, **external HTTP**, and **HTTPS** with clean exit
 - **Local HTTP page loading** -- full HTML + JavaScript rendering via `http://127.0.0.1`
 - **External HTTP page loading** -- fetching and rendering pages from the internet (e.g. `http://example.com`)
+- **HTTPS page loading** -- TLS 1.3 via BoringSSL (e.g. `https://example.com`)
 - **ICU internationalization**, CSS default stylesheets, full DOM tree
 
 ```
-$ ./run.sh http://example.com 2>/dev/null
+$ ./run.sh https://example.com 2>/dev/null
 <html><head><title>Example Domain</title>...
 <h1>Example Domain</h1>
 <p>This domain is for use in documentation examples...</p>
@@ -30,10 +31,13 @@ $ ./run.sh 'data:text/html,<h1>Hello from BB10</h1>' 2>/dev/null
 - **Ozone platform for QNX Screen** -- windowed rendering backend using `screen_create_window()` + Skia software rasterizer
 - **Browser chrome UI** -- Skia-rendered toolbar with URL bar, back/forward/reload buttons
 - **BAR packaging** -- native app packaging for BB10 launcher (currently crashes on launch, needs Ozone debugging)
+- **Root CA certificates** -- device has no CA bundle, requires `--ignore-certificate-errors` for HTTPS
+- **HTTP/2** -- ALPN negotiation causes 400 responses, currently forced to HTTP/1.1
 
 ## What Doesn't Work (Yet)
 
-- **HTTPS** -- TLS not yet tested
+- **HTTP/2** -- disabled via `--disable-http2` (ALPN negotiation issue)
+- **Certificate verification** -- no root CA store on device, bypassed with `--ignore-certificate-errors`
 - **Multi-process mode** -- QNX process model differences
 - **Service workers, web workers** -- disabled
 - **Windowed mode** -- Ozone `qnx_screen` platform needs debugging
