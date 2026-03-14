@@ -64,6 +64,7 @@ All patches apply against this commit. Fetch Chromium source using `depot_tools`
 
 ```
 ├── README.md
+├── browser-content-shell-131.zip  # pre-built binary package (72 MB)
 ├── patches/
 │   └── qnx-port.patch          # unified diff (~21k lines)
 ├── src/                         # 42 new QNX-specific files
@@ -90,10 +91,43 @@ All patches apply against this commit. Fetch Chromium source using `depot_tools`
 │   └── run-on-passport.sh       # deploy + run on device
 └── docs/
     ├── STATUS.md                # detailed status and issue log
-    └── QNX_BB10_MILESTONES.md   # milestone descriptions and test captures
+    ├── QNX_BB10_MILESTONES.md   # milestone descriptions and test captures
+    └── TERM49-DEPLOY.md         # quick deploy guide for Term49 userland
 ```
 
-## Prerequisites
+## Quick Start (Pre-built Binary)
+
+A ready-to-run zip is included in this repo: **`browser-content-shell-131.zip`** (~72 MB)
+
+### Install on BB10 device
+
+```bash
+# Copy zip to device (from host)
+scp browser-content-shell-131.zip passport:/accounts/1000/shared/misc/
+
+# On device (e.g. via Term49 shell)
+cp /accounts/1000/shared/misc/browser-content-shell-131.zip .
+unzip -o browser-content-shell-131.zip
+chmod +x bin/content-shell bin/content_shell
+```
+
+### Run
+
+```bash
+bin/content-shell https://example.com 2>/dev/null
+bin/content-shell http://example.com 2>/dev/null
+bin/content-shell 'data:text/html,<h1>Hello</h1>' 2>/dev/null
+```
+
+Output is the rendered DOM on stdout. Use `2>/dev/null` to suppress debug traces.
+
+See [docs/TERM49-DEPLOY.md](docs/TERM49-DEPLOY.md) for full Term49 deployment details.
+
+---
+
+## Building from Source
+
+### Prerequisites
 
 - **Linux host** (tested on Ubuntu in Docker)
 - **Chromium source** checked out at commit `ad76543128` via `depot_tools`
