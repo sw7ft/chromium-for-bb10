@@ -32,10 +32,19 @@ LD_LIBRARY_PATH=../lib ./content_shell \
   'https://example.com' 2>/dev/null
 ```
 
+## Debug traces
+
+Add `--qnx-trace` to enable verbose debug output on stderr (off by default):
+
+```bash
+bin/content-shell --qnx-trace https://example.com
+```
+
 ## Notes
 
 - Resources (`icudtl.dat`, `*.pak`, `snapshot_blob.bin`) must be next to the `content_shell` binary in `bin/`
 - `libtest_trace_processor.so` must be in `lib/`
 - `--disable-gpu-compositing` and `--disable-features=Viz` are required on Term49 to avoid a compositor crash in `strlen`
 - HTTPS requires `--ignore-certificate-errors` (no root CA store) and `--disable-http2` (ALPN issue)
+- If a `cacert.pem` file is placed next to the binary, set `SSL_CERT_FILE` to use it for proper certificate verification
 - First run takes ~10-15s for HTTPS, ~5s for HTTP, instant for data: URLs

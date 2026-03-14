@@ -119,7 +119,13 @@ bin/content-shell http://example.com 2>/dev/null
 bin/content-shell 'data:text/html,<h1>Hello</h1>' 2>/dev/null
 ```
 
-Output is the rendered DOM on stdout. Use `2>/dev/null` to suppress debug traces.
+Output is the rendered DOM on stdout. Use `2>/dev/null` to suppress stderr noise.
+
+Add `--qnx-trace` to enable verbose debug traces (off by default):
+
+```bash
+bin/content-shell --qnx-trace https://example.com
+```
 
 See [docs/TERM49-DEPLOY.md](docs/TERM49-DEPLOY.md) for full Term49 deployment details.
 
@@ -263,7 +269,7 @@ symbol_level = 1
 
 The port works around several QNX-specific issues:
 
-- **QNX ARM `std::string` bugs**: `find_first_of`, `find_first_not_of`, and `find(char, pos)` all return incorrect values (typically 0) on QNX ARM. Replaced with manual loop helpers across HTTP parsing, MIME type detection, chunked transfer decoding, and Mojo IPC deserialization.
+- **QNX ARM `std::string` bugs**: `find_first_of`, `find_first_not_of`, and `find(char, pos)` all return incorrect values (typically 0) on QNX ARM. Centralized safe replacements in `base/qnx_string_util.h` used across HTTP parsing, MIME type detection, chunked transfer decoding, and Mojo IPC deserialization.
 
 - **Mojo IPC `HttpResponseHeaders` deserialization**: The `HttpResponseHeaders::Builder` API hangs on QNX due to the `std::string::find` bug. Bypassed by directly constructing from raw header strings.
 
@@ -275,9 +281,11 @@ The port works around several QNX-specific issues:
 
 - **TRACE_EVENT hangs**: Perfetto tracing macros cause hangs on QNX. All critical paths guarded with `#if !BUILDFLAG(IS_QNX)`.
 
-- **libevent poll() broken**: `poll()` blocks indefinitely for external TCP sockets on QNX. Disabled poll backend, forced `select()` with minimum 50ms timeout.
+- **Debug traces**: ~350+ `write(2,...)` debug traces consolidated behind `QNX_TRACE_MSG`/`QNX_TRACE_FMT` macros controlled by `--qnx-trace` runtime flag (off by default, zero overhead).
 
-- **Socket readiness detection**: QNX `select()` with zero timeout doesn't detect TCP socket readiness. Thread-pool-offloaded `select()` with retry mechanism (12x5s) used as workaround.
+- **libevent poll() broken**: `poll()` blocks indefinitely for external TCP sockets on QNX. Disabled poll backend, forced `select()` with 50ms timeout for zero-timeout bug and 200ms cap for idle.
+
+- **Socket readiness detection**: QNX `select()` with zero timeout doesn't detect TCP socket readiness. Thread-pool-offloaded `select()` with retry mechanism (6x2s) used as workaround.
 
 - **Mojo `EnableBatchDispatch`**: Disabled on QNX to prevent message delivery delays in `ThrottlingURLLoader`.
 
