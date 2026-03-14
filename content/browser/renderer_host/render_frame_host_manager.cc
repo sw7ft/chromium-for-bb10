@@ -1383,15 +1383,14 @@ void RenderFrameHostManager::DidCreateNavigationRequest(
     }
   } else {
 #if BUILDFLAG(IS_QNX)
-    write(2, "QNX:RFHM:bypass\n", 17);
-    request->SetAssociatedRFHType(
-        NavigationRequest::AssociatedRenderFrameHostType::CURRENT);
-#else
     write(2, "QNX:RFHM:1 GetFH\n", 18);
+#endif
     BrowsingContextGroupSwap ignored_bcg_swap_info =
         BrowsingContextGroupSwap::CreateDefault();
     auto result = GetFrameHostForNavigation(request, &ignored_bcg_swap_info);
+#if BUILDFLAG(IS_QNX)
     write(2, "QNX:RFHM:2 GotFH\n", 18);
+#endif
     if (result.has_value()) {
       DCHECK(result.value());
     } else if (result.error() ==
@@ -1401,7 +1400,6 @@ void RenderFrameHostManager::DidCreateNavigationRequest(
           ->RecordMetricsForBlockedGetFrameHostAttempt(
               /* commit_attempt=*/false);
     }
-#endif
   }
 }
 

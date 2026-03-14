@@ -7,6 +7,31 @@
 #include <map>
 #include <string>
 #include <unordered_set>
+#if defined(__QNX__) || defined(__QNXNTO__)
+namespace {
+size_t QnxFindFirstOf(const char* data, size_t len, const char* chars,
+                      size_t start = 0) {
+  for (size_t i = start; i < len; i++) {
+    for (const char* c = chars; *c; c++) {
+      if (data[i] == *c)
+        return i;
+    }
+  }
+  return std::string::npos;
+}
+size_t QnxFindFirstNotOf(const char* data, size_t len, const char* chars,
+                         size_t start = 0) {
+  for (size_t i = start; i < len; i++) {
+    bool found = false;
+    for (const char* c = chars; *c; c++) {
+      if (data[i] == *c) { found = true; break; }
+    }
+    if (!found) return i;
+  }
+  return std::string::npos;
+}
+}  // namespace
+#endif
 
 #include "base/base64.h"
 #include "base/check_op.h"
@@ -471,14 +496,21 @@ bool ParseMimeType(const std::string& type_str,
   // Trim leading and trailing whitespace from type.  We include '(' in
   // the trailing trim set to catch media-type comments, which are not at all
   // standard, but may occur in rare cases.
+#if defined(__QNX__) || defined(__QNXNTO__)
+  size_t type_val = QnxFindFirstNotOf(type_str.data(), type_str.size(), HTTP_LWS);
+  type_val = std::min(type_val, type_str.length());
+  size_t type_end = QnxFindFirstOf(type_str.data(), type_str.size(), HTTP_LWS ";(", type_val);
+  if (type_end == std::string::npos)
+    type_end = type_str.length();
+  size_t slash_pos = QnxFindFirstOf(type_str.data(), type_str.size(), "/");
+#else
   size_t type_val = type_str.find_first_not_of(HTTP_LWS);
   type_val = std::min(type_val, type_str.length());
   size_t type_end = type_str.find_first_of(HTTP_LWS ";(", type_val);
   if (type_end == std::string::npos)
     type_end = type_str.length();
-
-  // Reject a mime-type if it does not include a slash.
   size_t slash_pos = type_str.find_first_of('/');
+#endif
   if (slash_pos == std::string::npos || slash_pos > type_end)
     return false;
   if (mime_type)
@@ -491,19 +523,27 @@ bool ParseMimeType(const std::string& type_str,
   // code points, and ignores spaces after "=" in parameters.
   if (params)
     params->clear();
+#if defined(__QNX__) || defined(__QNXNTO__)
+  std::string::size_type offset = QnxFindFirstOf(type_str.data(), type_str.size(), ";", type_end);
+#else
   std::string::size_type offset = type_str.find_first_of(';', type_end);
+#endif
   while (offset < type_str.size()) {
     DCHECK_EQ(';', type_str[offset]);
-    // Trim off the semicolon.
     ++offset;
 
-    // Trim off any following spaces.
+#if defined(__QNX__) || defined(__QNXNTO__)
+    offset = QnxFindFirstNotOf(type_str.data(), type_str.size(), HTTP_LWS, offset);
+#else
     offset = type_str.find_first_not_of(HTTP_LWS, offset);
+#endif
     std::string::size_type param_name_start = offset;
 
-    // Extend parameter name until run into a semicolon or equals sign.  Per
-    // spec, trailing spaces are not removed.
+#if defined(__QNX__) || defined(__QNXNTO__)
+    offset = QnxFindFirstOf(type_str.data(), type_str.size(), ";=", offset);
+#else
     offset = type_str.find_first_of(";=", offset);
+#endif
 
     // Nothing more to do if at end of string, or if there's no parameter
     // value, since names without values aren't allowed.
@@ -526,17 +566,22 @@ bool ParseMimeType(const std::string& type_str,
     // GET spec's way of getting an encoding, and the spec for handling
     // boundary values as well.
     // See https://encoding.spec.whatwg.org/#names-and-labels.
+#if defined(__QNX__) || defined(__QNXNTO__)
+    offset = QnxFindFirstNotOf(type_str.data(), type_str.size(), HTTP_LWS, offset);
+#else
     offset = type_str.find_first_not_of(HTTP_LWS, offset);
+#endif
 
     std::string param_value;
     if (offset == std::string::npos || type_str[offset] == ';') {
-      // Nothing to do here - an unquoted string of only whitespace should be
-      // skipped.
       continue;
     } else if (type_str[offset] != '"') {
-      // If the first character is not a quotation mark, copy data directly.
       std::string::size_type value_start = offset;
+#if defined(__QNX__) || defined(__QNXNTO__)
+      offset = QnxFindFirstOf(type_str.data(), type_str.size(), ";", offset);
+#else
       offset = type_str.find_first_of(';', offset);
+#endif
       std::string::size_type value_end = offset;
 
       // Remove terminal whitespace. If ran off the end of the string, have to
@@ -568,7 +613,11 @@ bool ParseMimeType(const std::string& type_str,
         ++offset;
       }
 
+#if defined(__QNX__) || defined(__QNXNTO__)
+      offset = QnxFindFirstOf(type_str.data(), type_str.size(), ";", offset);
+#else
       offset = type_str.find_first_of(';', offset);
+#endif
     }
     if (params)
       params->emplace_back(param_name, param_value);

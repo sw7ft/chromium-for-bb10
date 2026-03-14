@@ -465,9 +465,11 @@ void MessagePumpLibevent::OnLibeventNotification(int fd,
 // Called if a byte is received on the wakeup pipe.
 // static
 void MessagePumpLibevent::OnWakeup(int socket, short flags, void* context) {
+#if !BUILDFLAG(IS_QNX)
   TRACE_EVENT(TRACE_DISABLED_BY_DEFAULT("base"),
               "MessagePumpLibevent::OnWakeup", "socket", socket, "flags", flags,
               "context", context);
+#endif
   MessagePumpLibevent* that = static_cast<MessagePumpLibevent*>(context);
   DCHECK(that->wakeup_pipe_out_ == socket);
 

@@ -8,6 +8,20 @@
 #include "net/http/http_util.h"
 
 #include <algorithm>
+#if defined(__QNX__) || defined(__QNXNTO__)
+#include <unistd.h>
+namespace {
+size_t QnxFindFirstOf(const char* data, size_t len, const char* chars) {
+  for (size_t i = 0; i < len; i++) {
+    for (const char* c = chars; *c; c++) {
+      if (data[i] == *c)
+        return i;
+    }
+  }
+  return std::string::npos;
+}
+}  // namespace
+#endif
 
 #include "base/check_op.h"
 #include "base/containers/cxx20_erase.h"
@@ -638,10 +652,18 @@ static bool IsLineSegmentContinuable(base::StringPiece line) {
 
 // Helper used by AssembleRawHeaders, to find the end of the status line.
 static size_t FindStatusLineEnd(base::StringPiece str) {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  for (size_t i = 0; i < str.size(); i++) {
+    if (str[i] == '\r' || str[i] == '\n')
+      return i;
+  }
+  return str.size();
+#else
   size_t i = str.find_first_of("\r\n");
   if (i == base::StringPiece::npos)
     return str.size();
   return i;
+#endif
 }
 
 // Helper used by AssembleRawHeaders, to skip past leading LWS.
@@ -1069,7 +1091,11 @@ bool HttpUtil::NameValuePairsIterator::GetNext() {
 bool HttpUtil::ParseAcceptEncoding(const std::string& accept_encoding,
                                    std::set<std::string>* allowed_encodings) {
   DCHECK(allowed_encodings);
+#if defined(__QNX__) || defined(__QNXNTO__)
+  if (QnxFindFirstOf(accept_encoding.data(), accept_encoding.size(), "\"") != std::string::npos)
+#else
   if (accept_encoding.find_first_of("\"") != std::string::npos)
+#endif
     return false;
   allowed_encodings->clear();
 
@@ -1080,14 +1106,22 @@ bool HttpUtil::ParseAcceptEncoding(const std::string& accept_encoding,
     entry = TrimLWS(entry);
     size_t semicolon_pos = entry.find(';');
     if (semicolon_pos == base::StringPiece::npos) {
+#if defined(__QNX__) || defined(__QNXNTO__)
+      if (QnxFindFirstOf(entry.data(), entry.size(), HTTP_LWS) != std::string::npos)
+#else
       if (entry.find_first_of(HTTP_LWS) != base::StringPiece::npos)
+#endif
         return false;
       allowed_encodings->insert(base::ToLowerASCII(entry));
       continue;
     }
     base::StringPiece encoding = entry.substr(0, semicolon_pos);
     encoding = TrimLWS(encoding);
+#if defined(__QNX__) || defined(__QNXNTO__)
+    if (QnxFindFirstOf(encoding.data(), encoding.size(), HTTP_LWS) != std::string::npos)
+#else
     if (encoding.find_first_of(HTTP_LWS) != base::StringPiece::npos)
+#endif
       return false;
     base::StringPiece params = entry.substr(semicolon_pos + 1);
     params = TrimLWS(params);
@@ -1155,7 +1189,11 @@ bool HttpUtil::ParseAcceptEncoding(const std::string& accept_encoding,
 bool HttpUtil::ParseContentEncoding(const std::string& content_encoding,
                                     std::set<std::string>* used_encodings) {
   DCHECK(used_encodings);
+#if defined(__QNX__) || defined(__QNXNTO__)
+  if (QnxFindFirstOf(content_encoding.data(), content_encoding.size(), "\"=;*") != std::string::npos)
+#else
   if (content_encoding.find_first_of("\"=;*") != std::string::npos)
+#endif
     return false;
   used_encodings->clear();
 
@@ -1163,7 +1201,11 @@ bool HttpUtil::ParseContentEncoding(const std::string& content_encoding,
                                            content_encoding.end(), ",");
   while (encoding_tokenizer.GetNext()) {
     base::StringPiece encoding = TrimLWS(encoding_tokenizer.token_piece());
+#if defined(__QNX__) || defined(__QNXNTO__)
+    if (QnxFindFirstOf(encoding.data(), encoding.size(), HTTP_LWS) != std::string::npos)
+#else
     if (encoding.find_first_of(HTTP_LWS) != base::StringPiece::npos)
+#endif
       return false;
     used_encodings->insert(base::ToLowerASCII(encoding));
   }

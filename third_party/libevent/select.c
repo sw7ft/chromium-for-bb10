@@ -156,14 +156,19 @@ select_dispatch(struct event_base *base, void *arg, struct timeval *tv)
 	       sop->event_fdsz);
 
 #if defined(__QNX__) || defined(__QNXNTO__)
-	/* QNX: select() with timeout {0,0} (non-blocking) doesn't reliably
-	   report readiness for TCP sockets connected to external IPs.
-	   Use a small minimum timeout so the kernel updates socket state. */
+	/* QNX: select() has two broken behaviors:
+	   1) timeout {0,0} doesn't reliably report socket readiness
+	   2) NULL timeout (infinite block) misses wakeup pipe writes,
+	      freezing the message loop when no periodic timers exist.
+	   Cap all select() calls to a max of 50ms on QNX. */
 	struct timeval qnx_tv;
-	if (tv && tv->tv_sec == 0 && tv->tv_usec == 0 &&
-	    sop->event_fds > 0) {
+	if (!tv || (tv->tv_sec == 0 && tv->tv_usec == 0)) {
 		qnx_tv.tv_sec = 0;
 		qnx_tv.tv_usec = 50000; /* 50ms */
+		tv = &qnx_tv;
+	} else if (tv->tv_sec > 0 || tv->tv_usec > 50000) {
+		qnx_tv.tv_sec = 0;
+		qnx_tv.tv_usec = 50000; /* 50ms max */
 		tv = &qnx_tv;
 	}
 #endif

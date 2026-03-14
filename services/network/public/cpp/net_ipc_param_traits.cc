@@ -11,6 +11,16 @@
 #include "base/strings/string_number_conversions.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_version.h"
+
+namespace {
+size_t QnxStrFind(const std::string& s, char c, size_t pos = 0) {
+  for (size_t i = pos; i < s.size(); i++) {
+    if (s[i] == c)
+      return i;
+  }
+  return std::string::npos;
+}
+}  // namespace
 #endif
 
 #include "ipc/ipc_message_utils.h"
@@ -193,59 +203,9 @@ bool ParamTraits<scoped_refptr<net::HttpResponseHeaders>>::Read(
     std::string raw_input;
     if (!iter->ReadString(&raw_input))
       return false;
-    // The persisted format: "HTTP/x.x status\0header1: val1\0...\0\0"
-    // Extract status line (up to first \0)
-    size_t status_end = raw_input.find('\0');
-    if (status_end == std::string::npos)
-      status_end = raw_input.size();
-    std::string status_line = raw_input.substr(0, status_end);
-
-    // Parse version and status from status line like "HTTP/1.1 200 OK"
-    int major = 1, minor = 1, code = 200;
-    std::string reason = "OK";
-    if (status_line.size() >= 8 &&
-        status_line.substr(0, 5) == "HTTP/") {
-      size_t dot = status_line.find('.', 5);
-      if (dot != std::string::npos) {
-        major = status_line[5] - '0';
-        minor = status_line[dot + 1] - '0';
-      }
-      size_t sp = status_line.find(' ', 8);
-      if (sp != std::string::npos) {
-        std::string rest = status_line.substr(sp + 1);
-        code = atoi(rest.c_str());
-        size_t sp2 = rest.find(' ');
-        if (sp2 != std::string::npos)
-          reason = rest.substr(sp2 + 1);
-      }
-    }
-
-    net::HttpResponseHeaders::Builder builder(
-        net::HttpVersion(major, minor),
-        base::NumberToString(code) + " " + reason);
-
-    // Parse remaining headers (null-separated after status line)
-    size_t pos = status_end + 1;
-    while (pos < raw_input.size()) {
-      size_t next = raw_input.find('\0', pos);
-      if (next == std::string::npos)
-        next = raw_input.size();
-      if (next == pos)
-        break;  // double null = end
-      std::string header_line = raw_input.substr(pos, next - pos);
-      size_t colon = header_line.find(':');
-      if (colon != std::string::npos) {
-        std::string name = header_line.substr(0, colon);
-        std::string value = header_line.substr(colon + 1);
-        // Trim leading space from value
-        if (!value.empty() && value[0] == ' ')
-          value = value.substr(1);
-        builder.AddHeader(name, value);
-      }
-      pos = next + 1;
-    }
-
-    *r = builder.Build();
+    { const char _t[] = "QNX:PTRD:preNew\n"; write(2, _t, sizeof(_t) - 1); }
+    *r = base::MakeRefCounted<net::HttpResponseHeaders>(raw_input);
+    { const char _t[] = "QNX:PTRD:postNew\n"; write(2, _t, sizeof(_t) - 1); }
 #else
     *r = base::MakeRefCounted<net::HttpResponseHeaders>(iter);
 #endif

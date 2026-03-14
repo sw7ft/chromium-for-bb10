@@ -7,6 +7,12 @@
 #include <set>
 #include <utility>
 #include <vector>
+#if defined(__QNX__) || defined(__QNXNTO__)
+#include <unistd.h>
+#endif
+#if defined(__QNX__) || defined(__QNXNTO__)
+#include <unistd.h>
+#endif
 
 #include "base/base64url.h"
 #include "base/compiler_specific.h"
@@ -1179,6 +1185,15 @@ int HttpNetworkTransaction::DoReadHeaders() {
 }
 
 int HttpNetworkTransaction::DoReadHeadersComplete(int result) {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    char msg[128];
+    int n = ::snprintf(msg, sizeof(msg), "QNX:DRHC rv=%d code=%d\n",
+                       result,
+                       response_.headers ? response_.headers->response_code() : -1);
+    ::write(2, msg, n);
+  }
+#endif
   // We can get a ERR_SSL_CLIENT_AUTH_CERT_NEEDED here due to SSL renegotiation.
   // Server certificate errors are impossible. Rather than reverify the new
   // server certificate, BoringSSL forbids server certificates from changing.

@@ -521,6 +521,24 @@ void SocketPosix::ConnectCompleted() {
 
 int SocketPosix::DoRead(IOBuffer* buf, int buf_len) {
   int rv = HANDLE_EINTR(read(socket_fd_, buf->data(), buf_len));
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    char msg[128];
+    int n = snprintf(msg, sizeof(msg),
+                     "QNX:DoRead fd=%d req=%d got=%d errno=%d\n",
+                     socket_fd_, buf_len, rv, rv < 0 ? errno : 0);
+    write(2, msg, n);
+    if (rv > 0) {
+      int dump = rv < 300 ? rv : 300;
+      char hex[1024];
+      int p = snprintf(hex, sizeof(hex), "QNX:DoRead first%d: ", dump);
+      for (int i = 0; i < dump && p < 1000; i++)
+        p += snprintf(hex + p, sizeof(hex) - p, "%02x ", (unsigned char)buf->data()[i]);
+      hex[p++] = '\n';
+      write(2, hex, p);
+    }
+  }
+#endif
   return rv >= 0 ? rv : MapSystemError(errno);
 }
 
@@ -529,6 +547,14 @@ void SocketPosix::RetryRead(int rv) {
   DCHECK(read_buf_);
   DCHECK_LT(0, read_buf_len_);
 
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    char m[128];
+    int n = snprintf(m, sizeof(m), "QNX:RR rv=%d buf=%p len=%d\n",
+                     rv, read_buf_->data(), read_buf_len_);
+    write(2, m, n);
+  }
+#endif
   if (rv == OK) {
     rv = ReadIfReady(
         read_buf_.get(), read_buf_len_,
@@ -536,6 +562,13 @@ void SocketPosix::RetryRead(int rv) {
     if (rv == ERR_IO_PENDING)
       return;
   }
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    char m[128];
+    int n = snprintf(m, sizeof(m), "QNX:RR done rv=%d\n", rv);
+    write(2, m, n);
+  }
+#endif
   read_buf_ = nullptr;
   read_buf_len_ = 0;
   std::move(read_callback_).Run(rv);
@@ -569,7 +602,7 @@ void SocketPosix::QnxPollForRead() {
         fd_set rfds;
         FD_ZERO(&rfds);
         FD_SET(fd, &rfds);
-        struct timeval tv = {10, 0};
+        struct timeval tv = {5, 0};
         int sel = select(fd + 1, &rfds, nullptr, nullptr, &tv);
         io_runner->PostTask(
             FROM_HERE,
@@ -584,6 +617,20 @@ void SocketPosix::QnxReadSelectDone(int sel_result) {
   if (sel_result > 0) {
     ReadCompleted();
     return;
+  }
+
+  if (sel_result == 0) {
+    qnx_read_poll_count_++;
+    if (qnx_read_poll_count_ < 12) {
+      {
+        char m[80];
+        int n = snprintf(m, sizeof(m), "QNX:RSD timeout retry %d/12\n",
+                         qnx_read_poll_count_);
+        write(2, m, n);
+      }
+      QnxPollForRead();
+      return;
+    }
   }
 
   read_socket_watcher_.StopWatchingFileDescriptor();

@@ -2726,20 +2726,22 @@ void NavigationRequest::
          "`NavigationRequest` starts to select the RFH.";
 
 #if BUILDFLAG(IS_QNX)
-  { const char m[] = "QNX:Browser:SelFrame:useCurrent\n"; ::write(2, m, sizeof(m) - 1); }
-  render_frame_host_ = frame_tree_node_->current_frame_host()->GetSafeRef();
-#else
+  { const char m[] = "QNX:Browser:SelFrame:GetFH\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
   if (auto result =
           frame_tree_node_->render_manager()->GetFrameHostForNavigation(
               this, &browsing_context_group_swap_);
       result.has_value()) {
+#if BUILDFLAG(IS_QNX)
+    { const char m[] = "QNX:Browser:SelFrame:gotFH\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
     render_frame_host_ = result.value()->GetSafeRef();
   } else {
     switch (result.error()) {
       case GetFrameHostForNavigationFailed::kCouldNotReinitializeMainFrame:
-        // TODO(https://crbug.com/1400535): This was unhandled before and
-        // remains explicitly unhandled. This branch may be removed in the
-        // future.
+#if BUILDFLAG(IS_QNX)
+        { const char m[] = "QNX:Browser:SelFrame:reinitFail\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
         break;
       case GetFrameHostForNavigationFailed::kBlockedByPendingCommit:
         resume_commit_closure_ = base::BindOnce(
@@ -2753,7 +2755,6 @@ void NavigationRequest::
         return;
     }
   }
-#endif
 
   CHECK(Navigator::CheckWebUIRendererDoesNotDisplayNormalURL(
       &*render_frame_host_.value(), GetUrlInfo(),
@@ -4046,9 +4047,19 @@ void NavigationRequest::OnResponseStarted(
 #if BUILDFLAG(IS_QNX)
   {
     char buf[128];
-    int n = snprintf(buf, sizeof(buf), "QNX:NR:OnResponse code=%d\n",
-                     response_head ? response_head->headers->response_code() : -1);
+    int n = snprintf(buf, sizeof(buf), "QNX:NR:OnResponse code=%d dl=%d mime=%s\n",
+                     response_head ? response_head->headers->response_code() : -1,
+                     (int)is_download,
+                     response_head ? response_head->mime_type.c_str() : "null");
     write(2, buf, n);
+    if (response_head && response_head->headers) {
+      std::string raw = response_head->headers->raw_headers();
+      for (size_t i = 0; i < raw.size(); i++) {
+        if (raw[i] == '\0') raw[i] = '|';
+      }
+      n = snprintf(buf, sizeof(buf), "QNX:NR:RawHdr[%zu]: %.200s\n", raw.size(), raw.c_str());
+      write(2, buf, n);
+    }
   }
 #endif
   if (is_download) {
@@ -7444,11 +7455,18 @@ bool NavigationRequest::NeedsUrlLoader() {
       !common_params_->url.SchemeIs(url::kDataScheme);
 
 #if BUILDFLAG(IS_QNX)
-  // On QNX, force data: URLs to use the immediate-commit path (!NeedsUrlLoader)
-  // to bypass the network stack, which may not complete for data: URLs in
-  // single-process headless mode.
   if (common_params_->url.SchemeIs(url::kDataScheme))
     return false;
+  {
+    char buf[256];
+    int n = snprintf(buf, sizeof(buf), "QNX:NUL url=%s empty=%d net=%d same=%d mhtml=%d\n",
+                     common_params_->url.spec().c_str(),
+                     common_params_->url.is_empty() ? 1 : 0,
+                     IsURLHandledByNetworkStack(common_params_->url) ? 1 : 0,
+                     IsSameDocument() ? 1 : 0,
+                     is_mhtml_subframe_loaded_from_achive ? 1 : 0);
+    write(2, buf, n);
+  }
 #endif
 
   return IsURLHandledByNetworkStack(common_params_->url) && !IsSameDocument() &&
@@ -7530,16 +7548,15 @@ void NavigationRequest::ReadyToCommitNavigation(bool is_error) {
   // disconnection from the renderer NavigationClient; but browser-initiated
   // navigations do not, so we must look explicitly. We should not proceed and
   // claim "ReadyToCommitNavigation" to the delegate if the renderer is gone.
-#if BUILDFLAG(IS_QNX)
-  { const char m[] = "QNX:Browser:NR_skipLiveCheck\n"; ::write(2, m, sizeof(m) - 1); }
-#else
   if (!GetRenderFrameHost()->IsRenderFrameLive()) {
+#if BUILDFLAG(IS_QNX)
+    { const char m[] = "QNX:Browser:NR_notLive_abort\n"; ::write(2, m, sizeof(m) - 1); }
+#endif
     OnNavigationClientDisconnected(0, "");
     return;
   }
-#endif
 #if BUILDFLAG(IS_QNX)
-  { const char m[] = "QNX:Browser:NR_afterLive\n"; ::write(2, m, sizeof(m) - 1); }
+  { const char m[] = "QNX:Browser:NR_isLive\n"; ::write(2, m, sizeof(m) - 1); }
 #endif
 
   // Note: This marks the RenderFrameHost as loading. This is important to

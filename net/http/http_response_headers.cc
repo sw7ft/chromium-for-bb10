@@ -122,7 +122,15 @@ bool ShouldUpdateHeader(base::StringPiece name) {
 }
 
 bool HasEmbeddedNulls(base::StringPiece str) {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  for (size_t i = 0; i < str.size(); i++) {
+    if (str[i] == '\0')
+      return true;
+  }
+  return false;
+#else
   return str.find('\0') != std::string::npos;
+#endif
 }
 
 void CheckDoesNotHaveEmbeddedNulls(base::StringPiece str) {
@@ -133,7 +141,14 @@ void CheckDoesNotHaveEmbeddedNulls(base::StringPiece str) {
 }
 
 void RemoveLeadingSpaces(base::StringPiece* s) {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  size_t pos = 0;
+  while (pos < s->size() && (*s)[pos] == ' ')
+    pos++;
+  s->remove_prefix(pos);
+#else
   s->remove_prefix(std::min(s->find_first_not_of(' '), s->size()));
+#endif
 }
 
 // Parses `status` for response code and status text. Returns the response code,

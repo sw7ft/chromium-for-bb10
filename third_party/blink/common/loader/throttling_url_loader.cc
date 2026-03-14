@@ -640,8 +640,10 @@ void ThrottlingURLLoader::StartNow() {
   }
 #endif
 
+#if !defined(__QNX__) && !defined(__QNXNTO__)
   // TODO(https://crbug.com/919736): Remove this call.
   client_receiver_.internal_state()->EnableBatchDispatch();
+#endif
 
   client_receiver_.set_disconnect_handler(base::BindOnce(
       &ThrottlingURLLoader::OnClientConnectionError, base::Unretained(this)));
