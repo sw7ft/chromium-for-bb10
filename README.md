@@ -7,25 +7,26 @@ A port of Chromium's `content_shell` to QNX, targeting the **BlackBerry Passport
 - **Headless browser** running in single-process mode on the BlackBerry Passport
 - **HTML parsing and DOM construction** via Blink
 - **V8 JavaScript engine** initialized and running on ARM32 QNX
-- **`--dump-dom` output** for `about:blank`, `data:`, and **HTTP URLs** with clean exit
+- **`--dump-dom` output** for `about:blank`, `data:`, local HTTP, and **external HTTP** with clean exit
 - **Local HTTP page loading** -- full HTML + JavaScript rendering via `http://127.0.0.1`
+- **External HTTP page loading** -- fetching and rendering pages from the internet (e.g. `http://example.com`)
 - **ICU internationalization**, CSS default stylesheets, full DOM tree
 
 ```
-$ ssh passport "cd /accounts/devuser/berry-deploy && \
-    LD_LIBRARY_PATH=. ./content_shell \
-    --no-sandbox --disable-gpu --no-zygote --single-process \
-    --disable-features=ServiceWorker,NetworkServiceDedicatedThread,MojoIpcz \
-    --headless --dump-dom http://127.0.0.1:8001/" 2>/dev/null
-<html><head><title>Directory listing for /</title>
-</head><body><h2>Directory listing for /</h2><hr><ul>
-<li><a href="example.html">example.html</a></li>
-</ul><hr></body></html>
+$ ./run.sh http://example.com 2>/dev/null
+<html><head><title>Example Domain</title>...
+<h1>Example Domain</h1>
+<p>This domain is for use in documentation examples...</p>
+...</html>
+```
+
+```
+$ ./run.sh 'data:text/html,<h1>Hello from BB10</h1>' 2>/dev/null
+<html><head></head><body><h1>Hello from BB10</h1></body></html>
 ```
 
 ## In Progress
 
-- **External HTTP** (e.g. `http://example.com`) -- TCP connect and request/response work, but QNX `select()` has broken readiness detection for external sockets requiring thread-pool workarounds
 - **Ozone platform for QNX Screen** -- windowed rendering backend using `screen_create_window()` + Skia software rasterizer
 - **Browser chrome UI** -- Skia-rendered toolbar with URL bar, back/forward/reload buttons
 - **BAR packaging** -- native app packaging for BB10 launcher (currently crashes on launch, needs Ozone debugging)
@@ -33,7 +34,6 @@ $ ssh passport "cd /accounts/devuser/berry-deploy && \
 ## What Doesn't Work (Yet)
 
 - **HTTPS** -- TLS not yet tested
-- **External HTTP** -- partially working (connect + send works, read readiness detection in progress)
 - **Multi-process mode** -- QNX process model differences
 - **Service workers, web workers** -- disabled
 - **Windowed mode** -- Ozone `qnx_screen` platform needs debugging
@@ -61,7 +61,7 @@ All patches apply against this commit. Fetch Chromium source using `depot_tools`
 ```
 ├── README.md
 ├── patches/
-│   └── qnx-port.patch          # unified diff (368 modified files, ~16k lines)
+│   └── qnx-port.patch          # unified diff (~21k lines)
 ├── src/                         # 42 new QNX-specific files
 │   ├── base/qnx/               # platform abstractions (memory, process, files, threading)
 │   ├── build/config/qnx/       # GN platform config (defines, sysroot, flags)
@@ -71,6 +71,12 @@ All patches apply against this commit. Fetch Chromium source using `depot_tools`
 │   ├── sandbox/qnx/            # sandbox stubs
 │   ├── ui/ozone/platform/qnx_screen/  # Ozone platform backend for QNX Screen
 │   └── ...
+├── deploy/
+│   ├── README.md                # usage instructions for the binary
+│   ├── run.sh                   # convenience launcher script
+│   ├── package.sh               # build a deployable tarball
+│   └── www/index.html           # sample test page
+├── qnx_test_captures/           # verified milestone outputs (stdout + stderr)
 ├── build/
 │   ├── args.gn                  # GN build arguments
 │   └── ld-wrapper.sh            # linker wrapper (LLD + QNX libs)
@@ -79,7 +85,8 @@ All patches apply against this commit. Fetch Chromium source using `depot_tools`
 │   ├── build.sh                 # build content_shell
 │   └── run-on-passport.sh       # deploy + run on device
 └── docs/
-    └── STATUS.md                # detailed status and issue log
+    ├── STATUS.md                # detailed status and issue log
+    └── QNX_BB10_MILESTONES.md   # milestone descriptions and test captures
 ```
 
 ## Prerequisites
@@ -154,24 +161,33 @@ scp out/qnx-arm/content_shell out/qnx-arm/content_shell.pak \
 # Also deploy QNX runtime libraries (ldqnx.so.2, libm.so.2, libgcc_s.so.1, libstdc++.so.6)
 ```
 
-### 7. Run
+### 7. Package for deployment
 
 ```bash
-# Dump DOM for a local HTTP page (start python server: python3.2 -m http.server 8001)
-ssh passport "cd /accounts/devuser/berry-deploy && \
-    LD_LIBRARY_PATH=. ./content_shell \
-    --no-sandbox --disable-gpu --no-zygote --single-process \
-    --disable-features=ServiceWorker,NetworkServiceDedicatedThread,MojoIpcz \
-    --headless --dump-dom http://127.0.0.1:8001/" 2>/dev/null
-
-# Dump DOM for a data: URL
-ssh passport "cd /accounts/devuser/berry-deploy && \
-    LD_LIBRARY_PATH=. ./content_shell \
-    --no-sandbox --disable-gpu --no-zygote --single-process \
-    --disable-features=ServiceWorker,NetworkServiceDedicatedThread,MojoIpcz \
-    --headless --dump-dom \
-    'data:text/html,<h1>Hello from BlackBerry</h1>'" 2>/dev/null
+# Build a self-contained tarball with the binary, runtime libs, and resources
+./deploy/package.sh
+# Creates deploy/bb10-content-shell.tar.gz (~60 MB)
 ```
+
+### 8. Deploy and run
+
+```bash
+# Copy to device
+scp -r deploy/bb10-content-shell/ passport:/accounts/devuser/bb10-content-shell/
+
+# Run on device
+ssh passport "cd /accounts/devuser/bb10-content-shell && ./run.sh http://example.com" 2>/dev/null
+
+# Or with a data: URL
+ssh passport "cd /accounts/devuser/bb10-content-shell && \
+    ./run.sh 'data:text/html,<h1>Hello from BlackBerry</h1>'" 2>/dev/null
+
+# Local HTTP (start python server first: python3.2 -m http.server 8001)
+ssh passport "cd /accounts/devuser/bb10-content-shell && \
+    ./run.sh http://127.0.0.1:8001/" 2>/dev/null
+```
+
+See [deploy/README.md](deploy/README.md) for detailed usage instructions.
 
 ## Build Configuration
 
@@ -209,6 +225,10 @@ symbol_level = 1
 
 The port works around several QNX-specific issues:
 
+- **QNX ARM `std::string` bugs**: `find_first_of`, `find_first_not_of`, and `find(char, pos)` all return incorrect values (typically 0) on QNX ARM. Replaced with manual loop helpers across HTTP parsing, MIME type detection, chunked transfer decoding, and Mojo IPC deserialization.
+
+- **Mojo IPC `HttpResponseHeaders` deserialization**: The `HttpResponseHeaders::Builder` API hangs on QNX due to the `std::string::find` bug. Bypassed by directly constructing from raw header strings.
+
 - **URL path parsing bug**: QNX ARM codegen silently drops URL path components in `ParsePath()`. Bypassed with direct path assignment in `DoParseAfterScheme()`.
 
 - **DOCTYPE crash**: Lowercase `<!doctype html>` causes SIGSEGV in `strlen` during HTML tokenization on QNX ARM. Fixed by normalizing to uppercase `<!DOCTYPE` in `HTMLDocumentParser::Append()`.
@@ -219,7 +239,11 @@ The port works around several QNX-specific issues:
 
 - **libevent poll() broken**: `poll()` blocks indefinitely for external TCP sockets on QNX. Disabled poll backend, forced `select()` with minimum 50ms timeout.
 
-- **Socket readiness detection**: QNX `select()` with zero timeout doesn't detect TCP socket readiness. Non-blocking task-based polling and thread-pool-offloaded `select()` used as workarounds.
+- **Socket readiness detection**: QNX `select()` with zero timeout doesn't detect TCP socket readiness. Thread-pool-offloaded `select()` with retry mechanism (12x5s) used as workaround.
+
+- **Mojo `EnableBatchDispatch`**: Disabled on QNX to prevent message delivery delays in `ThrottlingURLLoader`.
+
+- **Content encoding**: Forced `Accept-Encoding: identity` on QNX to avoid gzip/deflate decompression issues.
 
 - **Single-process only**: Due to QNX process model differences, only `--single-process` mode is supported.
 

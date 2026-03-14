@@ -1,0 +1,2 @@
+<html><head><title>Test Page</title></head><body><h1>Local HTTP Works!</h1><p>Served from BB10 Passport</p>
+</body></html>
