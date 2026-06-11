@@ -87,6 +87,16 @@ LD_LIBRARY_PATH=. ./content_shell \
 | `--ignore-certificate-errors` | Skip TLS certificate verification |
 | `--disable-http2` | Force HTTP/1.1 (avoids ALPN 400 errors from some CDNs) |
 
+### Timeout reliability
+
+When `--timeout=<ms>` is set, the process is guaranteed to exit within
+`<ms> + 4000` milliseconds. A dedicated hard-deadline watchdog thread runs
+independently of the Chromium message loop, so even on pages that fully
+saturate the renderer (e.g. google.com), `content_shell` always terminates
+rather than hanging forever. On well-behaved pages the DOM is dumped at the
+soft deadline; on fully-jammed pages the watchdog force-exits at the hard
+deadline (output may be empty in that case).
+
 ## What works
 
 | URL type | Example | Status |
