@@ -335,6 +335,50 @@ void StackDumpSignalHandler(int signal, siginfo_t* info, void* void_context) {
   // NO malloc or stdio is allowed here.
 
 #if BUILDFLAG(IS_QNX)
+  // Non-fatal sampling profiler hook: on SIGUSR2 print the current thread's
+  // PC/LR + a stack scan and RETURN (do not abort). Used to find busy-spin
+  // hot paths on JS-heavy pages. Triggered by sending SIGUSR2 repeatedly.
+  if (signal == SIGUSR2) {
+    char sbuf[512];
+    ucontext_t* suc = (ucontext_t*)void_context;
+    unsigned spc = 0, slr = 0, ssp = 0;
+    if (suc) {
+      spc = suc->uc_mcontext.cpu.gpr[15];
+      slr = suc->uc_mcontext.cpu.gpr[14];
+      ssp = suc->uc_mcontext.cpu.gpr[13];
+    }
+    Dl_info sdli;
+    int sn = snprintf(sbuf, sizeof(sbuf), "QNX:SAMPLE tid=%x pc=0x%x",
+                      (unsigned)pthread_self(), spc);
+    write(STDERR_FILENO, sbuf, sn);
+    if (spc && dladdr((void*)spc, &sdli) && sdli.dli_sname) {
+      sn = snprintf(sbuf, sizeof(sbuf), " PC=%s+0x%x", sdli.dli_sname,
+                    (unsigned)((char*)spc - (char*)sdli.dli_saddr));
+      write(STDERR_FILENO, sbuf, sn);
+    }
+    if (slr && dladdr((void*)slr, &sdli) && sdli.dli_sname) {
+      sn = snprintf(sbuf, sizeof(sbuf), " LR=%s+0x%x", sdli.dli_sname,
+                    (unsigned)((char*)slr - (char*)sdli.dli_saddr));
+      write(STDERR_FILENO, sbuf, sn);
+    }
+    write(STDERR_FILENO, " ST:", 4);
+    if (ssp > 0x10000) {
+      unsigned* sp2 = (unsigned*)ssp;
+      for (int i = 0; i < 80; i++) {
+        unsigned val = sp2[i];
+        if (val > 0x1000000 && val < 0x6000000) {
+          Dl_info s2;
+          if (dladdr((void*)(val & ~1u), &s2) && s2.dli_sname) {
+            sn = snprintf(sbuf, sizeof(sbuf), " %s+%x", s2.dli_sname,
+                          (unsigned)((char*)(val & ~1u) - (char*)s2.dli_saddr));
+            write(STDERR_FILENO, sbuf, sn);
+          }
+        }
+      }
+    }
+    write(STDERR_FILENO, "\n", 1);
+    return;
+  }
   {
     char buf[512];
     const char* signame = "?";
@@ -1072,6 +1116,15 @@ bool EnableInProcessStackDumping() {
   success &= (sigaction(SIGSEGV, &action, nullptr) == 0);
 #if BUILDFLAG(IS_QNX)
   success &= (sigaction(SIGTRAP, &action, nullptr) == 0);
+  // Persistent (non-RESETHAND) handler for the SIGUSR2 sampling profiler.
+  {
+    struct sigaction usr2_action;
+    memset(&usr2_action, 0, sizeof(usr2_action));
+    usr2_action.sa_flags = static_cast<int>(SA_SIGINFO);
+    usr2_action.sa_sigaction = &StackDumpSignalHandler;
+    sigemptyset(&usr2_action.sa_mask);
+    sigaction(SIGUSR2, &usr2_action, nullptr);
+  }
 #endif
 // On Linux, SIGSYS is reserved by the kernel for seccomp-bpf sandboxing.
 #if !BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMEOS)
