@@ -29,6 +29,7 @@
 #include "base/time/time.h"
 #include "base/trace_event/base_tracing.h"
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
 #if BUILDFLAG(IS_IOS)
@@ -192,11 +193,6 @@ void ThreadControllerWithMessagePumpImpl::ScheduleWork() {
     }
     pump_->ScheduleWork();
   }
-#if defined(__QNX__) || defined(__QNXNTO__)
-  else if (pump_ && !associated_thread_->IsBoundToCurrentThread()) {
-    pump_->ScheduleWork();
-  }
-#endif
 }
 
 void ThreadControllerWithMessagePumpImpl::SetNextDelayedDoWork(
@@ -466,18 +462,16 @@ absl::optional<WakeUp> ThreadControllerWithMessagePumpImpl::DoWorkImpl(
       TaskAnnotator::LongTaskTracker long_task_tracker(
           time_source_, selected_task->task, &task_annotator_);
 
-#if defined(__QNX__) || defined(__QNXNTO__)
+#if BUILDFLAG(IS_QNX)
       {
         static int task_counter = 0;
         task_counter++;
         const auto& loc = selected_task->task.posted_from;
-        char _b[200];
-        int _n = snprintf(_b, sizeof(_b), "QNX:RT tid=%x #%d %s:%d %s\n",
-                          (unsigned)pthread_self(), task_counter,
-                          loc.file_name() ? loc.file_name() : "?",
-                          loc.line_number(),
-                          loc.function_name() ? loc.function_name() : "?");
-        if (_n > 0) write(2, _b, _n);
+        QNX_TRACE_FMT("QNX:RT tid=%x #%d %s:%d %s\n",
+                       (unsigned)pthread_self(), task_counter,
+                       loc.file_name() ? loc.file_name() : "?",
+                       loc.line_number(),
+                       loc.function_name() ? loc.function_name() : "?");
       }
 #endif
       // Note: all arguments after task are just passed to a TRACE_EVENT for

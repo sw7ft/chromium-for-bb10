@@ -7,6 +7,11 @@
 #include <errno.h>
 #include <unistd.h>
 
+#if defined(__QNX__) || defined(__QNXNTO__)
+#include <fcntl.h>
+#include <sys/socket.h>
+#endif
+
 #include <memory>
 #include <utility>
 
@@ -404,10 +409,28 @@ void MessagePumpLibevent::ScheduleDelayedWork(
 
 bool MessagePumpLibevent::Init() {
   int fds[2];
+#if defined(__QNX__) || defined(__QNXNTO__)
+  // QNX select() does not reliably report readability on pipe() FDs, only on
+  // socket FDs. A pipe-based wakeup therefore gets missed by the pump's
+  // blocked select(), which previously forced a 50ms polling workaround that
+  // burned CPU. Use a socketpair so ScheduleWork() wakes the pump reliably.
+  if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds) != 0) {
+    DPLOG(ERROR) << "socketpair creation failed";
+    return false;
+  }
+  for (int i = 0; i < 2; ++i) {
+    int flags = fcntl(fds[i], F_GETFL, 0);
+    if (flags == -1)
+      flags = 0;
+    fcntl(fds[i], F_SETFL, flags | O_NONBLOCK);
+    fcntl(fds[i], F_SETFD, FD_CLOEXEC);
+  }
+#else
   if (!CreateLocalNonBlockingPipe(fds)) {
     DPLOG(ERROR) << "pipe creation failed";
     return false;
   }
+#endif
   wakeup_pipe_out_ = fds[0];
   wakeup_pipe_in_ = fds[1];
 

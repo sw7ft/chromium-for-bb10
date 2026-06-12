@@ -156,19 +156,29 @@ select_dispatch(struct event_base *base, void *arg, struct timeval *tv)
 	       sop->event_fdsz);
 
 #if defined(__QNX__) || defined(__QNXNTO__)
-	/* QNX: select() has two broken behaviors:
+	/* QNX: select() historically had two issues:
 	   1) timeout {0,0} doesn't reliably report socket readiness
-	   2) NULL timeout (infinite block) misses wakeup pipe writes,
-	      freezing the message loop when no periodic timers exist.
-	   Cap all select() calls to a max of 50ms on QNX. */
+	   2) NULL timeout (infinite block) could miss message-pump wakeups
+	   Issue (2) is now fixed by using a socketpair (instead of pipe) for the
+	   message-pump wakeup FD: QNX select() reliably reports readability on
+	   socket FDs, so a blocked wait wakes correctly on ScheduleWork(). The
+	   blocking/idle wait can therefore sleep on a long backstop instead of
+	   busy-polling at 50ms. Only the genuine non-blocking {0,0} case still
+	   gets a small floor for the (1) socket-readiness bug. */
 	struct timeval qnx_tv;
-	if (!tv || (tv->tv_sec == 0 && tv->tv_usec == 0)) {
+	if (!tv) {
 		qnx_tv.tv_sec = 0;
-		qnx_tv.tv_usec = 50000; /* 50ms */
+		qnx_tv.tv_usec = 250000; /* 250ms backstop (was 50ms): socketpair wakeup
+		                            handles real work, this only bounds latency
+		                            for any unreported FD readiness. */
 		tv = &qnx_tv;
-	} else if (tv->tv_sec > 0 || tv->tv_usec > 50000) {
+	} else if (tv->tv_sec == 0 && tv->tv_usec == 0) {
 		qnx_tv.tv_sec = 0;
-		qnx_tv.tv_usec = 50000; /* 50ms max */
+		qnx_tv.tv_usec = 50000; /* 50ms for the {0,0} readiness bug */
+		tv = &qnx_tv;
+	} else if (tv->tv_sec > 0 || tv->tv_usec > 250000) {
+		qnx_tv.tv_sec = 0;
+		qnx_tv.tv_usec = 250000; /* 250ms cap for long idle waits */
 		tv = &qnx_tv;
 	}
 #endif
