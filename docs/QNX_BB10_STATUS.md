@@ -11,7 +11,11 @@
 - `about:blank` renders correctly
 - **`data:` URLs** fully working (e.g. `data:text/html,<h1>Hello</h1>` dumps DOM correctly)
 - **Local HTTP pages** via `http://127.0.0.1:8001/` fully working (HTML + JavaScript)
+- **External HTTP/HTTPS** including complex pages: `example.com`, `google.com`, `en.wikipedia.org/wiki/QNX`
 - Tested with Python HTTP server: `python3.2 -m http.server 8001`
+
+### Source branch
+Full Chromium source with QNX patches lives on branch **`qnx-bb10`** (see `deploy/HARDENING.md` for next steps).
 
 ### Test Command
 ```bash

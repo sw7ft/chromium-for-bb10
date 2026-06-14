@@ -11,6 +11,7 @@ A port of Chromium's `content_shell` to QNX, targeting the **BlackBerry Passport
 - **Local HTTP page loading** -- full HTML + JavaScript rendering via `http://127.0.0.1`
 - **External HTTP page loading** -- fetching and rendering pages from the internet (e.g. `http://example.com`)
 - **HTTPS page loading** -- TLS 1.3 via BoringSSL (e.g. `https://example.com`)
+- **Complex HTTPS pages** -- `https://www.google.com` and `https://en.wikipedia.org/wiki/QNX` dump full DOM (~200KB+)
 - **ICU internationalization**, CSS default stylesheets, full DOM tree
 
 ```
@@ -28,6 +29,7 @@ $ ./run.sh 'data:text/html,<h1>Hello from BB10</h1>' 2>/dev/null
 
 ## In Progress
 
+- **Feature hardening** -- tiered re-enablement of HTTP/2, Viz, multi-process, GPU (see `deploy/HARDENING.md`)
 - **Ozone platform for QNX Screen** -- windowed rendering backend using `screen_create_window()` + Skia software rasterizer
 - **Browser chrome UI** -- Skia-rendered toolbar with URL bar, back/forward/reload buttons
 - **BAR packaging** -- native app packaging for BB10 launcher (currently crashes on launch, needs Ozone debugging)
