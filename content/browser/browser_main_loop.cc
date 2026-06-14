@@ -54,6 +54,7 @@
 #include "base/trace_event/trace_event.h"
 #include "build/branding_buildflags.h"
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 #include "build/chromecast_buildflags.h"
 #include "build/chromeos_buildflags.h"
 #include "cc/base/histograms.h"
@@ -782,9 +783,7 @@ void BrowserMainLoop::CreateMessageLoopForEarlyShutdown() {
 
 int BrowserMainLoop::PreCreateThreads() {
   TRACE_EVENT0("startup", "BrowserMainLoop::PreCreateThreads");
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:BML:0 PreCreateThreads start\n", 32);
-#endif
+  QNX_TRACE_MSG("QNX:BML:0 PreCreateThreads start\n");
 
   // This must occur before metrics recording initialization in
   // ChromeBrowserMainParts::PreCreateThreads() because it's used in
@@ -860,9 +859,7 @@ int BrowserMainLoop::PreCreateThreads() {
   // needed in the browser process, because for other processes it is
   // transferred to them over IPC from the relevant process host.
   SetPseudonymizationSalt(GenerateBrowserSalt());
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:BML:0a PreCreateThreads done\n", 31);
-#endif
+  QNX_TRACE_MSG("QNX:BML:0a PreCreateThreads done\n");
 
   return result_code_;
 }
@@ -950,9 +947,7 @@ void BrowserMainLoop::SynchronouslyFlushStartupTasks() {
 
 int BrowserMainLoop::CreateThreads() {
   TRACE_EVENT0("startup,rail", "BrowserMainLoop::CreateThreads");
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:BML:1 CreateThreads start\n", 29);
-#endif
+  QNX_TRACE_MSG("QNX:BML:1 CreateThreads start\n");
 
   // Release the ThreadPool's threads.
   scoped_execution_fence_.reset();
@@ -983,17 +978,13 @@ int BrowserMainLoop::CreateThreads() {
           base::Unretained(this)));
 
   created_threads_ = true;
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:BML:2 CreateThreads done\n", 28);
-#endif
+  QNX_TRACE_MSG("QNX:BML:2 CreateThreads done\n");
   return result_code_;
 }
 
 int BrowserMainLoop::PostCreateThreads() {
   TRACE_EVENT0("startup", "BrowserMainLoop::PostCreateThreads");
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:BML:3 PostCreateThreads start\n", 32);
-#endif
+  QNX_TRACE_MSG("QNX:BML:3 PostCreateThreads start\n");
 
   content::BackgroundTracingManagerImpl::GetInstance()
       .AddMetadataGeneratorFunction();
@@ -1002,18 +993,14 @@ int BrowserMainLoop::PostCreateThreads() {
     parts_->PostCreateThreads();
 
   PostCreateThreadsImpl();
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:BML:4 PostCreateThreads done\n", 31);
-#endif
+  QNX_TRACE_MSG("QNX:BML:4 PostCreateThreads done\n");
 
   return result_code_;
 }
 
 int BrowserMainLoop::PreMainMessageLoopRun() {
   TRACE_EVENT0("startup", "BrowserMainLoop::PreMainMessageLoopRun");
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:BML:5 PreMainMessageLoopRun start\n", 37);
-#endif
+  QNX_TRACE_MSG("QNX:BML:5 PreMainMessageLoopRun start\n");
 
 #if BUILDFLAG(IS_ANDROID)
   bool use_display_wide_color_gamut =

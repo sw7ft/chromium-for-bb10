@@ -4,23 +4,16 @@
 
 #include "services/network/public/cpp/net_ipc_param_traits.h"
 
+#include "base/qnx_trace.h"
+
 #if defined(__QNX__)
 #include <cstdio>
 #include <cstdlib>
 #include <unistd.h>
+#include "base/qnx_string_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_version.h"
-
-namespace {
-size_t QnxStrFind(const std::string& s, char c, size_t pos = 0) {
-  for (size_t i = pos; i < s.size(); i++) {
-    if (s[i] == c)
-      return i;
-  }
-  return std::string::npos;
-}
-}  // namespace
 #endif
 
 #include "ipc/ipc_message_utils.h"
@@ -203,9 +196,9 @@ bool ParamTraits<scoped_refptr<net::HttpResponseHeaders>>::Read(
     std::string raw_input;
     if (!iter->ReadString(&raw_input))
       return false;
-    { const char _t[] = "QNX:PTRD:preNew\n"; write(2, _t, sizeof(_t) - 1); }
+    QNX_TRACE_MSG("QNX:PTRD:preNew\n");
     *r = base::MakeRefCounted<net::HttpResponseHeaders>(raw_input);
-    { const char _t[] = "QNX:PTRD:postNew\n"; write(2, _t, sizeof(_t) - 1); }
+    QNX_TRACE_MSG("QNX:PTRD:postNew\n");
 #else
     *r = base::MakeRefCounted<net::HttpResponseHeaders>(iter);
 #endif

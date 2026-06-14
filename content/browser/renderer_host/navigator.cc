@@ -60,6 +60,7 @@
 #include "third_party/blink/public/mojom/navigation/navigation_params.mojom.h"
 #include "url/gurl.h"
 #include "url/url_util.h"
+#include "base/qnx_trace.h"
 
 namespace content {
 
@@ -778,15 +779,11 @@ void Navigator::Navigate(std::unique_ptr<NavigationRequest> request,
   bool is_pending_entry =
       controller_.GetPendingEntry() &&
       (nav_entry_id == controller_.GetPendingEntry()->GetUniqueID());
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:NNav:1 TakeReq\n", 19);
-#endif
+  QNX_TRACE_MSG("QNX:NNav:1 TakeReq\n");
   frame_tree_node->TakeNavigationRequest(std::move(request));
   DCHECK(frame_tree_node->navigation_request());
 
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:NNav:2 CheckBU\n", 19);
-#endif
+  QNX_TRACE_MSG("QNX:NNav:2 CheckBU\n");
   if (should_dispatch_beforeunload) {
     frame_tree_node->navigation_request()->SetWaitingForRendererResponse();
     frame_tree_node->current_frame_host()->DispatchBeforeUnload(
@@ -799,13 +796,9 @@ void Navigator::Navigate(std::unique_ptr<NavigationRequest> request,
                                        ->common_params()
                                        .navigation_start);
     }
-#if BUILDFLAG(IS_QNX)
-    write(2, "QNX:NNav:3 BeginNav\n", 20);
-#endif
+    QNX_TRACE_MSG("QNX:NNav:3 BeginNav\n");
     frame_tree_node->navigation_request()->BeginNavigation();
-#if BUILDFLAG(IS_QNX)
-    write(2, "QNX:NNav:4 NavDone\n", 19);
-#endif
+    QNX_TRACE_MSG("QNX:NNav:4 NavDone\n");
   }
 
   // Make sure no code called via RFH::Navigate clears the pending entry.

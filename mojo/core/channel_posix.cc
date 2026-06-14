@@ -22,6 +22,7 @@
 #include "base/task/single_thread_task_runner.h"
 #include "base/task/task_runner.h"
 #include "base/time/time.h"
+#include "base/qnx_trace.h"
 #include "build/build_config.h"
 #include "mojo/public/cpp/platform/socket_utils_posix.h"
 
@@ -149,14 +150,8 @@ void ChannelPosix::ShutDownImpl() {
 }
 
 void ChannelPosix::Write(MessagePtr message) {
-#if defined(__QNX__)
-  {
-    char buf[80];
-    int n = snprintf(buf, sizeof(buf), "QNX:Mojo:Write sz=%u\n",
-                     message ? message->data_num_bytes() : 0);
-    write(2, buf, n);
-  }
-#endif
+  QNX_TRACE_FMT("QNX:Mojo:Write sz=%u\n",
+                message ? message->data_num_bytes() : 0);
   if (ShouldRecordSubsampledHistograms()) {
     UMA_HISTOGRAM_COUNTS_100000("Mojo.Channel.WriteMessageSize",
                                 message->data_num_bytes());
@@ -221,13 +216,7 @@ bool ChannelPosix::GetReadPlatformHandlesForIpcz(
 void ChannelPosix::StartOnIOThread() {
   DCHECK(!read_watcher_);
   DCHECK(!write_watcher_);
-#if defined(__QNX__)
-  {
-    char buf[80];
-    int n = snprintf(buf, sizeof(buf), "QNX:Mojo:StartIO fd=%d\n", socket_.get());
-    write(2, buf, n);
-  }
-#endif
+  QNX_TRACE_FMT("QNX:Mojo:StartIO fd=%d\n", socket_.get());
   read_watcher_ =
       std::make_unique<base::MessagePumpForIO::FdWatchController>(FROM_HERE);
   base::CurrentThread::Get()->AddDestructionObserver(this);
@@ -236,13 +225,7 @@ void ChannelPosix::StartOnIOThread() {
   bool ok = base::CurrentIOThread::Get()->WatchFileDescriptor(
       socket_.get(), true /* persistent */, base::MessagePumpForIO::WATCH_READ,
       read_watcher_.get(), this);
-#if defined(__QNX__)
-  {
-    char buf[80];
-    int n = snprintf(buf, sizeof(buf), "QNX:Mojo:WatchFD ok=%d\n", ok);
-    write(2, buf, n);
-  }
-#endif
+  QNX_TRACE_FMT("QNX:Mojo:WatchFD ok=%d\n", ok);
   base::AutoLock lock(write_lock_);
   FlushOutgoingMessagesNoLock();
 }
@@ -293,13 +276,7 @@ void ChannelPosix::WillDestroyCurrentMessageLoop() {
 }
 
 void ChannelPosix::OnFileCanReadWithoutBlocking(int fd) {
-#if defined(__QNX__)
-  {
-    char buf[80];
-    int n = snprintf(buf, sizeof(buf), "QNX:Mojo:Read fd=%d\n", fd);
-    write(2, buf, n);
-  }
-#endif
+  QNX_TRACE_FMT("QNX:Mojo:Read fd=%d\n", fd);
   CHECK_EQ(fd, socket_.get());
 
   bool validation_error = false;

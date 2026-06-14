@@ -35,6 +35,7 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/system/sys_info.h"
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 #include "components/crash/core/common/crash_key.h"
 #include "net/cookies/cookie_util.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
@@ -865,13 +866,13 @@ void V8Initializer::InitializeMainThread(
     const std::string js_command_line_flags) {
   DCHECK(IsMainThread());
 
-  { const char m[] = "QNX:V8M:1 IsoHolderInit\n"; write(2, m, sizeof(m)-1); }
+  QNX_TRACE_MSG("QNX:V8M:1 IsoHolderInit\n");
   DEFINE_STATIC_LOCAL(ArrayBufferAllocator, array_buffer_allocator, ());
   gin::IsolateHolder::Initialize(gin::IsolateHolder::kNonStrictMode,
                                  &array_buffer_allocator, reference_table,
                                  js_command_line_flags, ReportV8FatalError,
                                  ReportV8OOMError);
-  { const char m[] = "QNX:V8M:2 IsoHolderDone\n"; write(2, m, sizeof(m)-1); }
+  QNX_TRACE_MSG("QNX:V8M:2 IsoHolderDone\n");
 
   ThreadScheduler* scheduler = ThreadScheduler::Current();
 
@@ -884,11 +885,11 @@ void V8Initializer::InitializeMainThread(
     create_histogram_callback = CreateHistogram;
     add_histogram_sample_callback = AddHistogramSample;
   }
-  { const char m[] = "QNX:V8M:3 IsoCreate\n"; write(2, m, sizeof(m)-1); }
+  QNX_TRACE_MSG("QNX:V8M:3 IsoCreate\n");
   v8::Isolate* isolate = V8PerIsolateData::Initialize(
       scheduler->V8TaskRunner(), scheduler->V8LowPriorityTaskRunner(),
       snapshot_mode, create_histogram_callback, add_histogram_sample_callback);
-  { const char m[] = "QNX:V8M:4 IsoDone\n"; write(2, m, sizeof(m)-1); }
+  QNX_TRACE_MSG("QNX:V8M:4 IsoDone\n");
   scheduler->SetV8Isolate(isolate);
 
   // ThreadState::isolate_ needs to be set before setting the EmbedderHeapTracer
@@ -896,7 +897,7 @@ void V8Initializer::InitializeMainThread(
   // over to Blink.
   DCHECK(ThreadStateStorage::MainThreadStateStorage());
 
-  { const char m[] = "QNX:V8M:5 V8Common\n"; write(2, m, sizeof(m)-1); }
+  QNX_TRACE_MSG("QNX:V8M:5 V8Common\n");
   InitializeV8Common(isolate);
 
   isolate->AddMessageListenerWithErrorLevel(
@@ -928,7 +929,7 @@ void V8Initializer::InitializeMainThread(
 
   isolate->SetHostCreateShadowRealmContextCallback(
       OnCreateShadowRealmV8Context);
-  { const char m[] = "QNX:V8M:6 AllDone\n"; write(2, m, sizeof(m)-1); }
+  QNX_TRACE_MSG("QNX:V8M:6 AllDone\n");
 }
 
 // Stack size for workers is limited to 500KB because default stack size for

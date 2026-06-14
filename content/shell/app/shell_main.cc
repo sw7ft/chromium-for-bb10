@@ -85,7 +85,7 @@ int main(int argc, const char** argv) {
 #include <cstdlib>
 #include <signal.h>
 #include <ucontext.h>
-#define QNX_TRACE(msg) write(2, msg, sizeof(msg) - 1)
+#include "base/qnx_trace.h"
 
 static void qnx_hex(unsigned long v, char* buf, int len) {
   for (int i = len - 1; i >= 0; --i) {
@@ -138,8 +138,11 @@ static void qnx_segv_handler(int sig, siginfo_t* info, void* ctx) {
 
 int main(int argc, const char** argv) {
 #if BUILDFLAG(IS_QNX)
-  QNX_TRACE("QNX: main() entered\n");
-  // Install SIGSEGV handler that dumps registers (especially LR = caller)
+  for (int i = 1; i < argc; ++i) {
+    if (strcmp(argv[i], "--qnx-trace") == 0)
+      g_qnx_trace_enabled = true;
+  }
+  QNX_TRACE_MSG("QNX: main() entered\n");
   {
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
@@ -178,14 +181,14 @@ int main(int argc, const char** argv) {
   if (!getenv("LOGNAME")) setenv("LOGNAME", "user", 1);
   if (!getenv("SHELL")) setenv("SHELL", "/bin/sh", 1);
   if (!getenv("LANG")) setenv("LANG", "C", 1);
-  QNX_TRACE("QNX: env vars set, creating delegate\n");
+  QNX_TRACE_MSG("QNX: env vars set, creating delegate\n");
 #endif
   content::ShellMainDelegate delegate;
   content::ContentMainParams params(&delegate);
   params.argc = argc;
   params.argv = argv;
 #if BUILDFLAG(IS_QNX)
-  QNX_TRACE("QNX: calling ContentMain\n");
+  QNX_TRACE_MSG("QNX: calling ContentMain\n");
 #endif
   return content::ContentMain(std::move(params));
 }

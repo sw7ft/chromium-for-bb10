@@ -44,6 +44,7 @@
 #include "third_party/blink/public/common/loader/loader_constants.h"
 #include "third_party/blink/public/mojom/frame/user_activation_update_types.mojom.h"
 #include "third_party/blink/public/mojom/security_context/insecure_request_policy.mojom.h"
+#include "base/qnx_trace.h"
 
 namespace content {
 
@@ -612,25 +613,17 @@ void FrameTreeNode::TakeNavigationRequest(
                ->is_evicted_from_back_forward_cache());
   }
 
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:FTN:1 assign\n", 17);
-#endif
+  QNX_TRACE_MSG("QNX:FTN:1 assign\n");
   navigation_request_ = std::move(navigation_request);
   if (was_discarded_) {
     navigation_request_->set_was_discarded();
     was_discarded_ = false;
   }
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:FTN:2 DidCreate\n", 20);
-#endif
+  QNX_TRACE_MSG("QNX:FTN:2 DidCreate\n");
   render_manager()->DidCreateNavigationRequest(navigation_request_.get());
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:FTN:3 Loading\n", 18);
-#endif
+  QNX_TRACE_MSG("QNX:FTN:3 Loading\n");
   DidStartLoading(previous_frame_tree_loading_state);
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:FTN:4 done\n", 15);
-#endif
+  QNX_TRACE_MSG("QNX:FTN:4 done\n");
 }
 
 void FrameTreeNode::ResetNavigationRequest(NavigationDiscardReason reason) {

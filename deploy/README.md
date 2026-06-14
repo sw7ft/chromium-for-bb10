@@ -18,6 +18,7 @@ Runs in **headless mode** and dumps the rendered DOM to stdout.
 | `libgcc_s.so.1` | GCC runtime (QNX 8.0.0 toolchain) |
 | `libstdc++.so.6` | C++ standard library (QNX 8.0.0 toolchain) |
 | `libm.so.2` | Math library (QNX 8.0.0 toolchain) |
+| `cacert.pem` | Mozilla CA root certificates (for HTTPS) |
 | `run.sh` | Convenience launcher script |
 | `www/index.html` | Sample local test page |
 
@@ -61,11 +62,17 @@ cd /accounts/devuser/bb10-content-shell
 ./run.sh 'data:text/html,<h1>Custom</h1><p>Content here</p>'
 ```
 
-**External website:**
+**External HTTP:**
 
 ```bash
 ./run.sh http://example.com
 # Output: full DOM of example.com
+```
+
+**HTTPS (uses bundled CA certificates):**
+
+```bash
+./run.sh https://example.com
 ```
 
 **Local HTTP server:**
@@ -77,6 +84,18 @@ python3.2 -m http.server 8001 &
 
 # Terminal 2: fetch the page
 ./run.sh http://127.0.0.1:8001/index.html
+```
+
+**JS-heavy pages (Google, Wikipedia) -- use a timeout:**
+
+```bash
+./run.sh https://www.google.com --timeout=30000 2>/dev/null
+```
+
+**Faster dumps with DOMContentLoaded trigger:**
+
+```bash
+./run.sh http://example.com --dom-trigger=domcontentloaded 2>/dev/null
 ```
 
 **Suppress debug traces (clean output):**
@@ -116,11 +135,16 @@ export LD_LIBRARY_PATH=.:$LD_LIBRARY_PATH
 |------|-----|
 | `--no-sandbox` | QNX doesn't support Linux namespaces |
 | `--disable-gpu` | No GPU compositing in headless |
+| `--disable-gpu-compositing` | Avoids compositor crash in Term49 userland |
 | `--no-zygote` | QNX doesn't support fork-based zygote |
 | `--single-process` | Renderer runs in the browser process |
 | `--ozone-platform=headless` | Prevents QNX Screen event loop from spinning |
 | `--headless --dump-dom` | Headless mode, prints DOM to stdout |
-| `--disable-features=...` | Disables subsystems with QNX incompatibilities |
+| `--disable-features=...,Viz` | Disables subsystems with QNX incompatibilities |
+| `--disable-http2` | HTTP/2 ALPN negotiation causes 400 errors |
+| `--timeout=<ms>` | Dump DOM after N ms even if page hasn't finished loading |
+| `--dom-trigger=domcontentloaded` | Dump on DOMContentLoaded instead of window.onload |
+| `--qnx-trace` | Enable verbose QNX debug traces on stderr |
 
 ## Verified Working
 
@@ -129,6 +153,7 @@ export LD_LIBRARY_PATH=.:$LD_LIBRARY_PATH
 | `data:` URLs | `data:text/html,<h1>Hi</h1>` | Working |
 | Local HTTP | `http://127.0.0.1:8001/` | Working |
 | External HTTP | `http://example.com` | Working |
+| HTTPS | `https://example.com` | Working |
 
 ## Known Limitations
 
@@ -142,4 +167,6 @@ export LD_LIBRARY_PATH=.:$LD_LIBRARY_PATH
 
 - BlackBerry 10 device (tested on Passport with OS 10.3.x / QNX 8.0.0)
 - SSH access to the device
+- ~120 MB free storage
+ce
 - ~120 MB free storage

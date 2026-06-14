@@ -38,6 +38,7 @@
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/typed_macros.h"
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 #include "mojo/public/cpp/system/simple_watcher.h"
 #include "net/base/elements_upload_data_stream.h"
 #include "net/base/isolation_info.h"
@@ -438,6 +439,14 @@ URLLoader::MaybeSyncURLLoaderClient::BindNewPipeAndPassReceiver() {
 }
 
 mojom::URLLoaderClient* URLLoader::MaybeSyncURLLoaderClient::Get() {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  // Always use the Mojo remote on QNX. The sync in-process path re-enters the
+  // network stack during OnReceiveResponse and can deadlock single-process mode
+  // when many subresources arrive while socket reads are pending.
+  if (mojo_client_)
+    return mojo_client_.get();
+  return nullptr;
+#endif
   if (sync_client_)
     return sync_client_.get();
   if (mojo_client_)
@@ -542,14 +551,7 @@ URLLoader::URLLoader(
       provide_data_use_updates_(context.DataUseUpdatesEnabled()) {
   TRACE_EVENT("loading", "URLLoader::URLLoader",
               perfetto::Flow::FromPointer(this));
-#if defined(__QNX__) || defined(__QNXNTO__)
-  {
-    std::string u = request.url.spec();
-    char m[256];
-    int n = snprintf(m, sizeof(m), "QNX:UL:ctor url=%s\n", u.c_str());
-    ::write(2, m, n);
-  }
-#endif
+  QNX_TRACE_FMT("QNX:UL:ctor url=%s\n", request.url.spec().c_str());
   DCHECK(delete_callback_);
 
   mojom::TrustedURLLoaderHeaderClient* url_loader_header_client =
@@ -1042,14 +1044,8 @@ void URLLoader::OnDoneBeginningTrustTokenOperation(
 }
 
 void URLLoader::ScheduleStart() {
-#if defined(__QNX__)
-  {
-    std::string u = url_request_ ? url_request_->url().spec() : "null";
-    char m[256];
-    int n = snprintf(m, sizeof(m), "QNX:UL:SchedStart url=%s\n", u.c_str());
-    ::write(2, m, n);
-  }
-#endif
+  QNX_TRACE_FMT("QNX:UL:SchedStart url=%s\n",
+                 url_request_ ? url_request_->url().spec().c_str() : "null");
   bool defer = false;
   if (resource_scheduler_client_) {
     resource_scheduler_request_handle_ =
@@ -1061,19 +1057,9 @@ void URLLoader::ScheduleStart() {
   }
   if (defer) {
     url_request_->LogBlockedBy("ResourceScheduler");
-#if defined(__QNX__)
-    {
-      const char m2[] = "QNX:UL:Deferred!\n";
-      ::write(2, m2, sizeof(m2) - 1);
-    }
-#endif
+    QNX_TRACE_MSG("QNX:UL:Deferred!\n");
   } else {
-#if defined(__QNX__)
-    {
-      const char m2[] = "QNX:UL:Starting!\n";
-      ::write(2, m2, sizeof(m2) - 1);
-    }
-#endif
+    QNX_TRACE_MSG("QNX:UL:Starting!\n");
     url_request_->Start();
   }
 }
@@ -1620,11 +1606,7 @@ void URLLoader::ProcessInboundAttributionInterceptorOnResponseStarted() {
 
 void URLLoader::OnResponseStarted(net::URLRequest* url_request, int net_error) {
 #if defined(__QNX__)
-  {
-    char m[128];
-    int n = snprintf(m, sizeof(m), "QNX:UL:OnRespStarted err=%d\n", net_error);
-    ::write(2, m, n);
-  }
+  QNX_TRACE_FMT("QNX:UL:OnRespStarted err=%d\n", net_error);
 #endif
   DCHECK(url_request == url_request_.get());
   has_received_response_ = true;
@@ -1693,10 +1675,7 @@ void URLLoader::MaybeSendTrustTokenOperationResultToDevTools() {
 
 void URLLoader::ContinueOnResponseStarted() {
 #if defined(__QNX__)
-  {
-    const char m[] = "QNX:UL:ContOnResp\n";
-    ::write(2, m, sizeof(m) - 1);
-  }
+  QNX_TRACE_MSG("QNX:UL:ContOnResp\n");
 #endif
   MojoCreateDataPipeOptions options;
   options.struct_size = sizeof(MojoCreateDataPipeOptions);
@@ -1709,7 +1688,7 @@ void URLLoader::ContinueOnResponseStarted() {
       mojo::CreateDataPipe(&options, response_body_stream_, consumer_handle_);
   if (result != MOJO_RESULT_OK) {
 #if defined(__QNX__)
-    { const char m[] = "QNX:UL:DataPipeFail!\n"; ::write(2, m, sizeof(m) - 1); }
+    QNX_TRACE_MSG("QNX:UL:DataPipeFail!\n");
 #endif
     NotifyCompleted(net::ERR_INSUFFICIENT_RESOURCES);
     return;
@@ -1807,10 +1786,7 @@ void URLLoader::ContinueOnResponseStarted() {
 
 void URLLoader::ReadMore() {
 #if defined(__QNX__)
-  {
-    const char m[] = "QNX:UL:ReadMore\n";
-    ::write(2, m, sizeof(m) - 1);
-  }
+  QNX_TRACE_MSG("QNX:UL:ReadMore\n");
 #endif
   DCHECK(!read_in_progress_);
   // Once the MIME type is sniffed, all data is sent as soon as it is read from
@@ -1862,12 +1838,8 @@ void URLLoader::ReadMore() {
 
 void URLLoader::DidRead(int num_bytes, bool completed_synchronously) {
 #if defined(__QNX__)
-  {
-    char m[128];
-    int n = snprintf(m, sizeof(m), "QNX:UL:DidRead bytes=%d sync=%d\n",
+  QNX_TRACE_FMT("QNX:UL:DidRead bytes=%d sync=%d\n",
                      num_bytes, completed_synchronously ? 1 : 0);
-    ::write(2, m, n);
-  }
 #endif
   DCHECK(read_in_progress_);
   read_in_progress_ = false;
@@ -2222,23 +2194,43 @@ void URLLoader::SendResponseToClient() {
   TRACE_EVENT("loading", "network::URLLoader::SendResponseToClient",
               perfetto::Flow::FromPointer(this), "url", url_request_->url());
 #if defined(__QNX__)
-  {
-    char m[128];
-    int n = snprintf(m, sizeof(m), "QNX:UL:SendResp handle=%d\n",
+  QNX_TRACE_FMT("QNX:UL:SendResp handle=%d\n",
                      consumer_handle_.is_valid() ? 1 : 0);
-    ::write(2, m, n);
-  }
 #endif
   DCHECK_EQ(emitted_devtools_raw_request_, emitted_devtools_raw_response_);
   response_->emitted_extra_info = emitted_devtools_raw_request_;
 
+#if defined(__QNX__) || defined(__QNXNTO__)
+  // Defer client notification so the IO thread can continue ReadMore() and
+  // socket pumping before entering Mojo deserialization (avoids reentrancy
+  // deadlocks on heavy pages with many concurrent subresources).
+  network::mojom::URLResponseHeadPtr head = response_->Clone();
+  mojo::ScopedDataPipeConsumerHandle body = std::move(consumer_handle_);
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE,
+      base::BindOnce(
+          [](base::WeakPtr<URLLoader> loader,
+             network::mojom::URLResponseHeadPtr head,
+             mojo::ScopedDataPipeConsumerHandle body) {
+            if (!loader)
+              return;
+            mojom::URLLoaderClient* client = loader->url_loader_client_.Get();
+            if (!client)
+              return;
+            client->OnReceiveResponse(std::move(head), std::move(body),
+                                      absl::nullopt);
+#if defined(__QNX__)
+            QNX_TRACE_MSG("QNX:UL:SendRespDone\n");
+#endif
+          },
+          weak_ptr_factory_.GetWeakPtr(), std::move(head), std::move(body)));
+  return;
+#endif
+
   url_loader_client_.Get()->OnReceiveResponse(
       response_->Clone(), std::move(consumer_handle_), absl::nullopt);
 #if defined(__QNX__)
-  {
-    const char m[] = "QNX:UL:SendRespDone\n";
-    ::write(2, m, sizeof(m) - 1);
-  }
+  QNX_TRACE_MSG("QNX:UL:SendRespDone\n");
 #endif
 }
 
@@ -2693,13 +2685,9 @@ void URLLoader::ReportFlaggedResponseCookies(bool call_cookie_observer) {
 
 void URLLoader::StartReading() {
 #if defined(__QNX__)
-  {
-    char m[128];
-    int n = snprintf(m, sizeof(m), "QNX:UL:StartRead sniff=%d corb=%d\n",
+  QNX_TRACE_FMT("QNX:UL:StartRead sniff=%d corb=%d\n",
                      is_more_mime_sniffing_needed_ ? 1 : 0,
                      is_more_corb_sniffing_needed_ ? 1 : 0);
-    ::write(2, m, n);
-  }
 #endif
   if (!is_more_mime_sniffing_needed_ && !is_more_corb_sniffing_needed_) {
     // Treat feed types as text/plain.

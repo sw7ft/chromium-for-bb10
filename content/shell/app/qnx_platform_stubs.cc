@@ -5,6 +5,10 @@
 
 #if BUILDFLAG(IS_QNX)
 
+#include <dlfcn.h>
+#include <errno.h>
+#include <pthread.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -12,6 +16,7 @@
 #include <memory>
 #include <ostream>
 #include <string>
+#include <typeinfo>
 #include <unordered_set>
 #include <vector>
 
@@ -68,6 +73,86 @@ size_t strlen(const char* s) {
 // QNX may also resolve to this ISR-optimized name
 __attribute__((visibility("default"), used, noinline))
 size_t __strlen_isr(const char* s) { return strlen(s); }
+
+// Strong strncpy: QNX 8.0's <string_chk.h> (_FORTIFY_SOURCE) emits a weak
+// out-of-line strncpy under clang that recurses into itself, which the
+// optimizer collapses to an infinite loop (`b.n .`). Any TU built with
+// fortify can inject that trap into the link, hijacking every strncpy call
+// (observed: browser + renderer threads spinning at 100% CPU inside
+// breakpad's SetKeyValue). This strong definition wins over the weak trap.
+// Fortify is also disabled for QNX in build/config/compiler/BUILD.gn.
+// (Defined under a different C++ name with an asm label, because the fortify
+// header already declares strncpy as always_inline in this TU.)
+char* qnx_strncpy_impl(char* dst, const char* src, size_t n) __asm__("strncpy");
+__attribute__((visibility("default"), used, noinline))
+char* qnx_strncpy_impl(char* dst, const char* src, size_t n) {
+  size_t i = 0;
+  for (; i < n && src[i] != '\0'; ++i)
+    dst[i] = src[i];
+  for (; i < n; ++i)
+    dst[i] = '\0';
+  return dst;
+}
+
+// QNX diagnostic: interpose std::__throw_system_error(int) to capture the
+// error code and the exact (inline) caller before the exception machinery
+// runs. Forwards to the real libstdc++ implementation.
+#if 0  // Disabled after QNX page-load bring-up.
+typedef void (*qnx_tse_t)(int);
+__attribute__((visibility("default"), used, noreturn))
+void _ZSt20__throw_system_errori(int err) {
+  char b[160];
+  int n = snprintf(b, sizeof(b), "QNX:TSE err=%d from=%p tid=%d\n", err,
+                   __builtin_return_address(0), (int)pthread_self());
+  if (n > 0) write(2, b, n);
+  static qnx_tse_t real_tse = nullptr;
+  if (!real_tse)
+    real_tse = (qnx_tse_t)dlsym(RTLD_NEXT, "_ZSt20__throw_system_errori");
+  if (real_tse) real_tse(err);
+  abort();
+}
+#endif
+
+#if 0  // Disabled after QNX page-load bring-up.
+// QNX diagnostic: interpose __cxa_throw to find code throwing C++ exceptions
+// in a loop (observed: threads pegged in the unwinder's dl/phdr scans during
+// page load). Logs the first throws and every 1000th, then forwards to the
+// real libstdc++ implementation.
+typedef void (*qnx_cxa_throw_t)(void*, void*, void (*)(void*));
+__attribute__((visibility("default"), used))
+void __cxa_throw(void* ex, void* tinfo, void (*dest)(void*)) {
+  static qnx_cxa_throw_t real_throw = nullptr;
+  static unsigned long count = 0;
+  unsigned long c = __atomic_add_fetch(&count, 1, __ATOMIC_RELAXED);
+  if (c <= 20 || (c % 1000) == 0) {
+    const char* name =
+        tinfo ? reinterpret_cast<const std::type_info*>(tinfo)->name() : "?";
+    char b[256];
+    int n = snprintf(b, sizeof(b),
+                     "QNX:THROW #%lu type=%s from=%p tid=%d errno=%d\n", c,
+                     name, __builtin_return_address(0), (int)pthread_self(),
+                     errno);
+    if (n > 0) write(2, b, n);
+    void* sp;
+    __asm__ volatile("mov %0, sp" : "=r"(sp));
+    uintptr_t* sp_ptr = (uintptr_t*)sp;
+    int found = 0;
+    for (int i = 0; i < 512 && found < 24; i++) {
+      uintptr_t word = sp_ptr[i];
+      if (word > 0x800000 && word < 0x8000000) {
+        n = snprintf(b, sizeof(b), "QNX:THROWSTK[%d]=0x%lx\n", i,
+                     (unsigned long)word);
+        if (n > 0) write(2, b, n);
+        found++;
+      }
+    }
+  }
+  if (!real_throw)
+    real_throw = (qnx_cxa_throw_t)dlsym(RTLD_NEXT, "__cxa_throw");
+  if (real_throw) real_throw(ex, tinfo, dest);
+  abort();  // __cxa_throw must not return.
+}
+#endif
 
 // With -femulated-tls, Clang uses __emutls_get_address (from libgcc_eh.a)
 // instead of native ARM TLS.  These stubs are kept as safe fallbacks in case
@@ -450,8 +535,12 @@ const AtomicString& FontCache::SystemFontFamily() {
   return family;
 }
 scoped_refptr<SimpleFontData> FontCache::PlatformFallbackFontForCharacter(
-    const FontDescription&, UChar32, const SimpleFontData*,
-    FontFallbackPriority) { return nullptr; }
+    const FontDescription& description,
+    UChar32,
+    const SimpleFontData*,
+    FontFallbackPriority) {
+  return FontCache::Get().GetLastResortFallbackFont(description);
+}
 }  // namespace blink
 
 #include "third_party/blink/renderer/core/layout/layout_theme_default.h"
@@ -471,18 +560,44 @@ LayoutTheme& LayoutTheme::NativeTheme() {
 }
 }  // namespace blink
 
-// Skia font manager
+// Skia font manager — QNX has no fontconfig; use Skia's empty font mgr so
+// FontCache never hits CrashWithFontInfo when fallback runs.
 #include "third_party/skia/include/core/SkFontMgr.h"
-namespace skia {
-sk_sp<SkFontMgr> CreateDefaultSkFontMgr() { return nullptr; }
-}  // namespace skia
+#include "third_party/skia/include/core/SkTypeface.h"
+#include "third_party/skia/include/ports/SkFontConfigInterface.h"
+#include "third_party/skia/include/ports/SkFontMgr_empty.h"
 
-// SkFontConfigInterface
-class SkFontConfigInterface : public SkRefCnt {
+namespace {
+
+class QnxFontConfigInterface : public SkFontConfigInterface {
  public:
-  static sk_sp<SkFontConfigInterface> RefGlobal();
+  bool matchFamilyName(const char*,
+                       SkFontStyle,
+                       FontIdentity*,
+                       SkString*,
+                       SkFontStyle*) override {
+    return false;
+  }
+
+  SkStreamAsset* openStream(const FontIdentity&) override { return nullptr; }
+
+  sk_sp<SkTypeface> makeTypeface(const FontIdentity&) override {
+    return nullptr;
+  }
 };
-sk_sp<SkFontConfigInterface> SkFontConfigInterface::RefGlobal() { return nullptr; }
+
+}  // namespace
+
+sk_sp<SkFontConfigInterface> SkFontConfigInterface::RefGlobal() {
+  static sk_sp<SkFontConfigInterface> g = sk_make_sp<QnxFontConfigInterface>();
+  return g;
+}
+
+namespace skia {
+sk_sp<SkFontMgr> CreateDefaultSkFontMgr() {
+  return SkFontMgr_New_Custom_Empty();
+}
+}  // namespace skia
 
 // =====================================================================
 // printing

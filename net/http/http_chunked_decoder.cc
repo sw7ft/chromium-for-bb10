@@ -54,16 +54,8 @@
 #include "net/base/net_errors.h"
 
 #if defined(__QNX__) || defined(__QNXNTO__)
+#include "base/qnx_string_util.h"
 #include <unistd.h>
-namespace {
-size_t QnxFindChar(const char* data, size_t len, char target) {
-  for (size_t i = 0; i < len; i++) {
-    if (data[i] == target)
-      return i;
-  }
-  return base::StringPiece::npos;
-}
-}  // namespace
 #endif
 
 namespace net {
@@ -118,7 +110,7 @@ int HttpChunkedDecoder::ScanForChunkRemaining(const char* buf, int buf_len) {
   int bytes_consumed = 0;
 
 #if defined(__QNX__) || defined(__QNXNTO__)
-  size_t index_of_lf = QnxFindChar(buf, buf_len, '\n');
+  size_t index_of_lf = base::qnx::FindChar(buf, buf_len, '\n');
 #else
   size_t index_of_lf = base::StringPiece(buf, buf_len).find('\n');
 #endif
@@ -149,7 +141,7 @@ int HttpChunkedDecoder::ScanForChunkRemaining(const char* buf, int buf_len) {
     } else if (buf_len > 0) {
       // Ignore any chunk-extensions.
 #if defined(__QNX__) || defined(__QNXNTO__)
-      size_t index_of_semicolon = QnxFindChar(buf, buf_len, ';');
+      size_t index_of_semicolon = base::qnx::FindChar(buf, buf_len, ';');
 #else
       size_t index_of_semicolon = base::StringPiece(buf, buf_len).find(';');
 #endif

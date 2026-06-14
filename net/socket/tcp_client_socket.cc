@@ -6,6 +6,7 @@
 
 #include <memory>
 #include <utility>
+#include "base/qnx_trace.h"
 #if defined(__QNX__) || defined(__QNXNTO__)
 #include <unistd.h>
 #endif
@@ -129,10 +130,7 @@ void TCPClientSocket::SetBeforeConnectCallback(
 
 int TCPClientSocket::Connect(CompletionOnceCallback callback) {
 #if defined(__QNX__)
-  {
-    const char m[] = "QNX:TCP:Connect\n";
-    ::write(2, m, sizeof(m) - 1);
-  }
+  QNX_TRACE_MSG("QNX:TCP:Connect\n");
 #endif
   DCHECK(!callback.is_null());
 

@@ -33,6 +33,7 @@
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/ssl/ssl_info.h"
 #include "url/url_canon.h"
+#include "base/qnx_trace.h"
 
 namespace net {
 
@@ -645,13 +646,9 @@ int HttpStreamParser::DoReadBody() {
   CHECK(user_read_buf_.get());
 
 #if defined(__QNX__) || defined(__QNXNTO__)
-  {
-    char m[128];
-    int n = snprintf(m, sizeof(m), "QNX:DRB off=%d unused=%d urb=%p urblen=%d\n",
+  QNX_TRACE_FMT("QNX:DRB off=%d unused=%d urb=%p urblen=%d\n",
                      read_buf_->offset(), read_buf_unused_offset_,
                      user_read_buf_->data(), user_read_buf_len_);
-    write(2, m, n);
-  }
 #endif
 
   // There may be some data left over from reading the response headers.
@@ -661,21 +658,15 @@ int HttpStreamParser::DoReadBody() {
       CHECK_GT(available, 0);
       int bytes_from_buffer = std::min(available, user_read_buf_len_);
 #if defined(__QNX__) || defined(__QNXNTO__)
-      {
-        char m[128];
-        int n = snprintf(m, sizeof(m), "QNX:DRB memcpy dst=%p src=%p len=%d\n",
+      QNX_TRACE_FMT("QNX:DRB memcpy dst=%p src=%p len=%d\n",
                          user_read_buf_->data(),
                          read_buf_->StartOfBuffer() + read_buf_unused_offset_,
                          bytes_from_buffer);
-        write(2, m, n);
-      }
 #endif
       memcpy(user_read_buf_->data(),
              read_buf_->StartOfBuffer() + read_buf_unused_offset_,
              bytes_from_buffer);
-#if defined(__QNX__) || defined(__QNXNTO__)
-      { const char m[] = "QNX:DRB memcpy OK\n"; write(2, m, sizeof(m)-1); }
-#endif
+      QNX_TRACE_MSG("QNX:DRB memcpy OK\n");
       read_buf_unused_offset_ += bytes_from_buffer;
       if (bytes_from_buffer == available) {
         read_buf_->SetCapacity(0);
@@ -693,21 +684,15 @@ int HttpStreamParser::DoReadBody() {
     return 0;
 
   DCHECK_EQ(0, read_buf_->offset());
-#if defined(__QNX__) || defined(__QNXNTO__)
-  { const char m[] = "QNX:DRB socket-read\n"; write(2, m, sizeof(m)-1); }
-#endif
+  QNX_TRACE_MSG("QNX:DRB socket-read\n");
   return stream_socket_->Read(user_read_buf_.get(), user_read_buf_len_,
                               io_callback_);
 }
 
 int HttpStreamParser::DoReadBodyComplete(int result) {
 #if defined(__QNX__) || defined(__QNXNTO__)
-  {
-    char m[128];
-    int n = snprintf(m, sizeof(m), "QNX:DRBC result=%d chunked=%d\n",
+  QNX_TRACE_FMT("QNX:DRBC result=%d chunked=%d\n",
                      result, chunked_decoder_.get() ? 1 : 0);
-    write(2, m, n);
-  }
 #endif
   if (result == 0 && !IsResponseBodyComplete() && CanFindEndOfResponse()) {
     if (chunked_decoder_.get())
@@ -722,21 +707,13 @@ int HttpStreamParser::DoReadBodyComplete(int result) {
   // Filter incoming data if appropriate.  FilterBuf may return an error.
   if (result > 0 && chunked_decoder_.get()) {
 #if defined(__QNX__) || defined(__QNXNTO__)
-    {
-      char m[128];
-      int n = snprintf(m, sizeof(m), "QNX:DRBC pre-filter buf=%p len=%d\n",
+    QNX_TRACE_FMT("QNX:DRBC pre-filter buf=%p len=%d\n",
                        user_read_buf_->data(), result);
-      write(2, m, n);
-    }
 #endif
     result = chunked_decoder_->FilterBuf(user_read_buf_->data(), result);
 #if defined(__QNX__) || defined(__QNXNTO__)
-    {
-      char m[128];
-      int n = snprintf(m, sizeof(m), "QNX:DRBC post-filter result=%d eof=%d\n",
+    QNX_TRACE_FMT("QNX:DRBC post-filter result=%d eof=%d\n",
                        result, chunked_decoder_->reached_eof() ? 1 : 0);
-      write(2, m, n);
-    }
 #endif
     if (result == 0 && !chunked_decoder_->reached_eof()) {
       io_state_ = STATE_READ_BODY;
@@ -963,24 +940,21 @@ int HttpStreamParser::FindAndParseResponseHeaders(int new_bytes) {
         read_buf_->StartOfBuffer(), read_buf_->offset());
   }
 
-#if defined(__QNX__) || defined(__QNXNTO__)
-  {
-    char msg[256];
-    int n = snprintf(msg, sizeof(msg),
-        "QNX:FPRH new=%d off=%zu start=%zu buf[0..7]=%02x%02x%02x%02x%02x%02x%02x%02x\n",
-        new_bytes, (size_t)read_buf_->offset(),
-        response_header_start_offset_,
-        (unsigned char)read_buf_->StartOfBuffer()[0],
-        (unsigned char)read_buf_->StartOfBuffer()[1],
-        (unsigned char)read_buf_->StartOfBuffer()[2],
-        (unsigned char)read_buf_->StartOfBuffer()[3],
-        read_buf_->offset() > 4 ? (unsigned char)read_buf_->StartOfBuffer()[4] : 0,
-        read_buf_->offset() > 5 ? (unsigned char)read_buf_->StartOfBuffer()[5] : 0,
-        read_buf_->offset() > 6 ? (unsigned char)read_buf_->StartOfBuffer()[6] : 0,
-        read_buf_->offset() > 7 ? (unsigned char)read_buf_->StartOfBuffer()[7] : 0);
-    write(2, msg, n);
-  }
-#endif
+  QNX_TRACE_FMT(
+      "QNX:FPRH new=%d off=%zu start=%zu buf[0..7]=%02x%02x%02x%02x%02x%02x%02x%02x\n",
+      new_bytes, (size_t)read_buf_->offset(), response_header_start_offset_,
+      (unsigned char)read_buf_->StartOfBuffer()[0],
+      (unsigned char)read_buf_->StartOfBuffer()[1],
+      (unsigned char)read_buf_->StartOfBuffer()[2],
+      (unsigned char)read_buf_->StartOfBuffer()[3],
+      read_buf_->offset() > 4 ? (unsigned char)read_buf_->StartOfBuffer()[4]
+                              : 0,
+      read_buf_->offset() > 5 ? (unsigned char)read_buf_->StartOfBuffer()[5]
+                              : 0,
+      read_buf_->offset() > 6 ? (unsigned char)read_buf_->StartOfBuffer()[6]
+                              : 0,
+      read_buf_->offset() > 7 ? (unsigned char)read_buf_->StartOfBuffer()[7]
+                              : 0);
 
   if (response_header_start_offset_ != std::string::npos) {
     // LocateEndOfHeaders looks for two line breaks in a row (With or without
@@ -995,21 +969,13 @@ int HttpStreamParser::FindAndParseResponseHeaders(int new_bytes) {
     size_t search_start = std::max(response_header_start_offset_, lower_bound);
     end_offset = HttpUtil::LocateEndOfHeaders(
         read_buf_->StartOfBuffer(), read_buf_->offset(), search_start);
-#if defined(__QNX__) || defined(__QNXNTO__)
-    {
-      char msg[128];
-      int n = snprintf(msg, sizeof(msg),
-          "QNX:FPRH endOff=%zu searchStart=%zu\n", end_offset, search_start);
-      write(2, msg, n);
-    }
-#endif
+    QNX_TRACE_FMT("QNX:FPRH endOff=%zu searchStart=%zu\n", end_offset,
+                  search_start);
   } else if (read_buf_->offset() >= 8) {
     // Enough data to decide that this is an HTTP/0.9 response.
     // 8 bytes = (4 bytes of junk) + "http".length()
     end_offset = 0;
-#if defined(__QNX__) || defined(__QNXNTO__)
-    write(2, "QNX:FPRH HTTP/0.9 fallback!\n", 28);
-#endif
+    QNX_TRACE_MSG("QNX:FPRH HTTP/0.9 fallback!\n");
   }
 
   if (end_offset == std::string::npos)

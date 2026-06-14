@@ -40,6 +40,7 @@
 #include "base/threading/thread_checker.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 #include "components/viz/common/gpu/raster_context_provider.h"
 #include "gpu/ipc/client/gpu_channel_host.h"
 #include "media/base/media_log.h"
@@ -195,33 +196,19 @@ WebThemeEngine* Platform::ThemeEngine() {
 }
 
 void Platform::InitializeBlink() {
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:Blink:1 entry\n", 18);
-#endif
+  QNX_TRACE_MSG("QNX:Blink:1 entry\n");
   DCHECK(!did_initialize_blink_);
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:Blink:2 Part\n", 17);
-#endif
+  QNX_TRACE_MSG("QNX:Blink:2 Part\n");
   WTF::Partitions::Initialize();
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:Blink:3 WTF\n", 16);
-#endif
+  QNX_TRACE_MSG("QNX:Blink:3 WTF\n");
   WTF::Initialize();
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:Blink:4 Length\n", 19);
-#endif
+  QNX_TRACE_MSG("QNX:Blink:4 Length\n");
   Length::Initialize();
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:Blink:5 Heap\n", 17);
-#endif
+  QNX_TRACE_MSG("QNX:Blink:5 Heap\n");
   ProcessHeap::Init();
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:Blink:6 Thread\n", 19);
-#endif
+  QNX_TRACE_MSG("QNX:Blink:6 Thread\n");
   ThreadState::AttachMainThread();
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:Blink:7 done\n", 17);
-#endif
+  QNX_TRACE_MSG("QNX:Blink:7 done\n");
   did_initialize_blink_ = true;
 }
 

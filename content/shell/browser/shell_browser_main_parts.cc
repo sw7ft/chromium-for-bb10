@@ -22,6 +22,7 @@
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 #include "build/chromeos_buildflags.h"
 #include "cc/base/switches.h"
 #include "components/performance_manager/embedder/graph_features.h"
@@ -209,30 +210,20 @@ void ShellBrowserMainParts::PostCreateThreads() {
 }
 
 int ShellBrowserMainParts::PreMainMessageLoopRun() {
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:PMLR:1 enter\n", 18);
-#endif
+  QNX_TRACE_MSG("QNX:PMLR:1 enter\n");
 #if BUILDFLAG(IS_FUCHSIA)
   fuchsia_view_presenter_ = std::make_unique<FuchsiaViewPresenter>();
 #endif
 
   InitializeBrowserContexts();
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:PMLR:2 BrowserCtx\n", 22);
-#endif
+  QNX_TRACE_MSG("QNX:PMLR:2 BrowserCtx\n");
   Shell::Initialize(CreateShellPlatformDelegate());
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:PMLR:3 ShellInit\n", 21);
-#endif
+  QNX_TRACE_MSG("QNX:PMLR:3 ShellInit\n");
   net::NetModule::SetResourceProvider(PlatformResourceProvider);
   ShellDevToolsManagerDelegate::StartHttpHandler(browser_context_.get());
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:PMLR:4 DevTools\n", 20);
-#endif
+  QNX_TRACE_MSG("QNX:PMLR:4 DevTools\n");
   InitializeMessageLoopContext();
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:PMLR:5 MsgLoopCtx\n", 22);
-#endif
+  QNX_TRACE_MSG("QNX:PMLR:5 MsgLoopCtx\n");
   return 0;
 }
 

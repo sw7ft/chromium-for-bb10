@@ -4,8 +4,8 @@
 #include "ui/ozone/platform/qnx_screen/qnx_screen_window.h"
 
 #include <screen/screen.h>
-#include <unistd.h>
 
+#include "base/qnx_trace.h"
 #include "ui/base/cursor/platform_cursor.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_window_manager.h"
 
@@ -27,8 +27,7 @@ QnxScreenWindow::QnxScreenWindow(PlatformWindowDelegate* delegate,
 
   int rc = screen_create_window(&window_, ctx_);
   if (rc != 0) {
-    const char msg[] = "QNX:OzWin: screen_create_window failed\n";
-    ::write(2, msg, sizeof(msg) - 1);
+    QNX_TRACE_MSG("QNX:OzWin: screen_create_window failed\n");
     return;
   }
 
@@ -53,8 +52,7 @@ QnxScreenWindow::QnxScreenWindow(PlatformWindowDelegate* delegate,
 
   rc = screen_create_window_buffers(window_, 2);
   if (rc != 0) {
-    const char msg[] = "QNX:OzWin: screen_create_window_buffers failed\n";
-    ::write(2, msg, sizeof(msg) - 1);
+    QNX_TRACE_MSG("QNX:OzWin: screen_create_window_buffers failed\n");
   } else {
     // Fill initial buffer with a visible color to confirm window is showing
     screen_buffer_t buf[2];
@@ -75,8 +73,7 @@ QnxScreenWindow::QnxScreenWindow(PlatformWindowDelegate* delegate,
       }
       int dirty[4] = {0, 0, size[0], size[1]};
       screen_post_window(window_, buf[0], 1, dirty, 0);
-      const char msg[] = "QNX:OzWin: Initial buffer posted (dark blue)\n";
-      ::write(2, msg, sizeof(msg) - 1);
+      QNX_TRACE_MSG("QNX:OzWin: Initial buffer posted (dark blue)\n");
     }
   }
 

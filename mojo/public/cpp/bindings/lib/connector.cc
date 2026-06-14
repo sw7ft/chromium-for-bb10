@@ -42,6 +42,8 @@
 #include "mojo/public/cpp/system/wait.h"
 #include "third_party/perfetto/protos/perfetto/trace/track_event/chrome_mojo_event_info.pbzero.h"
 
+#include "base/qnx_trace.h"
+
 #if defined(ENABLE_IPC_FUZZER)
 #include "mojo/public/cpp/bindings/message_dumper.h"
 #endif
@@ -510,13 +512,9 @@ bool Connector::DispatchMessage(ScopedMessageHandle handle) {
   DCHECK(!paused_);
 
 #if defined(__QNX__)
-  {
-    char _b[128];
-    int _n = snprintf(_b, sizeof(_b), "QNX:DM tid=%x iface=%s\n",
+  QNX_TRACE_FMT("QNX:DM tid=%x iface=%s\n",
                       (unsigned)pthread_self(),
                       interface_name_ ? interface_name_ : "?");
-    write(2, _b, _n);
-  }
 #endif
   Message message = Message::CreateFromMessageHandle(&handle);
   if (message.IsNull()) {
@@ -572,26 +570,18 @@ bool Connector::DispatchMessage(ScopedMessageHandle handle) {
   if (connection_group_)
     message.set_receiver_connection_group(&connection_group_);
 #if defined(__QNX__)
-  {
-    char _b[128];
-    int _n = snprintf(_b, sizeof(_b), "QNX:DM:pre tid=%x recv=%p name=%u iface=%s\n",
+  QNX_TRACE_FMT("QNX:DM:pre tid=%x recv=%p name=%u iface=%s\n",
                       (unsigned)pthread_self(),
                       incoming_receiver_,
                       message.name(),
                       interface_name_ ? interface_name_ : "?");
-    write(2, _b, _n);
-  }
 #endif
   bool receiver_result =
       incoming_receiver_ && incoming_receiver_->Accept(&message);
 #if defined(__QNX__)
-  {
-    char _b[128];
-    int _n = snprintf(_b, sizeof(_b), "QNX:DM:post tid=%x res=%d iface=%s\n",
+  QNX_TRACE_FMT("QNX:DM:post tid=%x res=%d iface=%s\n",
                       (unsigned)pthread_self(), (int)receiver_result,
                       interface_name_ ? interface_name_ : "?");
-    write(2, _b, _n);
-  }
 #endif
   if (!weak_self)
     return receiver_result;

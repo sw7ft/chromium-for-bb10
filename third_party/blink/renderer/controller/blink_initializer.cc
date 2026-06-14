@@ -32,9 +32,9 @@
 
 #include <memory>
 #include <utility>
-#include <unistd.h>
 
 #include "base/allocator/partition_allocator/src/partition_alloc/page_allocator.h"
+#include "base/qnx_trace.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/ranges/algorithm.h"
@@ -115,10 +115,7 @@ BlinkInitializer& GetBlinkInitializer() {
 }
 
 void InitializeCommon(Platform* platform, mojo::BinderMap* binders) {
-  {
-    const char msg[] = "QNX:IC:1 entry\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:IC:1 entry\n");
 // #if expression should match the one around #include <windows.h>
 #if !defined(ARCH_CPU_X86_64) && !defined(ARCH_CPU_ARM64) && BUILDFLAG(IS_WIN)
   // Reserve address space on 32 bit Windows, to make it likelier that large
@@ -146,26 +143,17 @@ void InitializeCommon(Platform* platform, mojo::BinderMap* binders) {
   ChromeOSExtensions::Initialize();
 #endif
 
-  {
-    const char msg[] = "QNX:IC:2 blinkInit\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:IC:2 blinkInit\n");
   GetBlinkInitializer().Initialize();
 
   std::string js_command_line_flag =
       base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           blink::switches::kJavaScriptFlags);
-  {
-    const char msg[] = "QNX:IC:3 V8Init\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:IC:3 V8Init\n");
   V8Initializer::InitializeMainThread(V8ContextSnapshot::GetReferenceTable(),
                                       js_command_line_flag);
 
-  {
-    const char msg[] = "QNX:IC:4 RegIface\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:IC:4 RegIface\n");
   GetBlinkInitializer().RegisterInterfaces(*binders);
 
   DCHECK(!g_end_of_task_runner);
@@ -174,15 +162,9 @@ void InitializeCommon(Platform* platform, mojo::BinderMap* binders) {
 
   GetBlinkInitializer().RegisterMemoryWatchers(platform);
 
-  {
-    const char msg[] = "QNX:IC:5 PerfMgr\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:IC:5 PerfMgr\n");
   RendererResourceCoordinatorImpl::MaybeInitialize();
-  {
-    const char msg[] = "QNX:IC:6 Done\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:IC:6 Done\n");
 }
 
 }  // namespace
@@ -192,20 +174,11 @@ void Initialize(Platform* platform,
                 mojo::BinderMap* binders,
                 scheduler::WebThreadScheduler* main_thread_scheduler) {
   DCHECK(binders);
-  {
-    const char msg[] = "QNX:BI:1 MainThread\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:BI:1 MainThread\n");
   Platform::InitializeMainThread(platform, main_thread_scheduler);
-  {
-    const char msg[] = "QNX:BI:2 Common\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:BI:2 Common\n");
   InitializeCommon(platform, binders);
-  {
-    const char msg[] = "QNX:BI:3 Done\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:BI:3 Done\n");
 }
 
 // Function defined in third_party/blink/public/web/blink.h.

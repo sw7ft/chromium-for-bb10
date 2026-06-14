@@ -9,18 +9,8 @@
 
 #include <algorithm>
 #if defined(__QNX__) || defined(__QNXNTO__)
+#include "base/qnx_string_util.h"
 #include <unistd.h>
-namespace {
-size_t QnxFindFirstOf(const char* data, size_t len, const char* chars) {
-  for (size_t i = 0; i < len; i++) {
-    for (const char* c = chars; *c; c++) {
-      if (data[i] == *c)
-        return i;
-    }
-  }
-  return std::string::npos;
-}
-}  // namespace
 #endif
 
 #include "base/check_op.h"
@@ -1092,7 +1082,7 @@ bool HttpUtil::ParseAcceptEncoding(const std::string& accept_encoding,
                                    std::set<std::string>* allowed_encodings) {
   DCHECK(allowed_encodings);
 #if defined(__QNX__) || defined(__QNXNTO__)
-  if (QnxFindFirstOf(accept_encoding.data(), accept_encoding.size(), "\"") != std::string::npos)
+  if (base::qnx::FindFirstOf(accept_encoding.data(), accept_encoding.size(), "\"") != std::string::npos)
 #else
   if (accept_encoding.find_first_of("\"") != std::string::npos)
 #endif
@@ -1107,7 +1097,7 @@ bool HttpUtil::ParseAcceptEncoding(const std::string& accept_encoding,
     size_t semicolon_pos = entry.find(';');
     if (semicolon_pos == base::StringPiece::npos) {
 #if defined(__QNX__) || defined(__QNXNTO__)
-      if (QnxFindFirstOf(entry.data(), entry.size(), HTTP_LWS) != std::string::npos)
+      if (base::qnx::FindFirstOf(entry.data(), entry.size(), HTTP_LWS) != std::string::npos)
 #else
       if (entry.find_first_of(HTTP_LWS) != base::StringPiece::npos)
 #endif
@@ -1118,7 +1108,7 @@ bool HttpUtil::ParseAcceptEncoding(const std::string& accept_encoding,
     base::StringPiece encoding = entry.substr(0, semicolon_pos);
     encoding = TrimLWS(encoding);
 #if defined(__QNX__) || defined(__QNXNTO__)
-    if (QnxFindFirstOf(encoding.data(), encoding.size(), HTTP_LWS) != std::string::npos)
+    if (base::qnx::FindFirstOf(encoding.data(), encoding.size(), HTTP_LWS) != std::string::npos)
 #else
     if (encoding.find_first_of(HTTP_LWS) != base::StringPiece::npos)
 #endif
@@ -1190,7 +1180,7 @@ bool HttpUtil::ParseContentEncoding(const std::string& content_encoding,
                                     std::set<std::string>* used_encodings) {
   DCHECK(used_encodings);
 #if defined(__QNX__) || defined(__QNXNTO__)
-  if (QnxFindFirstOf(content_encoding.data(), content_encoding.size(), "\"=;*") != std::string::npos)
+  if (base::qnx::FindFirstOf(content_encoding.data(), content_encoding.size(), "\"=;*") != std::string::npos)
 #else
   if (content_encoding.find_first_of("\"=;*") != std::string::npos)
 #endif
@@ -1202,7 +1192,7 @@ bool HttpUtil::ParseContentEncoding(const std::string& content_encoding,
   while (encoding_tokenizer.GetNext()) {
     base::StringPiece encoding = TrimLWS(encoding_tokenizer.token_piece());
 #if defined(__QNX__) || defined(__QNXNTO__)
-    if (QnxFindFirstOf(encoding.data(), encoding.size(), HTTP_LWS) != std::string::npos)
+    if (base::qnx::FindFirstOf(encoding.data(), encoding.size(), HTTP_LWS) != std::string::npos)
 #else
     if (encoding.find_first_of(HTTP_LWS) != base::StringPiece::npos)
 #endif

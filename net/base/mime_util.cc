@@ -8,29 +8,7 @@
 #include <string>
 #include <unordered_set>
 #if defined(__QNX__) || defined(__QNXNTO__)
-namespace {
-size_t QnxFindFirstOf(const char* data, size_t len, const char* chars,
-                      size_t start = 0) {
-  for (size_t i = start; i < len; i++) {
-    for (const char* c = chars; *c; c++) {
-      if (data[i] == *c)
-        return i;
-    }
-  }
-  return std::string::npos;
-}
-size_t QnxFindFirstNotOf(const char* data, size_t len, const char* chars,
-                         size_t start = 0) {
-  for (size_t i = start; i < len; i++) {
-    bool found = false;
-    for (const char* c = chars; *c; c++) {
-      if (data[i] == *c) { found = true; break; }
-    }
-    if (!found) return i;
-  }
-  return std::string::npos;
-}
-}  // namespace
+#include "base/qnx_string_util.h"
 #endif
 
 #include "base/base64.h"
@@ -497,12 +475,12 @@ bool ParseMimeType(const std::string& type_str,
   // the trailing trim set to catch media-type comments, which are not at all
   // standard, but may occur in rare cases.
 #if defined(__QNX__) || defined(__QNXNTO__)
-  size_t type_val = QnxFindFirstNotOf(type_str.data(), type_str.size(), HTTP_LWS);
+  size_t type_val = base::qnx::FindFirstNotOf(type_str.data(), type_str.size(), HTTP_LWS);
   type_val = std::min(type_val, type_str.length());
-  size_t type_end = QnxFindFirstOf(type_str.data(), type_str.size(), HTTP_LWS ";(", type_val);
+  size_t type_end = base::qnx::FindFirstOf(type_str.data(), type_str.size(), HTTP_LWS ";(", type_val);
   if (type_end == std::string::npos)
     type_end = type_str.length();
-  size_t slash_pos = QnxFindFirstOf(type_str.data(), type_str.size(), "/");
+  size_t slash_pos = base::qnx::FindFirstOf(type_str.data(), type_str.size(), "/");
 #else
   size_t type_val = type_str.find_first_not_of(HTTP_LWS);
   type_val = std::min(type_val, type_str.length());
@@ -524,7 +502,7 @@ bool ParseMimeType(const std::string& type_str,
   if (params)
     params->clear();
 #if defined(__QNX__) || defined(__QNXNTO__)
-  std::string::size_type offset = QnxFindFirstOf(type_str.data(), type_str.size(), ";", type_end);
+  std::string::size_type offset = base::qnx::FindFirstOf(type_str.data(), type_str.size(), ";", type_end);
 #else
   std::string::size_type offset = type_str.find_first_of(';', type_end);
 #endif
@@ -533,14 +511,14 @@ bool ParseMimeType(const std::string& type_str,
     ++offset;
 
 #if defined(__QNX__) || defined(__QNXNTO__)
-    offset = QnxFindFirstNotOf(type_str.data(), type_str.size(), HTTP_LWS, offset);
+    offset = base::qnx::FindFirstNotOf(type_str.data(), type_str.size(), HTTP_LWS, offset);
 #else
     offset = type_str.find_first_not_of(HTTP_LWS, offset);
 #endif
     std::string::size_type param_name_start = offset;
 
 #if defined(__QNX__) || defined(__QNXNTO__)
-    offset = QnxFindFirstOf(type_str.data(), type_str.size(), ";=", offset);
+    offset = base::qnx::FindFirstOf(type_str.data(), type_str.size(), ";=", offset);
 #else
     offset = type_str.find_first_of(";=", offset);
 #endif
@@ -567,7 +545,7 @@ bool ParseMimeType(const std::string& type_str,
     // boundary values as well.
     // See https://encoding.spec.whatwg.org/#names-and-labels.
 #if defined(__QNX__) || defined(__QNXNTO__)
-    offset = QnxFindFirstNotOf(type_str.data(), type_str.size(), HTTP_LWS, offset);
+    offset = base::qnx::FindFirstNotOf(type_str.data(), type_str.size(), HTTP_LWS, offset);
 #else
     offset = type_str.find_first_not_of(HTTP_LWS, offset);
 #endif
@@ -578,7 +556,7 @@ bool ParseMimeType(const std::string& type_str,
     } else if (type_str[offset] != '"') {
       std::string::size_type value_start = offset;
 #if defined(__QNX__) || defined(__QNXNTO__)
-      offset = QnxFindFirstOf(type_str.data(), type_str.size(), ";", offset);
+      offset = base::qnx::FindFirstOf(type_str.data(), type_str.size(), ";", offset);
 #else
       offset = type_str.find_first_of(';', offset);
 #endif
@@ -614,7 +592,7 @@ bool ParseMimeType(const std::string& type_str,
       }
 
 #if defined(__QNX__) || defined(__QNXNTO__)
-      offset = QnxFindFirstOf(type_str.data(), type_str.size(), ";", offset);
+      offset = base::qnx::FindFirstOf(type_str.data(), type_str.size(), ";", offset);
 #else
       offset = type_str.find_first_of(';', offset);
 #endif

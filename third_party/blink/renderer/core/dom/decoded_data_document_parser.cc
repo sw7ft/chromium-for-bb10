@@ -31,6 +31,7 @@
 #include "third_party/blink/renderer/core/html/parser/text_resource_decoder.h"
 #include "third_party/blink/renderer/core/xml/document_xslt.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
+#include "base/qnx_trace.h"
 
 namespace blink {
 
@@ -57,26 +58,16 @@ void DecodedDataDocumentParser::AppendBytes(const char* data, size_t length) {
     return;
 
 #if defined(__QNX__)
-  {
-    char _b[64];
-    int _n = snprintf(_b, sizeof(_b), "QNX:DDDP:pre-decode len=%zu dec=%p\n",
+  QNX_TRACE_FMT("QNX:DDDP:pre-decode len=%zu dec=%p\n",
                       length, decoder_.get());
-    ::write(2, _b, _n);
-  }
 #endif
   String decoded = decoder_->Decode(data, length);
 #if defined(__QNX__)
-  {
-    char _b[64];
-    int _n = snprintf(_b, sizeof(_b), "QNX:DDDP:post-decode dlen=%u\n",
+  QNX_TRACE_FMT("QNX:DDDP:post-decode dlen=%u\n",
                       decoded.length());
-    ::write(2, _b, _n);
-  }
 #endif
   UpdateDocument(decoded);
-#if defined(__QNX__)
-  ::write(2, "QNX:DDDP:post-update\n", 21);
-#endif
+  QNX_TRACE_MSG("QNX:DDDP:post-update\n");
 }
 
 void DecodedDataDocumentParser::Flush() {

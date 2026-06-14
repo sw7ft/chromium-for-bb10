@@ -168,9 +168,7 @@ select_dispatch(struct event_base *base, void *arg, struct timeval *tv)
 	struct timeval qnx_tv;
 	if (!tv) {
 		qnx_tv.tv_sec = 0;
-		qnx_tv.tv_usec = 250000; /* 250ms backstop (was 50ms): socketpair wakeup
-		                            handles real work, this only bounds latency
-		                            for any unreported FD readiness. */
+		qnx_tv.tv_usec = 250000; /* 250ms backstop: socketpair wakeup handles work */
 		tv = &qnx_tv;
 	} else if (tv->tv_sec == 0 && tv->tv_usec == 0) {
 		qnx_tv.tv_sec = 0;
@@ -185,31 +183,6 @@ select_dispatch(struct event_base *base, void *arg, struct timeval *tv)
 
 	res = select(sop->event_fds + 1, sop->event_readset_out,
 	    sop->event_writeset_out, NULL, tv);
-
-#if defined(__QNX__) || defined(__QNXNTO__)
-	/* QNX spin diagnostic: count select() calls and how many returned
-	   immediately readable (res>0). A high calls/sec with most res>0 means
-	   the loop is busy-spinning on a never-drained readable FD. */
-	{
-		static unsigned long s_calls = 0, s_ready = 0;
-		static long s_t0 = 0;
-		struct timeval ntv;
-		long now;
-		gettimeofday(&ntv, 0);
-		now = (long)ntv.tv_sec;
-		s_calls++;
-		if (res > 0) s_ready++;
-		if (s_t0 == 0) s_t0 = now;
-		if (now - s_t0 >= 2) {
-			char b[160];
-			int n = snprintf(b, sizeof(b),
-			    "QNX:SELRATE calls=%lu ready=%lu over=%lds nfds=%d\n",
-			    s_calls, s_ready, now - s_t0, sop->event_fds + 1);
-			write(2, b, n);
-			s_calls = 0; s_ready = 0; s_t0 = now;
-		}
-	}
-#endif
 
 	check_selectop(sop);
 

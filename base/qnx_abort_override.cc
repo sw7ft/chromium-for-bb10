@@ -1,4 +1,5 @@
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 
 #if BUILDFLAG(IS_QNX)
 #include <dlfcn.h>
@@ -8,6 +9,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+// Intentionally uses raw write(2,...) — crash/abort handler that must always
+// fire unconditionally (similar to a crash handler), not a debug trace.
 static void qnx_print_caller(const char* prefix, void* addr) {
   char buf[512];
   Dl_info dli;
@@ -24,6 +27,8 @@ static void qnx_print_caller(const char* prefix, void* addr) {
   }
 }
 
+// Intentionally uses raw write(2,...) — crash/abort handler that must always
+// fire unconditionally (similar to a crash handler), not a debug trace.
 static void qnx_dump_stack(const char* tag) {
   char buf[512];
   Dl_info dli;
@@ -56,7 +61,7 @@ static void qnx_dump_stack(const char* tag) {
 namespace std {
 __attribute__((visibility("default"), noreturn)) void
 __throw_bad_optional_access() {
-  write(2, "QNX:BAD_OPTIONAL\n", 17);
+  QNX_TRACE_MSG("QNX:BAD_OPTIONAL\n");
   qnx_print_caller("QNX:OPT_C0", __builtin_return_address(0));
   qnx_dump_stack("OS");
   abort();
@@ -68,7 +73,7 @@ extern "C" void __real_abort(void) __attribute__((noreturn));
 extern "C" void __wrap_abort(void) __attribute__((noreturn));
 
 extern "C" void __wrap_abort(void) {
-  write(2, "QNX:ABORT_WRAP\n", 15);
+  QNX_TRACE_MSG("QNX:ABORT_WRAP\n");
   qnx_print_caller("QNX:ABORT_C0", __builtin_return_address(0));
   qnx_dump_stack("S");
   __real_abort();

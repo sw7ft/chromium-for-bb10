@@ -1668,7 +1668,12 @@ component("base") {
     }
 
     if (is_qnx) {
-      sources += [ "qnx_abort_override.cc" ]
+      sources += [
+        "qnx_abort_override.cc",
+        "qnx_string_util.h",
+        "qnx_trace.cc",
+        "qnx_trace.h",
+      ]
     }
 
     if (is_posix && !is_ios) {

@@ -23,6 +23,7 @@
 #include "base/task/thread_pool.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 #if BUILDFLAG(IS_QNX)
 #include <unistd.h>
 #endif
@@ -94,26 +95,18 @@ bool MoveDirectoryToTemporaryDirectory(const base::FilePath& path) {
 // rename the cache directory (for instance due to a sharing violation), and in
 // that case a cache for this profile (on the desired path) cannot be created.
 bool CleanupDirectoryInternal(const base::FilePath& path) {
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:CDI:1 entry\n", 16);
-#endif
+  QNX_TRACE_MSG("QNX:CDI:1 entry\n");
   const base::FilePath path_to_pass = path.StripTrailingSeparators();
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:CDI:2 move\n", 15);
-#endif
+  QNX_TRACE_MSG("QNX:CDI:2 move\n");
   bool result = MoveDirectoryToTemporaryDirectory(path_to_pass);
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:CDI:3 post\n", 15);
-#endif
+  QNX_TRACE_MSG("QNX:CDI:3 post\n");
 
   base::ThreadPool::PostTask(
       FROM_HERE,
       {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::BindOnce(&CleanupTemporaryDirectories, path_to_pass));
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:CDI:4 done\n", 15);
-#endif
+  QNX_TRACE_MSG("QNX:CDI:4 done\n");
 
   return result;
 }
@@ -175,9 +168,7 @@ void DeleteCache(const base::FilePath& path, bool remove_folder) {
 
 void CleanupDirectory(const base::FilePath& path,
                       base::OnceCallback<void(bool)> callback) {
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:CD:1 entry\n", 15);
-#endif
+  QNX_TRACE_MSG("QNX:CD:1 entry\n");
   auto task_runner = base::ThreadPool::CreateSequencedTaskRunner(
       {base::MayBlock(), base::TaskPriority::USER_BLOCKING,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN});
@@ -185,9 +176,7 @@ void CleanupDirectory(const base::FilePath& path,
   task_runner->PostTaskAndReplyWithResult(
       FROM_HERE, base::BindOnce(CleanupDirectoryInternal, path),
       std::move(callback));
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:CD:2 posted\n", 16);
-#endif
+  QNX_TRACE_MSG("QNX:CD:2 posted\n");
 }
 
 bool CleanupDirectorySync(const base::FilePath& path) {

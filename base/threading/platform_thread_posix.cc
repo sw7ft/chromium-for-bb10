@@ -14,14 +14,9 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#if BUILDFLAG(IS_QNX)
-#include <cstdio>
-#define QNX_TF(msg) write(2, msg, sizeof(msg) - 1)
-#define QNX_TFF(...) do { char _b[160]; int _n = snprintf(_b, sizeof(_b), __VA_ARGS__); if (_n > 0) write(2, _b, _n); } while(0)
-#else
-#define QNX_TF(msg) ((void)0)
-#define QNX_TFF(...) ((void)0)
-#endif
+#include "base/qnx_trace.h"
+#define QNX_TF(msg) QNX_TRACE_MSG(msg)
+#define QNX_TFF(...) QNX_TRACE_FMT(__VA_ARGS__)
 
 #include <memory>
 #include <tuple>

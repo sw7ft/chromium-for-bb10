@@ -19,6 +19,7 @@
 #include "base/trace_event/heap_profiler_allocation_context_tracker.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 #include "components/tracing/common/trace_startup_config.h"
 #include "components/tracing/common/tracing_switches.h"
 #include "content/browser/browser_main_loop.h"
@@ -84,9 +85,7 @@ int BrowserMainRunnerImpl::Initialize(MainFunctionParams parameters) {
     initialization_started_ = true;
 
     SkGraphics::Init();
-#if BUILDFLAG(IS_QNX)
-    write(2, "QNX:BMRI:1 SkiaInit\n", 20);
-#endif
+    QNX_TRACE_MSG("QNX:BMRI:1 SkiaInit\n");
 
     if (parameters.command_line->HasSwitch(switches::kWaitForDebugger)) {
       base::debug::WaitForDebugger(60, true);
@@ -103,36 +102,26 @@ int BrowserMainRunnerImpl::Initialize(MainFunctionParams parameters) {
     ole_initializer_ = std::make_unique<ui::ScopedOleInitializer>();
 #endif
 
-#if BUILDFLAG(IS_QNX)
-    write(2, "QNX:BMRI:2 Fonts\n", 17);
-#endif
+    QNX_TRACE_MSG("QNX:BMRI:2 Fonts\n");
     gfx::InitializeFonts();
-#if BUILDFLAG(IS_QNX)
-    write(2, "QNX:BMRI:3 MainLoop\n", 20);
-#endif
+    QNX_TRACE_MSG("QNX:BMRI:3 MainLoop\n");
 
     auto created_main_parts_closure =
         std::move(parameters.created_main_parts_closure);
 
     main_loop_ = std::make_unique<BrowserMainLoop>(
         std::move(parameters), std::move(scoped_execution_fence_));
-#if BUILDFLAG(IS_QNX)
-    write(2, "QNX:BMRI:4 Init\n", 16);
-#endif
+    QNX_TRACE_MSG("QNX:BMRI:4 Init\n");
 
     main_loop_->Init();
-#if BUILDFLAG(IS_QNX)
-    write(2, "QNX:BMRI:5 EarlyInit\n", 21);
-#endif
+    QNX_TRACE_MSG("QNX:BMRI:5 EarlyInit\n");
 
     if (created_main_parts_closure) {
       std::move(created_main_parts_closure).Run(main_loop_->parts());
     }
 
     const int early_init_error_code = main_loop_->EarlyInitialization();
-#if BUILDFLAG(IS_QNX)
-    write(2, "QNX:BMRI:6 Toolkit\n", 19);
-#endif
+    QNX_TRACE_MSG("QNX:BMRI:6 Toolkit\n");
     if (early_init_error_code > 0) {
       main_loop_->CreateMessageLoopForEarlyShutdown();
       return early_init_error_code;
@@ -142,22 +131,16 @@ int BrowserMainRunnerImpl::Initialize(MainFunctionParams parameters) {
       main_loop_->CreateMessageLoopForEarlyShutdown();
       return 1;
     }
-#if BUILDFLAG(IS_QNX)
-    write(2, "QNX:BMRI:7 MsgLoop\n", 19);
-#endif
+    QNX_TRACE_MSG("QNX:BMRI:7 MsgLoop\n");
 
     main_loop_->PreCreateMainMessageLoop();
     main_loop_->CreateMainMessageLoop();
     main_loop_->PostCreateMainMessageLoop();
-#if BUILDFLAG(IS_QNX)
-    write(2, "QNX:BMRI:8 InputMethod\n", 23);
-#endif
+    QNX_TRACE_MSG("QNX:BMRI:8 InputMethod\n");
 
     ui::InitializeInputMethod();
   }
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:BMRI:9 StartupTasks\n", 24);
-#endif
+  QNX_TRACE_MSG("QNX:BMRI:9 StartupTasks\n");
   main_loop_->CreateStartupTasks();
   int result_code = main_loop_->GetResultCode();
   if (result_code > 0) {

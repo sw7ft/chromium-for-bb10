@@ -5,11 +5,8 @@
 #include "services/network/cors/cors_url_loader_factory.h"
 
 #include <utility>
-#if defined(__QNX__) || defined(__QNXNTO__)
-#include <unistd.h>
-#include <cstdio>
-#endif
 
+#include "base/qnx_trace.h"
 #include "base/debug/crash_logging.h"
 #include "base/functional/bind.h"
 #include "base/logging.h"
@@ -339,14 +336,7 @@ void CorsURLLoaderFactory::CreateLoaderAndStart(
     const ResourceRequest& resource_request,
     mojo::PendingRemote<mojom::URLLoaderClient> client,
     const net::MutableNetworkTrafficAnnotationTag& traffic_annotation) {
-#if defined(__QNX__) || defined(__QNXNTO__)
-  {
-    std::string u = resource_request.url.spec();
-    char m[256];
-    int n = snprintf(m, sizeof(m), "QNX:CORS:CreateLoader url=%s\n", u.c_str());
-    ::write(2, m, n);
-  }
-#endif
+  QNX_TRACE_FMT("QNX:CORS:CreateLoader url=%s\n", resource_request.url.spec().c_str());
 #if BUILDFLAG(IS_ANDROID)
   // Use pseudo flag to investigate histogram issue.
   // See https://crbug.com/1439721.
@@ -363,12 +353,7 @@ void CorsURLLoaderFactory::CreateLoaderAndStart(
 #endif
 
   if (!IsValidRequest(resource_request, options)) {
-#if defined(__QNX__) || defined(__QNXNTO__)
-    {
-      const char m[] = "QNX:CORS:InvalidReq!\n";
-      ::write(2, m, sizeof(m) - 1);
-    }
-#endif
+    QNX_TRACE_MSG("QNX:CORS:InvalidReq!\n");
     mojo::Remote<mojom::URLLoaderClient>(std::move(client))
         ->OnComplete(URLLoaderCompletionStatus(net::ERR_INVALID_ARGUMENT));
     return;
@@ -409,16 +394,9 @@ void CorsURLLoaderFactory::CreateLoaderAndStart(
       factory_override_ ? factory_override_->get()
                         : network_loader_factory_.get();
   DCHECK(inner_url_loader_factory);
-#if defined(__QNX__) || defined(__QNXNTO__)
-  {
-    char m[128];
-    int n = snprintf(m, sizeof(m),
-                     "QNX:CORS:preStart disWebSec=%d override=%d\n",
+  QNX_TRACE_FMT("QNX:CORS:preStart disWebSec=%d override=%d\n",
                      disable_web_security_ ? 1 : 0,
                      factory_override_ ? 1 : 0);
-    ::write(2, m, n);
-  }
-#endif
   if (!disable_web_security_) {
     mojo::PendingRemote<mojom::DevToolsObserver> devtools_observer =
         GetDevToolsObserver(resource_request);
@@ -513,17 +491,12 @@ bool CorsURLLoaderFactory::IsValidCorsExemptHeaders(
 bool CorsURLLoaderFactory::IsValidRequest(const ResourceRequest& request,
                                           uint32_t options) {
 #if defined(__QNX__) || defined(__QNXNTO__)
-  {
-    char m[256];
-    int n = snprintf(m, sizeof(m),
-                     "QNX:IVR mode=%d cred=%d pid=%d trusted=%d dest=%d\n",
+  QNX_TRACE_FMT("QNX:IVR mode=%d cred=%d pid=%d trusted=%d dest=%d\n",
                      static_cast<int>(request.mode),
                      static_cast<int>(request.credentials_mode),
                      process_id_,
                      is_trusted_ ? 1 : 0,
                      static_cast<int>(request.destination));
-    ::write(2, m, n);
-  }
 #endif
   if (request.url.SchemeIs(url::kDataScheme)) {
     LOG(WARNING) << "CorsURLLoaderFactory doesn't support `data` scheme.";
@@ -542,6 +515,9 @@ bool CorsURLLoaderFactory::IsValidRequest(const ResourceRequest& request,
   if (!request.request_initiator &&
       request.mode != network::mojom::RequestMode::kNavigate &&
       request.mode != mojom::RequestMode::kNoCors) {
+#if defined(__QNX__) || defined(__QNXNTO__)
+    QNX_TRACE_MSG("QNX:IVR:fail no initiator\n");
+#endif
     LOG(WARNING) << "`mode` is " << request.mode
                  << ", but `request_initiator` is not set.";
     mojo::ReportBadMessage("CorsURLLoaderFactory: cors without initiator");
@@ -669,6 +645,9 @@ bool CorsURLLoaderFactory::IsValidRequest(const ResourceRequest& request,
       break;
 
     case InitiatorLockCompatibility::kNoLock:
+#if defined(__QNX__) || defined(__QNXNTO__)
+      QNX_TRACE_MSG("QNX:IVR:fail no lock\n");
+#endif
       // `request_initiator_origin_lock` should always be set in a
       // URLLoaderFactory vended to a renderer process.  See also
       // https://crbug.com/1114906.
@@ -678,6 +657,9 @@ bool CorsURLLoaderFactory::IsValidRequest(const ResourceRequest& request,
       return false;
 
     case InitiatorLockCompatibility::kNoInitiator:
+#if defined(__QNX__) || defined(__QNXNTO__)
+      QNX_TRACE_MSG("QNX:IVR:fail no initiator2\n");
+#endif
       // Requests from the renderer need to always specify an initiator.
       NOTREACHED();
       mojo::ReportBadMessage(
@@ -685,6 +667,11 @@ bool CorsURLLoaderFactory::IsValidRequest(const ResourceRequest& request,
       return false;
 
     case InitiatorLockCompatibility::kIncorrectLock:
+#if defined(__QNX__) || defined(__QNXNTO__)
+      QNX_TRACE_FMT("QNX:IVR:fail bad lock init=%s lock=%s\n",
+                    request.request_initiator->GetDebugString().c_str(),
+                    request_initiator_origin_lock_->GetDebugString().c_str());
+#endif
       // Requests from the renderer need to always specify a correct initiator.
       url::debug::ScopedOriginCrashKey initiator_origin_lock_crash_key(
           GetRequestInitiatorOriginLockCrashKey(),
@@ -702,6 +689,9 @@ bool CorsURLLoaderFactory::IsValidRequest(const ResourceRequest& request,
 
   if (!AreRequestHeadersSafe(request.headers) ||
       !AreRequestHeadersSafe(request.cors_exempt_headers)) {
+#if defined(__QNX__) || defined(__QNXNTO__)
+    QNX_TRACE_MSG("QNX:IVR:fail unsafe headers\n");
+#endif
     return false;
   }
 
@@ -769,6 +759,9 @@ bool CorsURLLoaderFactory::IsValidRequest(const ResourceRequest& request,
     // `net_log_create_info` field is expected to be used within network
     // service.
     if (request.net_log_create_info && !is_trusted_) {
+#if defined(__QNX__) || defined(__QNXNTO__)
+      QNX_TRACE_MSG("QNX:IVR:fail net_log_create\n");
+#endif
       mojo::ReportBadMessage(
           "CorsURLLoaderFactory: net_log_create_info field is not expected.");
       return false;

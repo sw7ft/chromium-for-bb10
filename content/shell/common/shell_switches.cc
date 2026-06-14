@@ -57,6 +57,12 @@ const char kTestRegisterStandardScheme[] = "test-register-standard-scheme";
 // Print DOM to stdout when main frame loads (for headless verification).
 const char kDumpDom[] = "dump-dom";
 
+// Maximum time in milliseconds to wait for page load before dumping DOM.
+const char kTimeout[] = "timeout";
+
+// Which event triggers the DOM dump: "load" (default) or "domcontentloaded".
+const char kDomTrigger[] = "dom-trigger";
+
 bool IsRunWebTestsSwitchPresent() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kRunWebTests);

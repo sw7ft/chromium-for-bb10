@@ -51,6 +51,7 @@
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/typed_macros.h"
 #include "base/values.h"
+#include "base/qnx_trace.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "cc/base/histograms.h"
@@ -529,10 +530,7 @@ RenderThreadImpl::RenderThreadImpl(
 
 void RenderThreadImpl::Init() {
   TRACE_EVENT0("startup", "RenderThreadImpl::Init");
-  {
-    const char msg[] = "QNX:RTI:1 Init\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:RTI:1 Init\n");
 
   SCOPED_UMA_HISTOGRAM_TIMER("Renderer.RenderThreadImpl.Init");
 
@@ -561,10 +559,7 @@ void RenderThreadImpl::Init() {
   metrics::InitializeSingleSampleMetricsFactory(base::BindRepeating(
       &CreateSingleSampleMetricsProvider, child_process_host()));
 
-  {
-    const char msg[] = "QNX:RTI:2 GPU\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:RTI:2 GPU\n");
   mojo::PendingRemote<viz::mojom::Gpu> remote_gpu;
   BindHostReceiver(remote_gpu.InitWithNewPipeAndPassReceiver());
   gpu_ = viz::Gpu::Create(std::move(remote_gpu), GetIOTaskRunner());
@@ -582,19 +577,13 @@ void RenderThreadImpl::Init() {
   // NOTE: Do not add interfaces to |binders| within this method. Instead,
   // modify the definition of |ExposeRendererInterfacesToBrowser()| to ensure
   // security review coverage.
-  {
-    const char msg[] = "QNX:RTI:3 WebKit\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:RTI:3 WebKit\n");
   mojo::BinderMap binders;
   InitializeWebKit(&binders);
 
   vc_manager_ = std::make_unique<blink::WebVideoCaptureImplManager>();
 
-  {
-    const char msg[] = "QNX:RTI:4 RenderStarted\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:RTI:4 RenderStarted\n");
   GetContentClient()->renderer()->RenderThreadStarted();
   ExposeRendererInterfacesToBrowser(weak_factory_.GetWeakPtr(), &binders);
   ExposeInterfacesToBrowser(std::move(binders));
@@ -660,10 +649,7 @@ void RenderThreadImpl::Init() {
       base::BindRepeating(&RenderThreadImpl::OnSyncMemoryPressure,
                           base::Unretained(this)));
 
-  {
-    const char msg[] = "QNX:RTI:5 DiscMem\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:RTI:5 DiscMem\n");
   discardable_memory_allocator_ = CreateDiscardableMemoryAllocator();
 
   // TODO(boliu): In single process, browser main loop should set up the
@@ -726,10 +712,7 @@ void RenderThreadImpl::Init() {
             },
             std::move(pending_factory)));
   }
-  {
-    const char msg[] = "QNX:RTI:6 Done\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:RTI:6 Done\n");
   UpdateForegroundCrashKey(
       /*foreground=*/!blink::kLaunchingProcessIsBackgrounded);
 }
@@ -871,10 +854,7 @@ void RenderThreadImpl::InitializeWebKit(mojo::BinderMap* binders) {
     gin::Debug::SetJitCodeEventHandler(vTune::GetVtuneCodeEventHandler());
 #endif
 
-  {
-    const char msg[] = "QNX:IWK:1 platform\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:IWK:1 platform\n");
   blink_platform_impl_ =
       std::make_unique<RendererBlinkPlatformImpl>(main_thread_scheduler_.get());
   // This, among other things, enables any feature marked "test" in
@@ -886,30 +866,18 @@ void RenderThreadImpl::InitializeWebKit(mojo::BinderMap* binders) {
       ->SetRuntimeFeaturesDefaultsBeforeBlinkInitialization();
   SetRuntimeFeaturesDefaultsAndUpdateFromArgs(command_line);
 
-  {
-    const char msg[] = "QNX:IWK:2 blinkInit\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:IWK:2 blinkInit\n");
   blink::Initialize(blink_platform_impl_.get(), binders,
                     main_thread_scheduler_.get());
 
-  {
-    const char msg[] = "QNX:IWK:3 v8isolate\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:IWK:3 v8isolate\n");
   v8::Isolate* isolate = blink::MainThreadIsolate();
 
-  {
-    const char msg[] = "QNX:IWK:4 compositor\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:IWK:4 compositor\n");
   if (!command_line.HasSwitch(switches::kDisableThreadedCompositing))
     InitializeCompositorThread();
 
-  {
-    const char msg[] = "QNX:IWK:5 schemes\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:IWK:5 schemes\n");
   RenderThreadImpl::RegisterSchemes();
 
   RenderMediaClient::Initialize();

@@ -17,6 +17,7 @@
 #include "base/task/current_thread.h"
 #include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 #include "gin/debug_impl.h"
 #include "gin/function_template.h"
 #include "gin/per_isolate_data.h"
@@ -102,13 +103,13 @@ IsolateHolder::IsolateHolder(
   v8::ArrayBuffer::Allocator* allocator = params->array_buffer_allocator;
   DCHECK(allocator);
 
-  { const char m[] = "QNX:IH:1 Alloc\n"; write(2, m, sizeof(m)-1); }
+  QNX_TRACE_MSG("QNX:IH:1 Alloc\n");
   isolate_ = v8::Isolate::Allocate();
-  { const char m[] = "QNX:IH:2 PerIso\n"; write(2, m, sizeof(m)-1); }
+  QNX_TRACE_MSG("QNX:IH:2 PerIso\n");
   isolate_data_ = std::make_unique<PerIsolateData>(
       isolate_, allocator, access_mode_, task_runner,
       std::move(low_priority_task_runner));
-  { const char m[] = "QNX:IH:3 Init\n"; write(2, m, sizeof(m)-1); }
+  QNX_TRACE_MSG("QNX:IH:3 Init\n");
   if (isolate_creation_mode == IsolateCreationMode::kCreateSnapshot) {
     snapshot_creator_ =
         std::make_unique<v8::SnapshotCreator>(isolate_, g_reference_table);
@@ -116,7 +117,7 @@ IsolateHolder::IsolateHolder(
   } else {
     v8::Isolate::Initialize(isolate_, *params);
   }
-  { const char m[] = "QNX:IH:4 InitDone\n"; write(2, m, sizeof(m)-1); }
+  QNX_TRACE_MSG("QNX:IH:4 InitDone\n");
 
   gin::V8SharedMemoryDumpProvider::Register();
 

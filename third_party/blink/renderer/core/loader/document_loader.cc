@@ -28,10 +28,7 @@
  */
 
 #include "third_party/blink/renderer/core/loader/document_loader.h"
-
-#if defined(__QNX__)
-#include <unistd.h>
-#endif
+#include "base/qnx_trace.h"
 
 #include <memory>
 #include <utility>
@@ -1145,13 +1142,7 @@ void DocumentLoader::SetHistoryItemStateForCommit(
 }
 
 void DocumentLoader::BodyDataReceived(base::span<const char> data) {
-#if defined(__QNX__)
-  {
-    char _b[64];
-    int _n = snprintf(_b, sizeof(_b), "QNX:BDR len=%zu\n", data.size());
-    ::write(2, _b, _n);
-  }
-#endif
+  QNX_TRACE_FMT("QNX:BDR len=%zu\n", data.size());
   EncodedBodyData body_data(data);
   BodyDataReceivedImpl(body_data);
 }
@@ -1182,13 +1173,7 @@ DocumentLoader::TakeProcessBackgroundDataCallback() {
 void DocumentLoader::BodyDataReceivedImpl(BodyData& data) {
   TRACE_EVENT0("loading", "DocumentLoader::BodyDataReceived");
   base::span<const char> encoded_data = data.EncodedData();
-#if defined(__QNX__)
-  {
-    char _b[64];
-    int _n = snprintf(_b, sizeof(_b), "QNX:BDRI:1 len=%zu\n", encoded_data.size());
-    ::write(2, _b, _n);
-  }
-#endif
+  QNX_TRACE_FMT("QNX:BDRI:1 len=%zu\n", encoded_data.size());
   if (encoded_data.size()) {
     GetFrameLoader().Progress().IncrementProgress(main_resource_identifier_,
                                                   encoded_data.size());
@@ -1204,9 +1189,7 @@ void DocumentLoader::BodyDataReceivedImpl(BodyData& data) {
 
   DCHECK(!frame_->GetPage()->Paused());
   time_of_last_data_received_ = clock_->NowTicks();
-#if defined(__QNX__)
-  ::write(2, "QNX:BDRI:2 pre-proc\n", 20);
-#endif
+  QNX_TRACE_MSG("QNX:BDRI:2 pre-proc\n");
 
   if (loading_main_document_from_mhtml_archive_) {
     data.Buffer(this);
@@ -1214,9 +1197,7 @@ void DocumentLoader::BodyDataReceivedImpl(BodyData& data) {
   }
 
   ProcessDataBuffer(&data);
-#if defined(__QNX__)
-  ::write(2, "QNX:BDRI:3 post-proc\n", 21);
-#endif
+  QNX_TRACE_MSG("QNX:BDRI:3 post-proc\n");
 }
 
 void DocumentLoader::BodyLoadingFinished(
@@ -1225,16 +1206,7 @@ void DocumentLoader::BodyLoadingFinished(
     int64_t total_encoded_body_length,
     int64_t total_decoded_body_length,
     const absl::optional<WebURLError>& error) {
-#if defined(__QNX__)
-  {
-    char _b[96];
-    int _n = snprintf(_b, sizeof(_b), "QNX:BLF enc=%lld body=%lld err=%d\n",
-                      (long long)total_encoded_data_length,
-                      (long long)total_decoded_body_length,
-                      error ? 1 : 0);
-    ::write(2, _b, _n);
-  }
-#endif
+  QNX_TRACE_FMT("QNX:BLF enc=%lld body=%lld err=%d\n", (long long)total_encoded_data_length, (long long)total_decoded_body_length, error ? 1 : 0);
   TRACE_EVENT0("loading", "DocumentLoader::BodyLoadingFinished");
 
   DCHECK(frame_);
@@ -1246,15 +1218,11 @@ void DocumentLoader::BodyLoadingFinished(
         completion_time, total_encoded_data_length, total_decoded_body_length);
 #endif
 
-#if defined(__QNX__)
-    ::write(2, "QNX:BLF:preDWP\n", 15);
-#endif
+    QNX_TRACE_MSG("QNX:BLF:preDWP\n");
     DOMWindowPerformance::performance(*frame_->DomWindow())
         ->OnBodyLoadFinished(total_encoded_body_length,
                              total_decoded_body_length);
-#if defined(__QNX__)
-    ::write(2, "QNX:BLF:postDWP\n", 16);
-#endif
+    QNX_TRACE_MSG("QNX:BLF:postDWP\n");
 
     if (resource_timing_info_for_parent_) {
       // Note that we already checked for Timing-Allow-Origin, otherwise we
@@ -1277,13 +1245,9 @@ void DocumentLoader::BodyLoadingFinished(
       frame_->Owner()->AddResourceTiming(
           std::move(resource_timing_info_for_parent_));
     }
-#if defined(__QNX__)
-    ::write(2, "QNX:BLF:preFL\n", 14);
-#endif
+    QNX_TRACE_MSG("QNX:BLF:preFL\n");
     FinishedLoading(completion_time);
-#if defined(__QNX__)
-    ::write(2, "QNX:BLF:postFL\n", 15);
-#endif
+    QNX_TRACE_MSG("QNX:BLF:postFL\n");
     return;
   }
 
@@ -1334,7 +1298,7 @@ void DocumentLoader::LoadFailed(const ResourceError& error) {
 
 void DocumentLoader::FinishedLoading(base::TimeTicks finish_time) {
 #if defined(__QNX__)
-  { const char m[] = "QNX:FL:1 entry\n"; ::write(2, m, sizeof(m) - 1); }
+  QNX_TRACE_MSG("QNX:FL:1 entry\n");
 #endif
   body_loader_.reset();
   virtual_time_pauser_.UnpauseVirtualTime();
@@ -1373,22 +1337,22 @@ void DocumentLoader::FinishedLoading(base::TimeTicks finish_time) {
   if (parser_) {
     if (parser_blocked_count_) {
 #if defined(__QNX__)
-      { const char m[] = "QNX:FL:2 blocked\n"; ::write(2, m, sizeof(m) - 1); }
+      QNX_TRACE_MSG("QNX:FL:2 blocked\n");
 #endif
       finish_loading_when_parser_resumed_ = true;
     } else {
 #if defined(__QNX__)
-      { const char m[] = "QNX:FL:3 preFinish\n"; ::write(2, m, sizeof(m) - 1); }
+      QNX_TRACE_MSG("QNX:FL:3 preFinish\n");
 #endif
       parser_->Finish();
 #if defined(__QNX__)
-      { const char m[] = "QNX:FL:4 postFinish\n"; ::write(2, m, sizeof(m) - 1); }
+      QNX_TRACE_MSG("QNX:FL:4 postFinish\n");
 #endif
       parser_.Clear();
     }
   } else {
 #if defined(__QNX__)
-    { const char m[] = "QNX:FL:5 noParser\n"; ::write(2, m, sizeof(m) - 1); }
+    QNX_TRACE_MSG("QNX:FL:5 noParser\n");
 #endif
   }
 }
@@ -1509,16 +1473,12 @@ void DocumentLoader::CommitData(BodyData& data) {
 
   if (!frame_ || !frame_->GetDocument()->Parsing() || !parser_)
     return;
-#if defined(__QNX__)
-  ::write(2, "QNX:CD:1 pre-append\n", 20);
-#endif
+  QNX_TRACE_MSG("QNX:CD:1 pre-append\n");
   base::AutoReset<bool> reentrancy_protector(&in_commit_data_, true);
   if (data.EncodedData().size())
     data_received_ = true;
   data.AppendToParser(this);
-#if defined(__QNX__)
-  ::write(2, "QNX:CD:2 post-append\n", 21);
-#endif
+  QNX_TRACE_MSG("QNX:CD:2 post-append\n");
 }
 
 mojom::CommitResult DocumentLoader::CommitSameDocumentNavigation(
@@ -1931,7 +1891,7 @@ void DocumentLoader::StartLoadingInternal() {
 
 void DocumentLoader::StartLoadingResponse() {
 #if defined(__QNX__)
-  { const char m[] = "QNX:SLR:1 entry\n"; ::write(2, m, sizeof(m) - 1); }
+  QNX_TRACE_MSG("QNX:SLR:1 entry\n");
 #endif
   if (!frame_)
     return;
@@ -1939,11 +1899,11 @@ void DocumentLoader::StartLoadingResponse() {
   CHECK_GE(state_, kCommitted);
 
 #if defined(__QNX__)
-  { const char m[] = "QNX:SLR:2 preParser\n"; ::write(2, m, sizeof(m) - 1); }
+  QNX_TRACE_MSG("QNX:SLR:2 preParser\n");
 #endif
   CreateParserPostCommit();
 #if defined(__QNX__)
-  { const char m[] = "QNX:SLR:3 postParser\n"; ::write(2, m, sizeof(m) - 1); }
+  QNX_TRACE_MSG("QNX:SLR:3 postParser\n");
 #endif
 
   if (loading_main_document_from_mhtml_archive_) {
@@ -1971,11 +1931,11 @@ void DocumentLoader::StartLoadingResponse() {
 
   if (loading_url_as_empty_document_) {
 #if defined(__QNX__)
-    { const char m[] = "QNX:SLR:4 emptyDoc\n"; ::write(2, m, sizeof(m) - 1); }
+    QNX_TRACE_MSG("QNX:SLR:4 emptyDoc\n");
 #endif
     FinishedLoading(base::TimeTicks::Now());
 #if defined(__QNX__)
-    { const char m[] = "QNX:SLR:5 finDone\n"; ::write(2, m, sizeof(m) - 1); }
+    QNX_TRACE_MSG("QNX:SLR:5 finDone\n");
 #endif
     return;
   }
@@ -2002,37 +1962,23 @@ void DocumentLoader::StartLoadingResponse() {
     return;
 
   if (!url_.ProtocolIsInHTTPFamily()) {
-#if defined(__QNX__)
-    { const char m[] = "QNX:SLR:6 nonHTTP startBody\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+    QNX_TRACE_MSG("QNX:SLR:6 nonHTTP startBody\n");
     body_loader_->StartLoadingBody(this);
     return;
   }
 
   if (parser_->IsPreloading()) {
-#if defined(__QNX__)
-    { const char m[] = "QNX:SLR:7 preloading commitData\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+    QNX_TRACE_MSG("QNX:SLR:7 preloading commitData\n");
     parser_->CommitPreloadedData();
-#if defined(__QNX__)
-    {
-      char _b[64];
-      int _n = snprintf(_b, sizeof(_b), "QNX:SLR:7a bl=%d\n", body_loader_ ? 1 : 0);
-      ::write(2, _b, _n);
-    }
+    QNX_TRACE_FMT("QNX:SLR:7a bl=%d\n", body_loader_ ? 1 : 0);
     if (body_loader_) {
       body_loader_->SetDefersLoading(WebLoaderFreezeMode::kNone);
-      ::write(2, "QNX:SLR:7b unfroze\n", 19);
+      QNX_TRACE_MSG("QNX:SLR:7b unfroze\n");
     }
-#endif
   } else {
-#if defined(__QNX__)
-    { const char m[] = "QNX:SLR:8 startBody HTTP\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+    QNX_TRACE_MSG("QNX:SLR:8 startBody HTTP\n");
     body_loader_->StartLoadingBody(this);
-#if defined(__QNX__)
-    { const char m[] = "QNX:SLR:9 startBody done\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+    QNX_TRACE_MSG("QNX:SLR:9 startBody done\n");
   }
 }
 
@@ -2641,16 +2587,7 @@ void DocumentLoader::InitializeWindow(Document* owner_document) {
 }
 
 void DocumentLoader::CommitNavigation() {
-#if defined(__QNX__)
-  {
-    char m[256];
-    WTF::String url_str = url_.GetString();
-    int n = snprintf(m, sizeof(m), "QNX:DL:CommitNav url=%s body=%d\n",
-                     url_str.Utf8().c_str(),
-                     body_loader_ ? 1 : 0);
-    ::write(2, m, n);
-  }
-#endif
+  QNX_TRACE_FMT("QNX:DL:CommitNav url=%s body=%d\n", url_.GetString().Utf8().c_str(), body_loader_ ? 1 : 0);
   DCHECK_LT(state_, kCommitted);
   DCHECK(frame_->GetPage());
   DCHECK(!frame_->GetDocument() || !frame_->GetDocument()->IsActive());
@@ -2749,7 +2686,7 @@ void DocumentLoader::CommitNavigation() {
 
   is_prerendering_ = frame_->GetPage()->IsPrerendering();
 #if defined(__QNX__)
-  { const char m[] = "QNX:DL:PreInstallDoc\n"; ::write(2, m, sizeof(m) - 1); }
+  QNX_TRACE_MSG("QNX:DL:PreInstallDoc\n");
 #endif
   Document* document = frame_->DomWindow()->InstallNewDocument(
       DocumentInit::Create()
@@ -2765,11 +2702,11 @@ void DocumentLoader::CommitNavigation() {
           .WithFallbackBaseURL(fallback_base_url_)
           .WithUkmSourceId(ukm_source_id_));
 #if defined(__QNX__)
-  { const char m[] = "QNX:DL:PostInstallDoc\n"; ::write(2, m, sizeof(m) - 1); }
+  QNX_TRACE_MSG("QNX:DL:PostInstallDoc\n");
 #endif
 
 #if defined(__QNX__)
-  { const char m[] = "QNX:DL:7 preUseCount\n"; ::write(2, m, sizeof(m) - 1); }
+  QNX_TRACE_MSG("QNX:DL:7 preUseCount\n");
 #endif
   RecordUseCountersForCommit();
   RecordConsoleMessagesForCommit();
@@ -2868,12 +2805,12 @@ void DocumentLoader::CommitNavigation() {
   }
 
 #if defined(__QNX__)
-  { const char m[] = "QNX:DL:8 preDidInstall\n"; ::write(2, m, sizeof(m) - 1); }
+  QNX_TRACE_MSG("QNX:DL:8 preDidInstall\n");
 #endif
   DidInstallNewDocument(document);
 
 #if defined(__QNX__)
-  { const char m[] = "QNX:DL:9 preDidCommit\n"; ::write(2, m, sizeof(m) - 1); }
+  QNX_TRACE_MSG("QNX:DL:9 preDidCommit\n");
 #endif
   DidCommitNavigation();
 
@@ -2950,13 +2887,13 @@ void DocumentLoader::CommitNavigation() {
   // TODO(crbug.com/1476866): We should check for protocols and not emit
   // performance timeline entries for file protocol navigations.
 #if defined(__QNX__)
-  { const char m[] = "QNX:DL:10 prePerf\n"; ::write(2, m, sizeof(m) - 1); }
+  QNX_TRACE_MSG("QNX:DL:10 prePerf\n");
 #endif
   DOMWindowPerformance::performance(*frame_->DomWindow())
       ->CreateNavigationTimingInstance(std::move(navigation_timing_info));
 
 #if defined(__QNX__)
-  { const char m[] = "QNX:DL:11 preNotify\n"; ::write(2, m, sizeof(m) - 1); }
+  QNX_TRACE_MSG("QNX:DL:11 preNotify\n");
 #endif
   {
     // Notify the browser process about the commit.
@@ -2989,11 +2926,11 @@ void DocumentLoader::CommitNavigation() {
   ProfilerGroup::InitializeIfEnabled(frame_->DomWindow());
 
 #if defined(__QNX__)
-  { const char m[] = "QNX:DL:12 preStartLoad\n"; ::write(2, m, sizeof(m) - 1); }
+  QNX_TRACE_MSG("QNX:DL:12 preStartLoad\n");
 #endif
   StartLoadingResponse();
 #if defined(__QNX__)
-  { const char m[] = "QNX:DL:13 CommitDone\n"; ::write(2, m, sizeof(m) - 1); }
+  QNX_TRACE_MSG("QNX:DL:13 CommitDone\n");
 #endif
 }
 

@@ -10,13 +10,6 @@
 #include <atomic>
 #include <utility>
 
-#if BUILDFLAG(IS_QNX) && 0 /* disabled - too verbose */
-#include <unistd.h>
-#define QNX_WT(msg) write(2, msg, sizeof(msg) - 1)
-#else
-#define QNX_WT(msg) ((void)0)
-#endif
-
 #include "base/allocator/partition_allocator/src/partition_alloc/partition_alloc_buildflags.h"
 #include "base/allocator/partition_allocator/src/partition_alloc/partition_alloc_config.h"
 #include "base/check_op.h"
@@ -28,6 +21,7 @@
 #include "base/task/task_features.h"
 #include "base/task/thread_pool/environment_config.h"
 #include "base/task/thread_pool/task_tracker.h"
+#include "base/qnx_trace.h"
 #include "base/task/thread_pool/worker_thread_observer.h"
 #include "base/threading/hang_watcher.h"
 #include "base/time/time.h"
@@ -314,12 +308,12 @@ void WorkerThread::UpdateThreadType(ThreadType desired_thread_type) {
 }
 
 void WorkerThread::ThreadMain() {
-  QNX_WT("QNX:W:0 ThreadMain\n");
+  QNX_TRACE_MSG("QNX:W:0 ThreadMain\n");
 #if (BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_NACL)) || BUILDFLAG(IS_FUCHSIA)
   DCHECK(io_thread_task_runner_);
-  QNX_WT("QNX:W:0a FDWatcher\n");
+  QNX_TRACE_MSG("QNX:W:0a FDWatcher\n");
   FileDescriptorWatcher file_descriptor_watcher(io_thread_task_runner_);
-  QNX_WT("QNX:W:0b FDWatcherDone\n");
+  QNX_TRACE_MSG("QNX:W:0b FDWatcherDone\n");
 #endif
 
   if (thread_type_hint_ == ThreadType::kBackground) {
@@ -418,21 +412,21 @@ NOINLINE void WorkerThread::RunBackgroundDedicatedCOMWorker() {
 #endif  // BUILDFLAG(IS_WIN)
 
 void WorkerThread::RunWorker() {
-  QNX_WT("QNX:W:1 RunWorker\n");
+  QNX_TRACE_MSG("QNX:W:1 RunWorker\n");
   DCHECK_EQ(self_, this);
-  QNX_WT("QNX:W:2 TRACE_INSTANT\n");
+  QNX_TRACE_MSG("QNX:W:2 TRACE_INSTANT\n");
   TRACE_EVENT_INSTANT0("base", "WorkerThread born", TRACE_EVENT_SCOPE_THREAD);
-  QNX_WT("QNX:W:3 TRACE_BEGIN\n");
+  QNX_TRACE_MSG("QNX:W:3 TRACE_BEGIN\n");
   TRACE_EVENT_BEGIN0("base", "WorkerThread active");
 
-  QNX_WT("QNX:W:4 observer\n");
+  QNX_TRACE_MSG("QNX:W:4 observer\n");
   if (worker_thread_observer_)
     worker_thread_observer_->OnWorkerThreadMainEntry();
 
-  QNX_WT("QNX:W:5 OnMainEntry\n");
+  QNX_TRACE_MSG("QNX:W:5 OnMainEntry\n");
   delegate_->OnMainEntry(this);
 
-  QNX_WT("QNX:W:6 HangWatch\n");
+  QNX_TRACE_MSG("QNX:W:6 HangWatch\n");
   // Background threads can take an arbitrary amount of time to complete, do not
   // watch them for hangs. Ignore priority boosting for now.
   const bool watch_for_hangs =
@@ -446,19 +440,19 @@ void WorkerThread::RunWorker() {
         base::HangWatcher::ThreadType::kThreadPoolThread);
   }
 
-  QNX_WT("QNX:W:7 WaitWork\n");
+  QNX_TRACE_MSG("QNX:W:7 WaitWork\n");
   // A WorkerThread starts out waiting for work.
   {
     TRACE_EVENT_END0("base", "WorkerThread active");
     // TODO(crbug.com/1021571): Remove this once fixed.
     PERFETTO_INTERNAL_ADD_EMPTY_EVENT();
     delegate_->WaitForWork(&wake_up_event_);
-    QNX_WT("QNX:W:8 GotWork\n");
+    QNX_TRACE_MSG("QNX:W:8 GotWork\n");
     TRACE_EVENT_BEGIN("base", "WorkerThread active",
                       perfetto::TerminatingFlow::FromPointer(this));
   }
   bool got_work_this_wakeup = false;
-  QNX_WT("QNX:W:9 Loop\n");
+  QNX_TRACE_MSG("QNX:W:9 Loop\n");
   while (!ShouldExit()) {
 #if BUILDFLAG(IS_APPLE)
     apple::ScopedNSAutoreleasePool autorelease_pool;
@@ -469,7 +463,7 @@ void WorkerThread::RunWorker() {
 
     UpdateThreadType(GetDesiredThreadType());
 
-    QNX_WT("QNX:W:10 GetWork\n");
+    QNX_TRACE_MSG("QNX:W:10 GetWork\n");
     // Get the task source containing the next task to execute.
     RegisteredTaskSource task_source = delegate_->GetWork(this);
     if (!task_source) {
@@ -500,7 +494,7 @@ void WorkerThread::RunWorker() {
     TaskSource* task_source_before_run = task_source.get();
     base::debug::Alias(&task_source_before_run);
 
-    QNX_WT("QNX:W:11 RunTask\n");
+    QNX_TRACE_MSG("QNX:W:11 RunTask\n");
     task_source = task_tracker_->RunAndPopNextTask(std::move(task_source));
 
     // Alias pointer for investigation of memory corruption. crbug.com/1218384

@@ -14,6 +14,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/strings/string_piece.h"
+#include "base/timer/timer.h"
 #include "build/build_config.h"
 #include "content/public/browser/session_storage_namespace.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -239,6 +240,8 @@ class Shell : public WebContentsDelegate, public WebContentsObserver {
   void RenderFrameCreated(RenderFrameHost* frame_host) override;
   void DidFinishLoad(RenderFrameHost* render_frame_host,
                      const GURL& validated_url) override;
+  void DOMContentLoaded(RenderFrameHost* render_frame_host) override;
+  void DidStartNavigation(NavigationHandle* navigation_handle) override;
 #if BUILDFLAG(IS_MAC)
   void PrimaryPageChanged(Page& page) override;
 #endif
@@ -258,6 +261,13 @@ class Shell : public WebContentsDelegate, public WebContentsObserver {
   bool hold_file_chooser_ = false;
   scoped_refptr<FileSelectListener> held_file_chooser_listener_;
   size_t run_file_chooser_count_ = 0u;
+
+  void DumpDomAndExit(RenderFrameHost* rfh);
+  void OnTimeout();
+
+  base::OneShotTimer dump_timer_;
+  bool dom_already_dumped_ = false;
+  bool timeout_armed_ = false;
 
   // A container of all the open windows. We use a vector so we can keep track
   // of ordering.

@@ -21,6 +21,7 @@
 #include "base/trace_event/typed_macros.h"
 #include "mojo/public/c/system/trap.h"
 #include "third_party/perfetto/protos/perfetto/trace/track_event/chrome_mojo_event_info.pbzero.h"
+#include "base/qnx_trace.h"
 
 namespace mojo {
 
@@ -254,13 +255,9 @@ void SimpleWatcher::OnHandleReady(int watch_id,
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
 #if defined(__QNX__)
-  {
-    char _b[96];
-    int _n = snprintf(_b, sizeof(_b), "QNX:OHR tid=%x wid=%d res=%d tag=%s\n",
+  QNX_TRACE_FMT("QNX:OHR tid=%x wid=%d res=%d tag=%s\n",
                       (unsigned)pthread_self(), watch_id, (int)result,
                       handler_tag_ ? handler_tag_ : "?");
-    write(2, _b, _n);
-  }
 #endif
 
   // This notification may be for a previously watched context, in which case
@@ -291,12 +288,10 @@ void SimpleWatcher::OnHandleReady(int watch_id,
                 });
 
     base::WeakPtr<SimpleWatcher> weak_self = weak_factory_.GetWeakPtr();
-#if defined(__QNX__)
-    write(2, "QNX:OHR:cb\n", 11);
-#endif
+    QNX_TRACE_MSG("QNX:OHR:cb\n");
     callback.Run(result, state);
 #if defined(__QNX__)
-    if (weak_self) write(2, "QNX:OHR:cb done\n", 16);
+    if (weak_self) QNX_TRACE_MSG("QNX:OHR:cb done\n");
 #endif
     if (!weak_self)
       return;

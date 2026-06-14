@@ -90,6 +90,15 @@ config("system") {
     # on QNX stores the thread ID, not a TLS data pointer, so native TLS
     # (__aeabi_read_tp + TPOFF / __tls_get_addr) crashes.
     "-femulated-tls",
+
+    # NOTE: QNX 8.0's BB-patched string.h had C++ inline wrappers for
+    # strchr/memchr/strrchr/strpbrk/strstr that, due to the surrounding
+    # __BEGIN_DECLS (extern "C"), became self-recursive definitions of the
+    # C symbols themselves. Clang 17 folded them to `unreachable`, deleting
+    # caller code after the calls (broke ICU locale init -> renderer
+    # EDEADLK throw; fortify strncpy became a `b.n .` trap). Fixed in the
+    # sysroot header by guarding the wrappers with !_NO_CPP_INLINES (which
+    # we define above). See qnx800/include/string.h.
   ]
 
   cflags_c = []
@@ -149,6 +158,16 @@ config("system") {
     # version instead of QNX's __strlen_isr in ldqnx.so.2.
     "-Wl,--export-dynamic-symbol=strlen",
     "-Wl,--export-dynamic-symbol=__strlen_isr",
+
+    # Force libgcc_s.so.1 to the FRONT of DT_NEEDED. BB10's libscreen.so.1
+    # (2018) bundles its own copy of the ARM EH unwinder (_Unwind_*,
+    # __gnu_unwind_execute). The QNX loader resolves symbols in NEEDED
+    # order, so if libscreen precedes libgcc_s, every C++ throw runs the
+    # 2018 unwinder, which cannot parse modern clang exidx/extab and spins
+    # forever (observed: renderer thread pegged at 100% inside libscreen's
+    # __gnu_unwind_execute during page load). ldflags precede the object
+    # list, so this lands before libscreen in NEEDED.
+    "-lgcc_s",
   ]
 
   libs = [

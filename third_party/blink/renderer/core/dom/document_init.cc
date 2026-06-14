@@ -28,6 +28,7 @@
  */
 
 #include "third_party/blink/renderer/core/dom/document_init.h"
+#include "base/qnx_trace.h"
 
 #if defined(__QNX__)
 #include <unistd.h>
@@ -302,16 +303,16 @@ Document* DocumentInit::CreateDocument() const {
   DCHECK(agent_);
 #endif
 #if defined(__QNX__)
-  { const char m[] = "QNX:CD:1 preSwitch\n"; ::write(2, m, sizeof(m) - 1); }
+  QNX_TRACE_MSG("QNX:CD:1 preSwitch\n");
 #endif
   switch (type_) {
     case Type::kHTML: {
 #if defined(__QNX__)
-      { const char m[] = "QNX:CD:2 preHTML\n"; ::write(2, m, sizeof(m) - 1); }
+      QNX_TRACE_MSG("QNX:CD:2 preHTML\n");
 #endif
       auto* doc = MakeGarbageCollected<HTMLDocument>(*this);
 #if defined(__QNX__)
-      { const char m[] = "QNX:CD:3 postHTML\n"; ::write(2, m, sizeof(m) - 1); }
+      QNX_TRACE_MSG("QNX:CD:3 postHTML\n");
 #endif
       return doc;
     }

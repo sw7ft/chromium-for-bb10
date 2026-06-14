@@ -35,10 +35,12 @@
  */
 
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
+#include "base/qnx_trace.h"
 
 #if defined(__QNX__)
-#include <unistd.h>
 #include "base/command_line.h"
+#include <string.h>
+#include <unistd.h>
 #endif
 
 #include <memory>
@@ -153,6 +155,37 @@ void LogJavaScriptUrlHistogram(LocalDOMWindow* origin_window, String script) {
     origin_window->CountUse(WebFeature::kExecutedEmptyJavaScriptURLFromFrame);
   }
 }
+
+#if defined(__QNX__)
+void QnxDumpDomAndExitIfRequested(LocalFrame* frame, const char* trigger_point) {
+  auto* cmdline = base::CommandLine::ForCurrentProcess();
+  if (!cmdline->HasSwitch("dump-dom"))
+    return;
+
+  const std::string trigger = cmdline->GetSwitchValueASCII("dom-trigger");
+  const bool want_dcl = (trigger == "domcontentloaded");
+  if (want_dcl) {
+    if (strcmp(trigger_point, "dcl") != 0)
+      return;
+  } else if (strcmp(trigger_point, "parsed") != 0) {
+    return;
+  }
+
+  Document* document = frame->GetDocument();
+  if (!document)
+    return;
+
+  Element* doc_el = document->documentElement();
+  if (doc_el) {
+    std::string html = "<html>" + doc_el->innerHTML().Utf8() + "</html>\n";
+    QNX_TRACE_MSG("QNX:FLFP:DumpDom\n");
+    write(1, html.c_str(), html.size());
+  } else {
+    write(1, "\n", 1);
+  }
+  _exit(0);
+}
+#endif
 
 }  // namespace
 
@@ -418,11 +451,11 @@ void FrameLoader::DidExplicitOpen() {
 
 void FrameLoader::FinishedParsing() {
 #if defined(__QNX__)
-  { const char m[] = "QNX:FLFP:1 entry\n"; ::write(2, m, sizeof(m) - 1); }
+  QNX_TRACE_MSG("QNX:FLFP:1 entry\n");
 #endif
   if (state_ == State::kUninitialized) {
 #if defined(__QNX__)
-    { const char m[] = "QNX:FLFP:2 uninit!\n"; ::write(2, m, sizeof(m) - 1); }
+    QNX_TRACE_MSG("QNX:FLFP:2 uninit!\n");
     if (frame_->GetDocument() &&
         base::CommandLine::ForCurrentProcess()->HasSwitch("dump-dom")) {
       auto* cmdline = base::CommandLine::ForCurrentProcess();
@@ -440,8 +473,7 @@ void FrameLoader::FinishedParsing() {
             target_url_str.substr(0, 8) == "https://"));
 
       if (is_network_url) {
-        const char m2[] = "QNX:FLFP:SkipNet\n";
-        ::write(2, m2, sizeof(m2) - 1);
+        QNX_TRACE_MSG("QNX:FLFP:SkipNet\n");
       } else if (target_url_str.size() > 5 &&
           target_url_str.substr(0, 5) == "data:") {
         size_t comma = target_url_str.find(',');
@@ -449,7 +481,7 @@ void FrameLoader::FinishedParsing() {
           std::string body = target_url_str.substr(comma + 1);
           std::string html =
               "<html><head></head><body>" + body + "</body></html>\n";
-          { const char m2[] = "QNX:FLFP:DumpData\n"; ::write(2, m2, sizeof(m2) - 1); }
+          QNX_TRACE_MSG("QNX:FLFP:DumpData\n");
           ::write(1, html.c_str(), html.size());
         }
         _exit(0);
@@ -458,7 +490,7 @@ void FrameLoader::FinishedParsing() {
         if (doc_el) {
           std::string html =
               "<html>" + doc_el->innerHTML().Utf8() + "</html>\n";
-          { const char m2[] = "QNX:FLFP:DumpBlank\n"; ::write(2, m2, sizeof(m2) - 1); }
+          QNX_TRACE_MSG("QNX:FLFP:DumpBlank\n");
           ::write(1, html.c_str(), html.size());
         } else {
           ::write(1, "\n", 1);
@@ -472,12 +504,11 @@ void FrameLoader::FinishedParsing() {
 
   progress_tracker_->FinishedParsing();
 
-#if defined(__QNX__)
-  { const char m[] = "QNX:FLFP:3 preDCL\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:FLFP:3 preDCL\n");
   frame_->GetLocalFrameHostRemote().DidDispatchDOMContentLoadedEvent();
+  QNX_TRACE_MSG("QNX:FLFP:4 postDCL\n");
 #if defined(__QNX__)
-  { const char m[] = "QNX:FLFP:4 postDCL\n"; ::write(2, m, sizeof(m) - 1); }
+  QnxDumpDomAndExitIfRequested(frame_, "dcl");
 #endif
 
   if (Client()) {
@@ -485,28 +516,23 @@ void FrameLoader::FinishedParsing() {
     Client()->DispatchDidDispatchDOMContentLoadedEvent();
   }
 
-#if defined(__QNX__)
-  { const char m[] = "QNX:FLFP:5 preScripts\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:FLFP:5 preScripts\n");
   if (Client()) {
     Client()->RunScriptsAtDocumentReady(
         document_loader_ ? document_loader_->IsCommittedButEmpty() : true);
   }
 
-#if defined(__QNX__)
-  { const char m[] = "QNX:FLFP:6 preFragment\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:FLFP:6 preFragment\n");
   if (frame_->View()) {
     ProcessFragment(frame_->GetDocument()->Url(), document_loader_->LoadType(),
                     kNavigationToDifferentDocument);
   }
 
-#if defined(__QNX__)
-  { const char m[] = "QNX:FLFP:7 preCheck\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:FLFP:7 preCheck\n");
   frame_->GetDocument()->CheckCompleted();
+  QNX_TRACE_MSG("QNX:FLFP:8 done\n");
 #if defined(__QNX__)
-  { const char m[] = "QNX:FLFP:8 done\n"; ::write(2, m, sizeof(m) - 1); }
+  QnxDumpDomAndExitIfRequested(frame_, "parsed");
 #endif
 }
 
@@ -514,40 +540,28 @@ void FrameLoader::FinishedParsing() {
 // does not do anything when navigation is in progress, or when loading
 // has finished already. We should call it at the right times.
 void FrameLoader::DidFinishNavigation(NavigationFinishState state) {
-#if defined(__QNX__)
-  { const char m[] = "QNX:DFN:1 entry\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:DFN:1 entry\n");
   if (document_loader_) {
     if (!document_loader_->SentDidFinishLoad() || HasProvisionalNavigation()) {
-#if defined(__QNX__)
-      {
-        char buf[80];
-        int n = snprintf(buf, sizeof(buf), "QNX:DFN:2 bail sent=%d prov=%d\n",
-            (int)document_loader_->SentDidFinishLoad(),
-            (int)HasProvisionalNavigation());
-        ::write(2, buf, n);
-      }
-#endif
+      QNX_TRACE_FMT("QNX:DFN:2 bail sent=%d prov=%d\n",
+                    (int)document_loader_->SentDidFinishLoad(),
+                    (int)HasProvisionalNavigation());
       return;
     }
     if (frame_->DomWindow()->navigation()->HasNonDroppedOngoingNavigation()) {
-#if defined(__QNX__)
-      { const char m[] = "QNX:DFN:3 ongoing\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+      QNX_TRACE_MSG("QNX:DFN:3 ongoing\n");
       return;
     }
   }
 
-#if defined(__QNX__)
-  { const char m[] = "QNX:DFN:4 preLoad\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:DFN:4 preLoad\n");
   if (frame_->IsLoading() && !frame_->IsProvisional()) {
     progress_tracker_->ProgressCompleted();
     RestoreScrollPositionAndViewState();
     if (document_loader_)
       document_loader_->SetLoadType(WebFrameLoadType::kStandard);
 #if defined(__QNX__)
-    { const char m[] = "QNX:DFN:5 FinishedLoading\n"; ::write(2, m, sizeof(m) - 1); }
+    QNX_TRACE_MSG("QNX:DFN:5 FinishedLoading\n");
 #endif
     frame_->FinishedLoading(state);
   }
@@ -1078,7 +1092,7 @@ void FrameLoader::CommitNavigation(
     std::unique_ptr<WebDocumentLoader::ExtraData> extra_data,
     CommitReason commit_reason) {
 #if defined(__QNX__)
-  { const char m[] = "QNX:FL:CommitNav\n"; ::write(2, m, sizeof(m) - 1); }
+  QNX_TRACE_MSG("QNX:FL:CommitNav\n");
 #endif
   DCHECK(document_loader_);
   DCHECK(frame_->GetDocument());

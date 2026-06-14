@@ -28,6 +28,7 @@
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "base/values.h"
+#include "base/qnx_trace.h"
 #include "build/build_config.h"
 #include "net/base/auth.h"
 #include "net/base/features.h"
@@ -1185,15 +1186,9 @@ int HttpNetworkTransaction::DoReadHeaders() {
 }
 
 int HttpNetworkTransaction::DoReadHeadersComplete(int result) {
-#if defined(__QNX__) || defined(__QNXNTO__)
-  {
-    char msg[128];
-    int n = ::snprintf(msg, sizeof(msg), "QNX:DRHC rv=%d code=%d\n",
-                       result,
-                       response_.headers ? response_.headers->response_code() : -1);
-    ::write(2, msg, n);
-  }
-#endif
+  QNX_TRACE_FMT("QNX:DRHC rv=%d code=%d\n",
+                result,
+                response_.headers ? response_.headers->response_code() : -1);
   // We can get a ERR_SSL_CLIENT_AUTH_CERT_NEEDED here due to SSL renegotiation.
   // Server certificate errors are impossible. Rather than reverify the new
   // server certificate, BoringSSL forbids server certificates from changing.

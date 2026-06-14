@@ -5,6 +5,7 @@
 #include "services/network/public/cpp/not_implemented_url_loader_factory.h"
 
 #include "base/logging.h"
+#include "build/build_config.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "services/network/public/mojom/url_loader.mojom.h"
 
@@ -23,9 +24,11 @@ void NotImplementedURLLoaderFactory::CreateLoaderAndStart(
     const network::ResourceRequest& url_request,
     mojo::PendingRemote<network::mojom::URLLoaderClient> client,
     const net::MutableNetworkTrafficAnnotationTag& traffic_annotation) {
-  NOTREACHED();
   network::URLLoaderCompletionStatus status;
   status.error_code = net::ERR_NOT_IMPLEMENTED;
+#if !BUILDFLAG(IS_QNX)
+  NOTREACHED();
+#endif
   mojo::Remote<network::mojom::URLLoaderClient>(std::move(client))
       ->OnComplete(status);
 }

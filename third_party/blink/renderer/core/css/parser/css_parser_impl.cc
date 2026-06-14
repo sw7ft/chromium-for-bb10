@@ -51,6 +51,7 @@
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_position.h"
+#include "base/qnx_trace.h"
 
 using std::swap;
 
@@ -361,39 +362,27 @@ ParseSheetResult CSSParserImpl::ParseStyleSheet(
     }
   }
 #if defined(__QNX__)
-  { char _b[48]; int _n = snprintf(_b, sizeof(_b), "QNX:PSS:0 entry tid=%x\n", (unsigned)pthread_self()); write(2, _b, _n); }
+  QNX_TRACE_FMT("QNX:PSS:0 entry tid=%x\n", (unsigned)pthread_self());
 #endif
   TRACE_EVENT_BEGIN2("blink,blink_style", "CSSParserImpl::parseStyleSheet",
                      "baseUrl", context->BaseURL().GetString().Utf8(), "mode",
                      context->Mode());
-#if defined(__QNX__)
-  write(2, "QNX:PSS:1 trace\n", 16);
-#endif
+  QNX_TRACE_MSG("QNX:PSS:1 trace\n");
 
   TRACE_EVENT_BEGIN0("blink,blink_style",
                      "CSSParserImpl::parseStyleSheet.parse");
-#if defined(__QNX__)
-  write(2, "QNX:PSS:2 trace2\n", 17);
-#endif
+  QNX_TRACE_MSG("QNX:PSS:2 trace2\n");
   CSSTokenizer tokenizer(string);
-#if defined(__QNX__)
-  write(2, "QNX:PSS:3 tok\n", 14);
-#endif
+  QNX_TRACE_MSG("QNX:PSS:3 tok\n");
   CSSParserTokenStream stream(tokenizer);
-#if defined(__QNX__)
-  write(2, "QNX:PSS:4 stream\n", 17);
-#endif
+  QNX_TRACE_MSG("QNX:PSS:4 stream\n");
   CSSParserImpl parser(context, style_sheet);
-#if defined(__QNX__)
-  write(2, "QNX:PSS:5 parser\n", 17);
-#endif
+  QNX_TRACE_MSG("QNX:PSS:5 parser\n");
   if (defer_property_parsing == CSSDeferPropertyParsing::kYes) {
     parser.lazy_state_ = MakeGarbageCollected<CSSLazyParsingState>(
         context, string, parser.style_sheet_);
   }
-#if defined(__QNX__)
-  write(2, "QNX:PSS:6 preRules\n", 19);
-#endif
+  QNX_TRACE_MSG("QNX:PSS:6 preRules\n");
   ParseSheetResult result = ParseSheetResult::kSucceeded;
   bool first_rule_valid = parser.ConsumeRuleList(
       stream, kTopLevelRuleList, CSSNestingType::kNone,
@@ -632,7 +621,7 @@ bool CSSParserImpl::ConsumeRuleList(CSSParserTokenStream& stream,
   bool seen_rule = false;
   bool first_rule_valid = false;
 #if defined(__QNX__)
-  { char _b[40]; int _n = snprintf(_b, sizeof(_b), "QNX:CRL:0 atEnd=%d\n", stream.AtEnd()); write(2, _b, _n); }
+  QNX_TRACE_FMT("QNX:CRL:0 atEnd=%d\n", stream.AtEnd());
 #endif
   while (!stream.AtEnd()) {
 #if defined(__QNX__)
@@ -647,14 +636,10 @@ bool CSSParserImpl::ConsumeRuleList(CSSParserTokenStream& stream,
         stream.UncheckedConsume();
         continue;
       case kAtKeywordToken:
-#if defined(__QNX__)
-        { char _b[48]; int _n = snprintf(_b, sizeof(_b), "QNX:CRL:at i=%d\n", crl_iter); write(2, _b, _n); }
-#endif
+        QNX_TRACE_FMT("QNX:CRL:at i=%d\n", crl_iter);
         rule = ConsumeAtRule(stream, allowed_rules, nesting_type,
                              parent_rule_for_nesting);
-#if defined(__QNX__)
-        write(2, "QNX:CRL:at done\n", 16);
-#endif
+        QNX_TRACE_MSG("QNX:CRL:at done\n");
         break;
       case kCDOToken:
       case kCDCToken:
@@ -665,13 +650,11 @@ bool CSSParserImpl::ConsumeRuleList(CSSParserTokenStream& stream,
         [[fallthrough]];
       default:
 #if defined(__QNX__)
-        { char _b[48]; int _n = snprintf(_b, sizeof(_b), "QNX:CRL:qr i=%d t=%d\n", crl_iter, (int)tokType); write(2, _b, _n); }
+        QNX_TRACE_FMT("QNX:CRL:qr i=%d t=%d\n", crl_iter, (int)tokType);
 #endif
         rule = ConsumeQualifiedRule(stream, allowed_rules, nesting_type,
                                     parent_rule_for_nesting);
-#if defined(__QNX__)
-        write(2, "QNX:CRL:qr done\n", 16);
-#endif
+        QNX_TRACE_MSG("QNX:CRL:qr done\n");
         break;
     }
     if (!seen_rule) {
@@ -738,18 +721,14 @@ StyleRuleBase* CSSParserImpl::ConsumeAtRule(
     CSSNestingType nesting_type,
     StyleRule* parent_rule_for_nesting) {
   DCHECK_EQ(stream.Peek().GetType(), kAtKeywordToken);
-#if defined(__QNX__)
-  write(2, "QNX:CAR:0\n", 10);
-#endif
+  QNX_TRACE_MSG("QNX:CAR:0\n");
   CSSParserToken name_token =
       stream.ConsumeIncludingWhitespace();  // Must live until CssAtRuleID().
-#if defined(__QNX__)
-  write(2, "QNX:CAR:1\n", 10);
-#endif
+  QNX_TRACE_MSG("QNX:CAR:1\n");
   const StringView name = name_token.Value();
   const CSSAtRuleID id = CssAtRuleID(name);
 #if defined(__QNX__)
-  { char _b[64]; int _n = snprintf(_b, sizeof(_b), "QNX:CAR:2 id=%d\n", (int)id); write(2, _b, _n); }
+  QNX_TRACE_FMT("QNX:CAR:2 id=%d\n", (int)id);
 #endif
   return ConsumeAtRuleContents(id, stream, allowed_rules, nesting_type,
                                parent_rule_for_nesting);
@@ -783,16 +762,12 @@ StyleRuleBase* CSSParserImpl::ConsumeAtRuleContents(
     import_prelude_uri = ConsumeStringOrURI(stream);
   }
 
-#if defined(__QNX__)
-  write(2, "QNX:CARC:0\n", 11);
-#endif
+  QNX_TRACE_MSG("QNX:CARC:0\n");
   if (id != CSSAtRuleID::kCSSAtRuleInvalid &&
       context_->IsUseCounterRecordingEnabled()) {
     CountAtRule(context_, id);
   }
-#if defined(__QNX__)
-  write(2, "QNX:CARC:1\n", 11);
-#endif
+  QNX_TRACE_MSG("QNX:CARC:1\n");
 
   if (allowed_rules == kKeyframeRules || allowed_rules == kNoRules) {
     // Parse error, no at-rules supported inside @keyframes,
@@ -802,9 +777,7 @@ StyleRuleBase* CSSParserImpl::ConsumeAtRuleContents(
   }
 
   stream.EnsureLookAhead();
-#if defined(__QNX__)
-  write(2, "QNX:CARC:2 LA\n", 14);
-#endif
+  QNX_TRACE_MSG("QNX:CARC:2 LA\n");
   if (allowed_rules == kAllowCharsetRules &&
       id == CSSAtRuleID::kCSSAtRuleCharset) {
     return ConsumeCharsetRule(stream);
@@ -813,9 +786,7 @@ StyleRuleBase* CSSParserImpl::ConsumeAtRuleContents(
     return ConsumeImportRule(std::move(import_prelude_uri), stream);
   } else if (allowed_rules <= kAllowNamespaceRules &&
              id == CSSAtRuleID::kCSSAtRuleNamespace) {
-#if defined(__QNX__)
-    write(2, "QNX:CARC:3 NS\n", 14);
-#endif
+    QNX_TRACE_MSG("QNX:CARC:3 NS\n");
     return ConsumeNamespaceRule(stream);
   } else if (allowed_rules == kTryRules) {
     if (id == CSSAtRuleID::kCSSAtRuleTry) {

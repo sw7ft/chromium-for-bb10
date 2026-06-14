@@ -58,6 +58,7 @@
 #include "base/trace_event/trace_event.h"
 #include "base/types/optional_util.h"
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 #include "cc/base/switches.h"
 #include "content/browser/bad_message.h"
 #include "content/browser/blob_storage/chrome_blob_storage_context.h"
@@ -3653,18 +3654,14 @@ base::WeakPtr<NavigationHandle> NavigationControllerImpl::NavigateWithoutEntry(
   // will be updated when the BeforeUnload ack is received.
   const auto navigation_start_time = base::TimeTicks::Now();
 
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:Nav:1 CreateReq\n", 20);
-#endif
+  QNX_TRACE_MSG("QNX:Nav:1 CreateReq\n");
   std::unique_ptr<NavigationRequest> request =
       CreateNavigationRequestFromLoadParams(
           node, params, override_user_agent, should_replace_current_entry,
           params.has_user_gesture, network::mojom::SourceLocation::New(),
           reload_type, pending_entry_, pending_entry_->GetFrameEntry(node),
           navigation_start_time);
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:Nav:2 ReqCreated\n", 21);
-#endif
+  QNX_TRACE_MSG("QNX:Nav:2 ReqCreated\n");
 
   // If the navigation couldn't start, return immediately and discard the
   // pending NavigationEntry.
@@ -3687,15 +3684,11 @@ base::WeakPtr<NavigationHandle> NavigationControllerImpl::NavigateWithoutEntry(
   // function.
   std::unique_ptr<PendingEntryRef> pending_entry_ref = ReferencePendingEntry();
 
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:Nav:3 Navigate\n", 19);
-#endif
+  QNX_TRACE_MSG("QNX:Nav:3 Navigate\n");
   base::WeakPtr<NavigationHandle> created_navigation_handle(
       request->GetWeakPtr());
   node->navigator().Navigate(std::move(request), reload_type);
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:Nav:4 NavDone\n", 18);
-#endif
+  QNX_TRACE_MSG("QNX:Nav:4 NavDone\n");
 
   in_navigate_to_pending_entry_ = false;
   return created_navigation_handle;
@@ -3851,9 +3844,7 @@ NavigationControllerImpl::CreateNavigationRequestFromLoadParams(
 
   // For main frames, rewrite the URL if necessary and compute the virtual URL
   // that should be shown in the address bar.
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:CNRFLP:1 entry\n", 19);
-#endif
+  QNX_TRACE_MSG("QNX:CNRFLP:1 entry\n");
   if (node->IsOutermostMainFrame()) {
     bool ignored_reverse_on_redirect = false;
     RewriteUrlForNavigation(params.url, browser_context_, &url_to_load,
@@ -3923,9 +3914,7 @@ NavigationControllerImpl::CreateNavigationRequestFromLoadParams(
   if (is_view_source_mode)
     download_policy.SetDisallowed(blink::NavigationDownloadType::kViewSource);
 
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:CNRFLP:2 common\n", 20);
-#endif
+  QNX_TRACE_MSG("QNX:CNRFLP:2 common\n");
   blink::mojom::CommonNavigationParamsPtr common_params =
       blink::mojom::CommonNavigationParams::New(
           url_to_load, params.initiator_origin, params.initiator_base_url,
@@ -4004,13 +3993,9 @@ NavigationControllerImpl::CreateNavigationRequestFromLoadParams(
   }
 #endif
 
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:CNRFLP:3 commit\n", 20);
-#endif
+  QNX_TRACE_MSG("QNX:CNRFLP:3 commit\n");
   commit_params->was_activated = params.was_activated;
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:CNRFLP:4 entropy\n", 21);
-#endif
+  QNX_TRACE_MSG("QNX:CNRFLP:4 entropy\n");
   commit_params->navigation_timing->system_entropy_at_navigation_start =
       SystemEntropyUtils::ComputeSystemEntropyForFrameTreeNode(
           node, params.suggested_system_entropy);
@@ -4019,9 +4004,7 @@ NavigationControllerImpl::CreateNavigationRequestFromLoadParams(
   std::string extra_headers_crlf;
   base::ReplaceChars(params.extra_headers, "\n", "\r\n", &extra_headers_crlf);
 
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:CNRFLP:5 NavReq\n", 20);
-#endif
+  QNX_TRACE_MSG("QNX:CNRFLP:5 NavReq\n");
   auto navigation_request = NavigationRequest::Create(
       node, std::move(common_params), std::move(commit_params),
       !params.is_renderer_initiated, params.was_opener_suppressed,
@@ -4031,9 +4014,7 @@ NavigationControllerImpl::CreateNavigationRequestFromLoadParams(
       params.impression, params.initiator_activation_and_ad_status,
       params.is_pdf, is_embedder_initiated_fenced_frame_navigation,
       is_container_initiated, embedder_shared_storage_context);
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:CNRFLP:6 done\n", 18);
-#endif
+  QNX_TRACE_MSG("QNX:CNRFLP:6 done\n");
   navigation_request->set_from_download_cross_origin_redirect(
       params.from_download_cross_origin_redirect);
   navigation_request->set_force_new_browsing_instance(

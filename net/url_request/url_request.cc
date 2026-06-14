@@ -5,11 +5,8 @@
 #include "net/url_request/url_request.h"
 
 #include <utility>
-#if defined(__QNX__) || defined(__QNXNTO__)
-#include <unistd.h>
-#include <cstdio>
-#endif
 
+#include "base/qnx_trace.h"
 #include "base/compiler_specific.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
@@ -538,14 +535,7 @@ void URLRequest::set_allow_credentials(bool allow_credentials) {
 }
 
 void URLRequest::Start() {
-#if defined(__QNX__)
-  {
-    std::string u = url().spec();
-    char m[256];
-    int n = snprintf(m, sizeof(m), "QNX:UR:Start url=%s\n", u.c_str());
-    ::write(2, m, n);
-  }
-#endif
+  QNX_TRACE_FMT("QNX:UR:Start url=%s\n", url().spec().c_str());
   DCHECK(delegate_);
 
   if (status_ != OK)
@@ -645,12 +635,8 @@ void URLRequest::BeforeRequestComplete(int error) {
 
 void URLRequest::StartJob(std::unique_ptr<URLRequestJob> job) {
 #if defined(__QNX__)
-  {
-    char m[256];
-    int n = snprintf(m, sizeof(m), "QNX:UR:StartJob url=%s\n",
+  QNX_TRACE_FMT("QNX:UR:StartJob url=%s\n",
                      url().spec().c_str());
-    ::write(2, m, n);
-  }
 #endif
   DCHECK(!is_pending_);
   DCHECK(!job_);

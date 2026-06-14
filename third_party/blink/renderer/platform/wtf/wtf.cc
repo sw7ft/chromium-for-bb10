@@ -35,6 +35,7 @@
 #endif
 #include "base/third_party/double_conversion/double-conversion/double-conversion.h"
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 #include "third_party/abseil-cpp/absl/base/attributes.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partitions.h"
 #include "third_party/blink/renderer/platform/wtf/date_math.h"
@@ -75,42 +76,28 @@ ABSL_CONST_INIT thread_local bool g_is_main_thread = false;
 #endif
 
 void Initialize() {
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:WTF:1 entry\n", 16);
-#endif
+  QNX_TRACE_MSG("QNX:WTF:1 entry\n");
   CHECK(!g_initialized);
   g_initialized = true;
 #if !BUILDFLAG(IS_ANDROID)
   g_is_main_thread = true;
 #endif
   g_main_thread_identifier = CurrentThread();
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:WTF:2 thread\n", 17);
-#endif
+  QNX_TRACE_MSG("QNX:WTF:2 thread\n");
 
   Threading::Initialize();
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:WTF:3 dconv\n", 16);
-#endif
+  QNX_TRACE_MSG("QNX:WTF:3 dconv\n");
 
   double_conversion::DoubleToStringConverter::EcmaScriptConverter();
   internal::GetDoubleConverter();
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:WTF:4 stack\n", 16);
-#endif
+  QNX_TRACE_MSG("QNX:WTF:4 stack\n");
 
   internal::InitializeMainThreadStackEstimate();
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:WTF:5 atom\n", 15);
-#endif
+  QNX_TRACE_MSG("QNX:WTF:5 atom\n");
   AtomicString::Init();
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:WTF:5b str\n", 15);
-#endif
+  QNX_TRACE_MSG("QNX:WTF:5b str\n");
   StringStatics::Init();
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:WTF:6 done\n", 15);
-#endif
+  QNX_TRACE_MSG("QNX:WTF:6 done\n");
 }
 
 }  // namespace WTF

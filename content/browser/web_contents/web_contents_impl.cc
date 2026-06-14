@@ -49,6 +49,7 @@
 #include "base/trace_event/optional_trace_event.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 #include "build/chromeos_buildflags.h"
 #include "components/attribution_reporting/features.h"
 #include "components/download/public/common/download_stats.h"
@@ -6211,9 +6212,7 @@ void WebContentsImpl::ReadyToCommitNavigation(
   TRACE_EVENT1("navigation", "WebContentsImpl::ReadyToCommitNavigation",
                "navigation_handle", navigation_handle);
 
-#if BUILDFLAG(IS_QNX)
-  { const char m[] = "QNX:WC:ReadyToCommit:enter\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:WC:ReadyToCommit:enter\n");
 
   // Cross-document navigation of the top-level frame resets the capture
   // handle config. Using IsInPrimaryMainFrame is valid here since the browser
@@ -6226,9 +6225,7 @@ void WebContentsImpl::ReadyToCommitNavigation(
   observers_.NotifyObservers(&WebContentsObserver::ReadyToCommitNavigation,
                              navigation_handle);
 
-#if BUILDFLAG(IS_QNX)
-  { const char m[] = "QNX:WC:ReadyToCommit:postObservers\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:WC:ReadyToCommit:postObservers\n");
 
   // If any domains are blocked from accessing 3D APIs because they may
   // have caused the GPU to reset recently, unblock them here if the user
@@ -8913,22 +8910,14 @@ void WebContentsImpl::CreateRenderWidgetHostViewForRenderManager(
     WebContentsViewChildFrame::CreateRenderWidgetHostViewForInnerFrameTree(
         this, render_view_host->GetWidget());
   } else {
-#if BUILDFLAG(IS_QNX)
-    write(2, "QNX:CRWM:1 preCreateView\n", 25);
-#endif
+    QNX_TRACE_MSG("QNX:CRWM:1 preCreateView\n");
     RenderWidgetHostViewBase* rwh_view =
         view_->CreateViewForWidget(render_view_host->GetWidget());
-#if BUILDFLAG(IS_QNX)
-    write(2, "QNX:CRWM:2 postCreateView\n", 26);
-#endif
+    QNX_TRACE_MSG("QNX:CRWM:2 postCreateView\n");
     view_->SetOverscrollControllerEnabled(CanOverscrollContent());
-#if BUILDFLAG(IS_QNX)
-    write(2, "QNX:CRWM:3 preSetSize\n", 22);
-#endif
+    QNX_TRACE_MSG("QNX:CRWM:3 preSetSize\n");
     rwh_view->SetSize(GetSizeForMainFrame());
-#if BUILDFLAG(IS_QNX)
-    write(2, "QNX:CRWM:4 postSetSize\n", 23);
-#endif
+    QNX_TRACE_MSG("QNX:CRWM:4 postSetSize\n");
   }
 }
 
@@ -8952,16 +8941,12 @@ bool WebContentsImpl::CreateRenderViewForRenderManager(
   // stack unwinds. See crbug.com/1181043.
   base::AutoReset<bool> scope(&prevent_destruction_, true);
 
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:CRV:1 preCreateWidget\n", 26);
-#endif
+  QNX_TRACE_MSG("QNX:CRV:1 preCreateWidget\n");
   if (!proxy_host) {
     CreateRenderWidgetHostViewForRenderManager(render_view_host);
   }
 
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:CRV:2 preCreateRV\n", 21);
-#endif
+  QNX_TRACE_MSG("QNX:CRV:2 preCreateRV\n");
   const auto proxy_routing_id =
       proxy_host ? proxy_host->GetRoutingID() : MSG_ROUTING_NONE;
   // TODO(https://crbug.com/1171646): Given MPArch, should we pass
@@ -8971,9 +8956,7 @@ bool WebContentsImpl::CreateRenderViewForRenderManager(
     return false;
   }
 
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:CRV:3 postCreateRV\n", 23);
-#endif
+  QNX_TRACE_MSG("QNX:CRV:3 postCreateRV\n");
   // Set the TextAutosizer state from the main frame's renderer on the new view,
   // but only if it's not for the main frame. Main frame renderers should create
   // this state themselves from up-to-date values, so we shouldn't override it
@@ -9005,9 +8988,7 @@ bool WebContentsImpl::CreateRenderViewForRenderManager(
 #if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_ANDROID)
   // Force a ViewMsg_Resize to be sent, needed to make plugins show up on
   // linux. See crbug.com/83941.
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:CRV:4 preSyncVisual\n", 24);
-#endif
+  QNX_TRACE_MSG("QNX:CRV:4 preSyncVisual\n");
   RenderWidgetHostView* rwh_view = render_view_host->GetWidget()->GetView();
   if (rwh_view) {
     if (RenderWidgetHost* render_widget_host =
@@ -9015,9 +8996,7 @@ bool WebContentsImpl::CreateRenderViewForRenderManager(
       render_widget_host->SynchronizeVisualProperties();
     }
   }
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:CRV:5 postSyncVisual\n", 25);
-#endif
+  QNX_TRACE_MSG("QNX:CRV:5 postSyncVisual\n");
 #endif
 
   return true;

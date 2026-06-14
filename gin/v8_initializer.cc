@@ -37,6 +37,7 @@
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 #include "gin/array_buffer.h"
 #include "gin/gin_features.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
@@ -476,26 +477,22 @@ void V8Initializer::Initialize(IsolateHolder::ScriptMode mode,
   // See https://crbug.com/v8/11043
   SetFlags(mode, js_command_line_flags);
 
-#if BUILDFLAG(IS_QNX)
-  { const char m[] = "QNX:V8I:1 Platform\n"; write(2, m, sizeof(m)-1); }
-#endif
+  QNX_TRACE_MSG("QNX:V8I:1 Platform\n");
   v8::V8::InitializePlatform(V8Platform::Get());
 
-#if BUILDFLAG(IS_QNX)
-  { const char m[] = "QNX:V8I:2 PlatDone\n"; write(2, m, sizeof(m)-1); }
-#endif
+  QNX_TRACE_MSG("QNX:V8I:2 PlatDone\n");
   v8::V8::SetFatalMemoryErrorCallback(oom_error_callback);
   v8::V8::SetEntropySource(&GenerateEntropy);
 
 #if defined(V8_USE_EXTERNAL_STARTUP_DATA)
 #if BUILDFLAG(IS_QNX)
-  { const char m[] = "QNX:V8I:3 Snapshot\n"; write(2, m, sizeof(m)-1); }
+  QNX_TRACE_MSG("QNX:V8I:3 Snapshot\n");
   if (g_qnx_snapshot_buf) {
     v8::StartupData snapshot;
     snapshot.data = reinterpret_cast<const char*>(g_qnx_snapshot_buf);
     snapshot.raw_size = static_cast<int>(g_qnx_snapshot_size);
     v8::V8::SetSnapshotDataBlob(&snapshot);
-    { const char m[] = "QNX:V8I:3a SnapSet\n"; write(2, m, sizeof(m)-1); }
+    QNX_TRACE_MSG("QNX:V8I:3a SnapSet\n");
   } else
 #endif
   if (g_mapped_snapshot) {
@@ -505,14 +502,10 @@ void V8Initializer::Initialize(IsolateHolder::ScriptMode mode,
   }
 #endif  // V8_USE_EXTERNAL_STARTUP_DATA
 
-#if BUILDFLAG(IS_QNX)
-  { const char m[] = "QNX:V8I:4 V8Init\n"; write(2, m, sizeof(m)-1); }
-#endif
+  QNX_TRACE_MSG("QNX:V8I:4 V8Init\n");
   v8::V8::Initialize();
 
-#if BUILDFLAG(IS_QNX)
-  { const char m[] = "QNX:V8I:5 V8Done\n"; write(2, m, sizeof(m)-1); }
-#endif
+  QNX_TRACE_MSG("QNX:V8I:5 V8Done\n");
   v8_is_initialized = true;
 
 #if defined(V8_ENABLE_SANDBOX)

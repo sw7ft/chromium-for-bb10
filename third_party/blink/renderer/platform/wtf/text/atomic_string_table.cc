@@ -11,6 +11,7 @@
 #include "third_party/blink/renderer/platform/wtf/text/character_visitor.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
 #include "third_party/blink/renderer/platform/wtf/text/utf8.h"
+#include "base/qnx_trace.h"
 
 namespace WTF {
 
@@ -260,29 +261,29 @@ struct LowercaseLookupTranslator {
 
 AtomicStringTable& AtomicStringTable::Instance() {
 #if BUILDFLAG(IS_QNX) && 0 /* disabled - too verbose */
-  write(2, "QNX:AST:1 inst\n", 15);
+  QNX_TRACE_MSG("QNX:AST:1 inst\n");
 #endif
   DEFINE_THREAD_SAFE_STATIC_LOCAL(AtomicStringTable, table, ());
 #if BUILDFLAG(IS_QNX) && 0 /* disabled */
-  write(2, "QNX:AST:2 got\n", 14);
+  QNX_TRACE_MSG("QNX:AST:2 got\n");
 #endif
   return table;
 }
 
 AtomicStringTable::AtomicStringTable() {
 #if BUILDFLAG(IS_QNX) && 0
-  write(2, "QNX:AST:3 ctor\n", 15);
+  QNX_TRACE_MSG("QNX:AST:3 ctor\n");
 #endif
   base::AutoLock auto_lock(lock_);
 #if BUILDFLAG(IS_QNX) && 0
-  write(2, "QNX:AST:4 locked\n", 17);
+  QNX_TRACE_MSG("QNX:AST:4 locked\n");
 #endif
   for (StringImpl* string : StringImpl::AllStaticStrings().Values()) {
     DCHECK(string->length());
     AddNoLock(string);
   }
 #if BUILDFLAG(IS_QNX) && 0
-  write(2, "QNX:AST:5 done\n", 15);
+  QNX_TRACE_MSG("QNX:AST:5 done\n");
 #endif
 }
 
@@ -294,16 +295,16 @@ void AtomicStringTable::ReserveCapacity(unsigned size) {
 template <typename T, typename HashTranslator>
 scoped_refptr<StringImpl> AtomicStringTable::AddToStringTable(const T& value) {
 #if BUILDFLAG(IS_QNX) && 0
-  write(2, "QNX:ATST:1 lock\n", 16);
+  QNX_TRACE_MSG("QNX:ATST:1 lock\n");
 #endif
   base::AutoLock auto_lock(lock_);
 #if BUILDFLAG(IS_QNX) && 0
-  write(2, "QNX:ATST:2 add\n", 15);
+  QNX_TRACE_MSG("QNX:ATST:2 add\n");
 #endif
   HashSet<StringImpl*>::AddResult add_result =
       table_.AddWithTranslator<HashTranslator>(value);
 #if BUILDFLAG(IS_QNX) && 0
-  write(2, "QNX:ATST:3 done\n", 16);
+  QNX_TRACE_MSG("QNX:ATST:3 done\n");
 #endif
 
   return add_result.is_new_entry
@@ -368,15 +369,15 @@ scoped_refptr<StringImpl> AtomicStringTable::Add(const LChar* s,
     return StringImpl::empty_;
 
 #if BUILDFLAG(IS_QNX) && 0
-  write(2, "QNX:ADD:1 buf\n", 14);
+  QNX_TRACE_MSG("QNX:ADD:1 buf\n");
 #endif
   LCharBuffer buffer(s, length);
 #if BUILDFLAG(IS_QNX) && 0
-  write(2, "QNX:ADD:2 table\n", 16);
+  QNX_TRACE_MSG("QNX:ADD:2 table\n");
 #endif
   auto result = AddToStringTable<LCharBuffer, LCharBufferTranslator>(buffer);
 #if BUILDFLAG(IS_QNX) && 0
-  write(2, "QNX:ADD:3 done\n", 15);
+  QNX_TRACE_MSG("QNX:ADD:3 done\n");
 #endif
   return result;
 }

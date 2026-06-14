@@ -29,6 +29,7 @@
 #include "base/trace_event/trace_config.h"
 #include "base/trace_event/trace_log.h"
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 #include "build/chromeos_buildflags.h"
 #include "components/tracing/common/trace_to_console.h"
 #include "components/tracing/common/tracing_switches.h"
@@ -248,15 +249,11 @@ RunContentProcess(ContentMainParams params,
     SetProcessTitleFromCommandLine(argv);
 #endif  // !BUILDFLAG(IS_ANDROID)
 
-#if BUILDFLAG(IS_QNX)
-    write(2, "QNX: CommandLine init done\n", 26);
-#endif
+    QNX_TRACE_MSG("QNX: CommandLine init done\n");
 
     InitTimeTicksAtUnixEpoch();
 
-#if BUILDFLAG(IS_QNX)
-    write(2, "QNX: TimeTicksAtUnixEpoch done\n", 31);
-#endif
+    QNX_TRACE_MSG("QNX: TimeTicksAtUnixEpoch done\n");
 
 // On Android setlocale() is not supported, and we don't override the signal
 // handlers so we can get a stack trace when crashing.
@@ -309,13 +306,9 @@ RunContentProcess(ContentMainParams params,
     base::subtle::EnableFDOwnershipEnforcement(true);
 #endif
 
-#if BUILDFLAG(IS_QNX)
-    write(2, "QNX: pre-RegisterPathProvider\n", 30);
-#endif
+    QNX_TRACE_MSG("QNX: pre-RegisterPathProvider\n");
     ui::RegisterPathProvider();
-#if BUILDFLAG(IS_QNX)
-    write(2, "QNX: pre-Initialize\n", 20);
-#endif
+    QNX_TRACE_MSG("QNX: pre-Initialize\n");
     exit_code = content_main_runner->Initialize(std::move(params));
 
     if (exit_code >= 0) {

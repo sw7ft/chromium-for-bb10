@@ -23,6 +23,7 @@
 #include "base/strings/strcat.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 #include "components/download/public/common/download_stats.h"
 #include "content/browser/about_url_loader_factory.h"
 #include "content/browser/attribution_reporting/attribution_manager.h"
@@ -473,10 +474,7 @@ void NavigationURLLoaderImpl::StartImpl(
   head_ = network::mojom::URLResponseHead::New();
   started_ = true;
 #if defined(__QNX__)
-  {
-    const char m[] = "QNX:NULI:StartImpl\n";
-    ::write(2, m, sizeof(m) - 1);
-  }
+  QNX_TRACE_MSG("QNX:NULI:StartImpl\n");
 #endif
 
   resource_request_->headers.SetHeader(
@@ -705,10 +703,7 @@ void NavigationURLLoaderImpl::MaybeStartLoader(
 
   // No interceptors wanted to handle this request.
 #if defined(__QNX__)
-  {
-    const char m[] = "QNX:NULI:Fallback\n";
-    ::write(2, m, sizeof(m) - 1);
-  }
+  QNX_TRACE_MSG("QNX:NULI:Fallback\n");
 #endif
   FallbackToNonInterceptedRequest(false);
 }
@@ -717,10 +712,7 @@ void NavigationURLLoaderImpl::FallbackToNonInterceptedRequest(
     bool reset_subresource_loader_params,
     const net::LoadTimingInfo& timing_info) {
 #if defined(__QNX__)
-  {
-    const char m[] = "QNX:NULI:FallbackImpl\n";
-    ::write(2, m, sizeof(m) - 1);
-  }
+  QNX_TRACE_MSG("QNX:NULI:FallbackImpl\n");
 #endif
   if (reset_subresource_loader_params)
     subresource_loader_params_.reset();
@@ -866,10 +858,7 @@ void NavigationURLLoaderImpl::OnReceiveResponse(
     mojo::ScopedDataPipeConsumerHandle response_body,
     absl::optional<mojo_base::BigBuffer> cached_metadata) {
 #if defined(__QNX__)
-  {
-    const char m[] = "QNX:NULI:OnRecvResp!\n";
-    ::write(2, m, sizeof(m) - 1);
-  }
+  QNX_TRACE_MSG("QNX:NULI:OnRecvResp!\n");
 #endif
   DCHECK(!cached_metadata);
   LogQueueTimeHistogram("Navigation.QueueTime.OnReceiveResponse",
@@ -1061,12 +1050,8 @@ void NavigationURLLoaderImpl::OnTransferSizeUpdated(
 void NavigationURLLoaderImpl::OnComplete(
     const network::URLLoaderCompletionStatus& status) {
 #if defined(__QNX__)
-  {
-    char m[64];
-    int n = snprintf(m, sizeof(m), "QNX:NULI:OnComplete err=%d\n",
+  QNX_TRACE_FMT("QNX:NULI:OnComplete err=%d\n",
                      status.error_code);
-    ::write(2, m, n);
-  }
 #endif
   // Successful load must have used OnResponseStarted first. In this case, the
   // URLLoaderClient has already been transferred to the renderer process and
@@ -1546,14 +1531,9 @@ NavigationURLLoaderImpl::CreateNetworkLoaderFactory(
   }
   DCHECK(network_loader_factory);
 #if defined(__QNX__) || defined(__QNXNTO__)
-  {
-    char m[128];
-    int n = snprintf(m, sizeof(m),
-                     "QNX:CNLF proxy=%d hdrCli=%d\n",
+  QNX_TRACE_FMT("QNX:CNLF proxy=%d hdrCli=%d\n",
                      use_proxy ? 1 : 0,
                      header_client.is_valid() ? 1 : 0);
-    ::write(2, m, n);
-  }
 #endif
   if (!use_proxy) {
     return network_loader_factory;
@@ -1565,19 +1545,9 @@ NavigationURLLoaderImpl::CreateNetworkLoaderFactory(
 }
 
 void NavigationURLLoaderImpl::Start() {
-#if defined(__QNX__) || defined(__QNXNTO__)
-  {
-    const char m[] = "QNX:NULI:Start!\n";
-    ::write(2, m, sizeof(m) - 1);
-  }
-#endif
+  QNX_TRACE_MSG("QNX:NULI:Start!\n");
   std::move(start_closure_).Run();
-#if defined(__QNX__) || defined(__QNXNTO__)
-  {
-    const char m[] = "QNX:NULI:StartDone!\n";
-    ::write(2, m, sizeof(m) - 1);
-  }
-#endif
+  QNX_TRACE_MSG("QNX:NULI:StartDone!\n");
 }
 
 void NavigationURLLoaderImpl::FollowRedirect(

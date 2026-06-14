@@ -32,6 +32,7 @@
 #include "base/trace_event/interned_args_helper.h"
 #include "base/trace_event/typed_macros.h"
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 #include "mojo/public/cpp/bindings/associated_group.h"
 #include "mojo/public/cpp/bindings/associated_group_controller.h"
 #include "mojo/public/cpp/bindings/interface_endpoint_controller.h"
@@ -1020,25 +1021,17 @@ bool InterfaceEndpointClient::HandleValidatedMessage(Message* message) {
       return control_message_handler_.Accept(message);
 
 #if defined(__QNX__)
-    {
-      char _b[128];
-      int _n = snprintf(_b, sizeof(_b), "QNX:IEC:pre tid=%x name=%u iface=%s\n",
+    QNX_TRACE_FMT("QNX:IEC:pre tid=%x name=%u iface=%s\n",
                         (unsigned)pthread_self(),
                         message->name(),
                         interface_name_ ? interface_name_ : "?");
-      write(2, _b, _n);
-    }
 #endif
     accepted_interface_message = incoming_receiver_->Accept(message);
 #if defined(__QNX__)
-    {
-      char _b[128];
-      int _n = snprintf(_b, sizeof(_b), "QNX:IEC:post tid=%x res=%d iface=%s\n",
+    QNX_TRACE_FMT("QNX:IEC:post tid=%x res=%d iface=%s\n",
                         (unsigned)pthread_self(),
                         (int)accepted_interface_message,
                         interface_name_ ? interface_name_ : "?");
-      write(2, _b, _n);
-    }
 #endif
   }
 

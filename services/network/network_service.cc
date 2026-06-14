@@ -39,6 +39,7 @@
 #include "base/types/pass_key.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 #include "build/chromecast_buildflags.h"
 #include "build/chromeos_buildflags.h"
 #include "components/network_session_configurator/common/network_features.h"
@@ -362,11 +363,7 @@ NetworkService::NetworkService(
     bool delay_initialization_until_set_client)
     : net_log_(net::NetLog::Get()), registry_(std::move(registry)) {
 #if defined(__QNX__) || defined(__QNXNTO__)
-  {
-    char m[96];
-    int n = snprintf(m, sizeof(m), "QNX:NS:ctor tid=%lu\n", (unsigned long)pthread_self());
-    ::write(2, m, n);
-  }
+  QNX_TRACE_FMT("QNX:NS:ctor tid=%lu\n", (unsigned long)pthread_self());
 #endif
   DCHECK(!g_network_service);
   g_network_service = this;
@@ -395,12 +392,8 @@ NetworkService::NetworkService(
 void NetworkService::Initialize(mojom::NetworkServiceParamsPtr params,
                                 bool mock_network_change_notifier) {
 #if defined(__QNX__) || defined(__QNXNTO__)
-  {
-    char m[96];
-    int n = snprintf(m, sizeof(m), "QNX:NS:Init! already=%d tid=%lu\n",
+  QNX_TRACE_FMT("QNX:NS:Init! already=%d tid=%lu\n",
                      initialized_ ? 1 : 0, (unsigned long)pthread_self());
-    ::write(2, m, n);
-  }
 #endif
   if (initialized_) {
     return;
@@ -639,11 +632,7 @@ void NetworkService::CreateNetLogEntriesForActiveObjects(
 
 void NetworkService::SetParams(mojom::NetworkServiceParamsPtr params) {
 #if defined(__QNX__) || defined(__QNXNTO__)
-  {
-    char m[64];
-    int n = snprintf(m, sizeof(m), "QNX:NS:SetParams! tid=%lu\n", (unsigned long)pthread_self());
-    ::write(2, m, n);
-  }
+  QNX_TRACE_FMT("QNX:NS:SetParams! tid=%lu\n", (unsigned long)pthread_self());
 #endif
   Initialize(std::move(params));
 }
@@ -695,11 +684,7 @@ void NetworkService::CreateNetworkContext(
     mojo::PendingReceiver<mojom::NetworkContext> receiver,
     mojom::NetworkContextParamsPtr params) {
 #if defined(__QNX__) || defined(__QNXNTO__)
-  {
-    char m[96];
-    int n = snprintf(m, sizeof(m), "QNX:NS:CreateNetCtx! tid=%lu\n", (unsigned long)pthread_self());
-    ::write(2, m, n);
-  }
+  QNX_TRACE_FMT("QNX:NS:CreateNetCtx! tid=%lu\n", (unsigned long)pthread_self());
 #endif
   // If a custom proxy config is already set, the Masked Domain List proxy
   // configs should not be used.
@@ -1143,22 +1128,14 @@ void NetworkService::OnNetworkContextConnectionClosed(
 void NetworkService::Bind(
     mojo::PendingReceiver<mojom::NetworkService> receiver) {
 #if defined(__QNX__) || defined(__QNXNTO__)
-  {
-    char m[96];
-    int n = snprintf(m, sizeof(m), "QNX:NS:Bind valid=%d tid=%lu\n",
+  QNX_TRACE_FMT("QNX:NS:Bind valid=%d tid=%lu\n",
                      receiver.is_valid() ? 1 : 0, (unsigned long)pthread_self());
-    ::write(2, m, n);
-  }
 #endif
   DCHECK(!receiver_.is_bound());
   receiver_.Bind(std::move(receiver));
 #if defined(__QNX__) || defined(__QNXNTO__)
-  {
-    char m[64];
-    int n = snprintf(m, sizeof(m), "QNX:NS:Bind done bound=%d\n",
+  QNX_TRACE_FMT("QNX:NS:Bind done bound=%d\n",
                      receiver_.is_bound() ? 1 : 0);
-    ::write(2, m, n);
-  }
 #endif
 }
 

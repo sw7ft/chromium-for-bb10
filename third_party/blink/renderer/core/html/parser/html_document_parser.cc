@@ -991,8 +991,15 @@ void HTMLDocumentParser::CommitPreloadedData() {
     return;
 
   SetIsPreloading(false);
-  if (task_runner_state_->SeenFirstByte() && !IsStopped())
+  if (task_runner_state_->SeenFirstByte() && !IsStopped()) {
+#if defined(__QNX__) || defined(__QNXNTO__)
+    // FinishAppend() can call PumpTokenizerIfPossible() synchronously, which
+    // wedges on QNX. Always defer the pump to the task runner instead.
+    SchedulePumpTokenizer(/*from_finish_append=*/true);
+#else
     FinishAppend();
+#endif
+  }
 }
 
 void HTMLDocumentParser::end() {

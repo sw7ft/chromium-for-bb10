@@ -1,4 +1,5 @@
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 
 #if BUILDFLAG(IS_QNX)
 #include <dlfcn.h>
@@ -9,9 +10,11 @@
 
 namespace std {
 
+// Intentionally uses raw write(2,...) — abort handler that must always fire
+// unconditionally (similar to a crash handler), not a debug trace.
 [[noreturn]] void __throw_bad_optional_access() {
   char buf[512];
-  write(2, "QNX:BAD_OPTIONAL\n", 17);
+  QNX_TRACE_MSG("QNX:BAD_OPTIONAL\n");
 
   // __builtin_return_address(0) gives the call site of
   // __throw_bad_optional_access, which — when value() is inlined — is

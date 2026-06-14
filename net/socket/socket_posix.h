@@ -159,10 +159,8 @@ class NET_EXPORT_PRIVATE SocketPosix
   base::ThreadChecker thread_checker_;
 
 #if defined(__QNX__) || defined(__QNXNTO__)
-  void QnxPollForRead();
-  void QnxReadSelectDone(int sel_result);
+  void QnxRearmReadPoll();
   void QnxPollForConnect();
-  int qnx_read_poll_count_ = 0;
   int qnx_connect_poll_count_ = 0;
   base::WeakPtrFactory<SocketPosix> weak_factory_{this};
 #endif

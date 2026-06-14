@@ -29,6 +29,7 @@
 #include <utility>
 
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 #if BUILDFLAG(IS_QNX)
 #include <unistd.h>
 #endif
@@ -145,22 +146,16 @@ V8PerIsolateData::V8PerIsolateData(
       private_property_(std::make_unique<V8PrivateProperty>()),
       constructor_mode_(ConstructorMode::kCreateNewObject),
       runtime_call_stats_(base::DefaultTickClock::GetInstance()) {
-#if BUILDFLAG(IS_QNX)
-  { const char m[] = "QNX:V8PID:1 postInitList\n"; write(2, m, sizeof(m)-1); }
-#endif
+  QNX_TRACE_MSG("QNX:V8PID:1 postInitList\n");
   if (v8_context_snapshot_mode == V8ContextSnapshotMode::kTakeSnapshot) {
     // Snapshot should only execute on the main thread. SnapshotCreator enters
     // the isolate, so we don't call Isolate::Enter() here.
     CHECK(IsMainThread());
   } else {
     // FIXME: Remove once all v8::Isolate::GetCurrent() calls are gone.
-#if BUILDFLAG(IS_QNX)
-    { const char m[] = "QNX:V8PID:2 preEnter\n"; write(2, m, sizeof(m)-1); }
-#endif
+    QNX_TRACE_MSG("QNX:V8PID:2 preEnter\n");
     GetIsolate()->Enter();
-#if BUILDFLAG(IS_QNX)
-    { const char m[] = "QNX:V8PID:3 postEnter\n"; write(2, m, sizeof(m)-1); }
-#endif
+    QNX_TRACE_MSG("QNX:V8PID:3 postEnter\n");
     GetIsolate()->AddBeforeCallEnteredCallback(&BeforeCallEnteredCallback);
   }
   if (IsMainThread()) {

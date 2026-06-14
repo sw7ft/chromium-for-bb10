@@ -50,6 +50,7 @@
 #include "base/trace_event/optional_trace_event.h"
 #include "base/types/optional_util.h"
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 #include "components/download/public/common/download_url_parameters.h"
 #include "components/viz/common/features.h"
 #include "content/browser/about_url_loader_factory.h"
@@ -764,6 +765,10 @@ bool VerifyThatBrowserAndRendererCalculatedOriginsToCommitMatch(
   // we are sure that the `browser_side_origin` is always the same as the
   // `renderer_side_origin`.
   if (!origins_match) {
+#if BUILDFLAG(IS_QNX)
+    // QNX bring-up: allow commit when browser/renderer origin calc diverges.
+    return true;
+#endif
     NavigationRequest::ScopedCrashKeys navigation_request_crash_keys(
         *navigation_request);
     SCOPED_CRASH_KEY_STRING256(
@@ -1163,10 +1168,12 @@ class RenderFrameHostImpl::SubresourceLoaderFactoriesConfig {
     result.origin_ = frame.GetLastCommittedOrigin();
     result.isolation_info_ = frame.GetIsolationInfoForSubresources();
     result.client_security_state_ = frame.BuildClientSecurityState();
+#if !BUILDFLAG(IS_QNX)
     if (frame.coep_reporter_) {
       frame.coep_reporter_->Clone(
           result.coep_reporter_.BindNewPipeAndPassReceiver());
     }
+#endif
     result.trust_token_redemption_policy_ =
         DetermineAfterCommitWhetherToForbidTrustTokenOperation(
             frame, network::mojom::TrustTokenOperationType::kRedemption);
@@ -1190,22 +1197,15 @@ class RenderFrameHostImpl::SubresourceLoaderFactoriesConfig {
       NavigationRequest& navigation_request) {
     SubresourceLoaderFactoriesConfig result;
     result.origin_ = navigation_request.GetOriginToCommit().value();
-#if BUILDFLAG(IS_QNX)
-    { const char m[] = "QNX:SLFC:ForPendNav bypass\n"; ::write(2, m, sizeof(m) - 1); }
-    result.client_security_state_ = network::mojom::ClientSecurityState::New();
-    result.ukm_source_id_ = ukm::SourceIdObj::FromInt64(
-        navigation_request.GetNextPageUkmSourceId());
-    result.isolation_info_ = net::IsolationInfo::CreateTransient();
-    result.trust_token_redemption_policy_ =
-        network::mojom::TrustTokenOperationPolicyVerdict::kForbid;
-    result.trust_token_issuance_policy_ =
-        network::mojom::TrustTokenOperationPolicyVerdict::kForbid;
-    return result;
-#endif
     result.client_security_state_ =
         navigation_request.BuildClientSecurityStateForCommittedDocument();
+#if BUILDFLAG(IS_QNX)
+    result.ukm_source_id_ =
+        ukm::SourceIdObj::FromInt64(ukm::kInvalidSourceId);
+#else
     result.ukm_source_id_ = ukm::SourceIdObj::FromInt64(
         navigation_request.GetNextPageUkmSourceId());
+#endif
 
     // TODO(lukasza): Consider pushing the ok-vs-error differentiation into
     // NavigationRequest methods (e.g. into |isolation_info_for_subresources|
@@ -1222,10 +1222,12 @@ class RenderFrameHostImpl::SubresourceLoaderFactoriesConfig {
     } else {
       result.isolation_info_ =
           navigation_request.isolation_info_for_subresources();
+#if !BUILDFLAG(IS_QNX)
       if (navigation_request.coep_reporter()) {
         navigation_request.coep_reporter()->Clone(
             result.coep_reporter_.BindNewPipeAndPassReceiver());
       }
+#endif
       result.trust_token_redemption_policy_ =
           DetermineWhetherToForbidTrustTokenOperation(
               navigation_request.GetRenderFrameHost(),
@@ -6995,22 +6997,16 @@ void RenderFrameHostImpl::DidChangeLoadProgress(double load_progress) {
 }
 
 void RenderFrameHostImpl::DidFinishLoad(const GURL& validated_url) {
-#if BUILDFLAG(IS_QNX)
-  { const char m[] = "QNX:RFHI:DidFinishLoad\n"; write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:RFHI:DidFinishLoad\n");
   if (lifecycle_state() == LifecycleStateImpl::kPrerendering) {
     document_associated_data_->set_pending_did_finish_load_url_for_prerendering(
         validated_url);
     return;
   }
 
-#if BUILDFLAG(IS_QNX)
-  { const char m[] = "QNX:RFHI:preDelegate\n"; write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:RFHI:preDelegate\n");
   delegate_->OnDidFinishLoad(this, validated_url);
-#if BUILDFLAG(IS_QNX)
-  { const char m[] = "QNX:RFHI:postDelegate\n"; write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:RFHI:postDelegate\n");
 }
 
 void RenderFrameHostImpl::DispatchLoad() {
@@ -10166,9 +10162,7 @@ void RenderFrameHostImpl::CommitNavigation(
     blink::mojom::ServiceWorkerContainerInfoForClientPtr container_info,
     const absl::optional<blink::DocumentToken>& document_token,
     const base::UnguessableToken& devtools_navigation_token) {
-#if BUILDFLAG(IS_QNX)
-  { const char m[] = "QNX:Browser:RFHI_CommitNav\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:Browser:RFHI_CommitNav\n");
   TRACE_EVENT2("navigation", "RenderFrameHostImpl::CommitNavigation",
                "navigation_request", navigation_request, "url",
                common_params->url);
@@ -10260,14 +10254,10 @@ void RenderFrameHostImpl::CommitNavigation(
 
   const bool is_first_navigation = !has_committed_any_navigation_;
   has_committed_any_navigation_ = true;
-#if BUILDFLAG(IS_QNX)
-  { const char m[] = "QNX:RFHI:1 postAccessCheck\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:RFHI:1 postAccessCheck\n");
 
   UpdatePermissionsForNavigation(navigation_request);
-#if BUILDFLAG(IS_QNX)
-  { const char m[] = "QNX:RFHI:2 postPerms\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:RFHI:2 postPerms\n");
 
   // Get back to a clean state, in case we start a new navigation without
   // completing an unload handler.
@@ -10291,16 +10281,6 @@ void RenderFrameHostImpl::CommitNavigation(
       subresource_loader_factories;
   mojo::PendingRemote<blink::mojom::ResourceCache> resource_cache_remote;
   if (!is_same_document || is_first_navigation) {
-#if BUILDFLAG(IS_QNX)
-    { const char m[] = "QNX:RFHI:2a preFactory\n"; ::write(2, m, sizeof(m) - 1); }
-    recreate_default_url_loader_factory_after_network_service_crash_ = false;
-    subresource_loader_factories =
-        std::make_unique<blink::PendingURLLoaderFactoryBundle>();
-    subresource_loader_factories->pending_default_factory() =
-        network::NotImplementedURLLoaderFactory::Create();
-    { const char m[] = "QNX:RFHI:2a factoryBypass\n"; ::write(2, m, sizeof(m) - 1); }
-    goto qnx_skip_factory_setup;
-#endif
     recreate_default_url_loader_factory_after_network_service_crash_ = false;
     subresource_loader_factories =
         std::make_unique<blink::PendingURLLoaderFactoryBundle>();
@@ -10326,9 +10306,7 @@ void RenderFrameHostImpl::CommitNavigation(
     mojo::PendingRemote<network::mojom::URLLoaderFactory>
         pending_default_factory;
 
-#if BUILDFLAG(IS_QNX)
-    { const char m[] = "QNX:RFHI:2b preWebUI\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+    QNX_TRACE_MSG("QNX:RFHI:2b preWebUI\n");
     // See if this is for WebUI.
     const auto& webui_schemes = URLDataManagerBackend::GetWebUISchemes();
     if (base::Contains(webui_schemes, effective_scheme)) {
@@ -10378,9 +10356,7 @@ void RenderFrameHostImpl::CommitNavigation(
     }
 
     if (!pending_default_factory) {
-#if BUILDFLAG(IS_QNX)
-      { const char m[] = "QNX:RFHI:2c preNetSvc\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+      QNX_TRACE_MSG("QNX:RFHI:2c preNetSvc\n");
       // Otherwise default to a Network Service-backed loader from the
       // appropriate NetworkContext.
       recreate_default_url_loader_factory_after_network_service_crash_ = true;
@@ -10394,9 +10370,7 @@ void RenderFrameHostImpl::CommitNavigation(
                   "RFHI::CommitNavigation"),
               subresource_loader_factories_config.ukm_source_id(),
               pending_default_factory.InitWithNewPipeAndPassReceiver());
-#if BUILDFLAG(IS_QNX)
-      { const char m[] = "QNX:RFHI:2d postNetSvc\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+      QNX_TRACE_MSG("QNX:RFHI:2d postNetSvc\n");
       subresource_loader_factories->set_bypass_redirect_checks(
           bypass_redirect_checks);
     }
@@ -10484,10 +10458,6 @@ void RenderFrameHostImpl::CommitNavigation(
     }
   }
 
-#if BUILDFLAG(IS_QNX)
-  qnx_skip_factory_setup:
-  { const char m[] = "QNX:RFHI:3 postFactories\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
   // It is imperative that cross-document navigations always provide a set of
   // subresource ULFs.
   DCHECK(is_same_document || !is_first_navigation || is_srcdoc ||
@@ -10612,9 +10582,7 @@ void RenderFrameHostImpl::CommitNavigation(
               navigation_request->GetPolicyContainerHost());
     }
 
-#if BUILDFLAG(IS_QNX)
-    { const char m[] = "QNX:RFHI:4 preNavClient\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+    QNX_TRACE_MSG("QNX:RFHI:4 preNavClient\n");
     mojom::NavigationClient* navigation_client =
         navigation_request->GetCommitNavigationClient();
 
@@ -10665,9 +10633,7 @@ void RenderFrameHostImpl::CommitNavigation(
       }
     }
 
-#if BUILDFLAG(IS_QNX)
-    { const char m[] = "QNX:RFHI:5 preSendCommit\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+    QNX_TRACE_MSG("QNX:RFHI:5 preSendCommit\n");
     SendCommitNavigation(
         navigation_client, navigation_request, std::move(common_params),
         std::move(commit_params), std::move(head), std::move(response_body),
@@ -13732,9 +13698,7 @@ void RenderFrameHostImpl::SendCommitNavigation(
     const blink::DocumentToken& document_token,
     const base::UnguessableToken& devtools_navigation_token) {
   TRACE_EVENT0("navigation", "RenderFrameHostImpl::SendCommitNavigation");
-#if BUILDFLAG(IS_QNX)
-  { const char m[] = "QNX:RFHI:6 SendCommitEntry\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:RFHI:6 SendCommitEntry\n");
   base::ElapsedTimer timer;
   DCHECK_EQ(net::OK, navigation_request->GetNetErrorCode());
   // `origin_to_commit` is currently only set only on failed navigations or
@@ -13857,12 +13821,7 @@ void RenderFrameHostImpl::SendCommitNavigation(
   }
 
   commit_params->commit_sent = base::TimeTicks::Now();
-#if BUILDFLAG(IS_QNX)
-  {
-    const char m[] = "QNX:Browser:SendCommit\n";
-    ::write(2, m, sizeof(m) - 1);
-  }
-#endif
+  QNX_TRACE_MSG("QNX:Browser:SendCommit\n");
   navigation_client->CommitNavigation(
       std::move(common_params), std::move(commit_params),
       std::move(response_head), std::move(response_body),

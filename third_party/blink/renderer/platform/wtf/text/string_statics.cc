@@ -34,6 +34,7 @@
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_impl.h"
 #include "third_party/blink/renderer/platform/wtf/wtf.h"
+#include "base/qnx_trace.h"
 
 namespace WTF {
 
@@ -126,38 +127,24 @@ bool NewlineThenWhitespaceStringsTable::IsNewlineThenWhitespaces(
 
 void StringStatics::Init() {
   DCHECK(IsMainThread());
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:SS:1 entry\n", 15);
-#endif
+  QNX_TRACE_MSG("QNX:SS:1 entry\n");
 
   StringImpl::InitStatics();
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:SS:2 empty\n", 15);
-#endif
+  QNX_TRACE_MSG("QNX:SS:2 empty\n");
   new (NotNullTag::kNotNull, (void*)&g_empty_string) String(StringImpl::empty_);
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:SS:2a 16bit\n", 16);
-#endif
+  QNX_TRACE_MSG("QNX:SS:2a 16bit\n");
   new (NotNullTag::kNotNull, (void*)&g_empty_string16_bit)
       String(StringImpl::empty16_bit_);
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:SS:2b pre*\n", 15);
-#endif
+  QNX_TRACE_MSG("QNX:SS:2b pre*\n");
 
   new (NotNullTag::kNotNull, (void*)&g_star_atom) AtomicString("*");
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:SS:3 star\n", 14);
-#endif
+  QNX_TRACE_MSG("QNX:SS:3 star\n");
 
   new (NotNullTag::kNotNull, (void*)&g_star_atom) AtomicString("*");
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:SS:4 xml\n", 13);
-#endif
+  QNX_TRACE_MSG("QNX:SS:4 xml\n");
   new (NotNullTag::kNotNull, (void*)&g_xml_atom)
       AtomicString(AddStaticASCIILiteral("xml"));
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:SS:5 xmlns\n", 15);
-#endif
+  QNX_TRACE_MSG("QNX:SS:5 xmlns\n");
   new (NotNullTag::kNotNull, (void*)&g_xmlns_atom)
       AtomicString(AddStaticASCIILiteral("xmlns"));
   new (NotNullTag::kNotNull, (void*)&g_xlink_atom)
@@ -167,14 +154,10 @@ void StringStatics::Init() {
       AtomicString(AddStaticASCIILiteral("http"));
   new (NotNullTag::kNotNull, (void*)&g_https_atom)
       AtomicString(AddStaticASCIILiteral("https"));
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:SS:6 table\n", 15);
-#endif
+  QNX_TRACE_MSG("QNX:SS:6 table\n");
 
   NewlineThenWhitespaceStringsTable::Init();
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:SS:7 done\n", 14);
-#endif
+  QNX_TRACE_MSG("QNX:SS:7 done\n");
 }
 
 }  // namespace WTF

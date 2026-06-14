@@ -34,6 +34,7 @@
 #include "base/task/single_thread_task_runner.h"
 #include "base/trace_event/typed_macros.h"
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 #if defined(__QNX__)
 #include <unistd.h>
 #endif
@@ -794,20 +795,20 @@ Document* LocalDOMWindow::InstallNewDocument(const DocumentInit& init) {
   DCHECK_EQ(init.GetWindow(), this);
 
 #if defined(__QNX__)
-  { const char m[] = "QNX:IND:1 preCreate\n"; ::write(2, m, sizeof(m) - 1); }
+  QNX_TRACE_MSG("QNX:IND:1 preCreate\n");
 #endif
   document_ = init.CreateDocument();
 #if defined(__QNX__)
-  { const char m[] = "QNX:IND:2 preInit\n"; ::write(2, m, sizeof(m) - 1); }
+  QNX_TRACE_MSG("QNX:IND:2 preInit\n");
 #endif
   document_->Initialize();
 #if defined(__QNX__)
-  { const char m[] = "QNX:IND:3 preViewport\n"; ::write(2, m, sizeof(m) - 1); }
+  QNX_TRACE_MSG("QNX:IND:3 preViewport\n");
 #endif
 
   document_->GetViewportData().UpdateViewportDescription();
 #if defined(__QNX__)
-  { const char m[] = "QNX:IND:4 preSched\n"; ::write(2, m, sizeof(m) - 1); }
+  QNX_TRACE_MSG("QNX:IND:4 preSched\n");
 #endif
 
   auto* frame_scheduler = GetFrame()->GetFrameScheduler();
@@ -815,12 +816,12 @@ Document* LocalDOMWindow::InstallNewDocument(const DocumentInit& init) {
   frame_scheduler->SetCrossOriginToNearestMainFrame(
       GetFrame()->IsCrossOriginToNearestMainFrame());
 #if defined(__QNX__)
-  { const char m[] = "QNX:IND:5 preSupplement\n"; ::write(2, m, sizeof(m) - 1); }
+  QNX_TRACE_MSG("QNX:IND:5 preSupplement\n");
 #endif
 
   GetFrame()->GetPage()->GetChromeClient().InstallSupplements(*GetFrame());
 #if defined(__QNX__)
-  { const char m[] = "QNX:IND:6 done\n"; ::write(2, m, sizeof(m) - 1); }
+  QNX_TRACE_MSG("QNX:IND:6 done\n");
 #endif
 
   return document_.Get();

@@ -30,6 +30,7 @@
 
 #include "third_party/blink/renderer/core/core_initializer.h"
 
+#include "base/qnx_trace.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/web/blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/binding_security.h"
@@ -71,7 +72,6 @@
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partitions.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string_table.h"
-#include <unistd.h>
 
 namespace blink {
 
@@ -125,10 +125,7 @@ void CoreInitializer::Initialize() {
 
   AtomicStringTable::Instance().ReserveCapacity(kCoreStaticStringsCount);
 
-  {
-    const char msg[] = "QNX:CI:0 names\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:CI:0 names\n");
   html_names::Init();
   mathml_names::Init();
   svg_names::Init();
@@ -161,35 +158,20 @@ void CoreInitializer::Initialize() {
 
   RegisterEventFactory();
 
-  {
-    const char msg[] = "QNX:CI:1 freeze\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:CI:1 freeze\n");
   StringImpl::FreezeStaticStrings();
 
   V8ThrowDOMException::Init();
 
   BindingSecurity::Init();
   ScriptStateImpl::Init();
-  {
-    const char msg[] = "QNX:CI:2 TZ\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:CI:2 TZ\n");
   TimeZoneController::Init();
-  {
-    const char msg[] = "QNX:CI:3 Font\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:CI:3 Font\n");
   FontGlobalContext::Init();
-  {
-    const char msg[] = "QNX:CI:4 CSS\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:CI:4 CSS\n");
   CSSDefaultStyleSheets::Init();
-  {
-    const char msg[] = "QNX:CI:5 Done\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:CI:5 Done\n");
   element_locator::TokenStreamMatcher::InitSets();
 }
 

@@ -32,6 +32,7 @@
 #include "base/trace_event/typed_macros.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 #include "cc/base/switches.h"
 #include "components/viz/common/features.h"
 #include "content/browser/bad_message.h"
@@ -417,29 +418,23 @@ bool RenderViewHostImpl::CreateRenderView(
   TRACE_EVENT0("renderer_host,navigation",
                "RenderViewHostImpl::CreateRenderView");
 #else
-  write(2, "QNX:RVH_CRV:0 entry\n", 21);
+  QNX_TRACE_MSG("QNX:RVH_CRV:0 entry\n");
 #endif
   DCHECK(!IsRenderViewLive()) << "Creating view twice";
 
   if (!GetAgentSchedulingGroup().Init())
     return false;
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:RVH_CRV:1 postInit\n", 23);
-#endif
+  QNX_TRACE_MSG("QNX:RVH_CRV:1 postInit\n");
   DCHECK(GetProcess()->IsInitializedAndNotDead());
   DCHECK(GetProcess()->GetBrowserContext());
 
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:RVH_CRV:1a checks\n", 22);
-#endif
+  QNX_TRACE_MSG("QNX:RVH_CRV:1a checks\n");
   CHECK(!(main_frame_routing_id_ != MSG_ROUTING_NONE &&
           proxy_route_id != MSG_ROUTING_NONE));
   CHECK(!(main_frame_routing_id_ == MSG_ROUTING_NONE &&
           proxy_route_id == MSG_ROUTING_NONE));
 
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:RVH_CRV:1a2 preFromID\n", 26);
-#endif
+  QNX_TRACE_MSG("QNX:RVH_CRV:1a2 preFromID\n");
   RenderFrameHostImpl* main_rfh = nullptr;
   RenderFrameProxyHost* main_rfph = nullptr;
   if (main_frame_routing_id_ != MSG_ROUTING_NONE) {
@@ -451,22 +446,16 @@ bool RenderViewHostImpl::CreateRenderView(
         RenderFrameProxyHost::FromID(GetProcess()->GetID(), proxy_route_id);
     DCHECK(main_rfph);
   }
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:RVH_CRV:1a3 preParams\n", 26);
-#endif
+  QNX_TRACE_MSG("QNX:RVH_CRV:1a3 preParams\n");
   FrameTreeNode* const frame_tree_node =
       main_rfh ? main_rfh->frame_tree_node() : main_rfph->frame_tree_node();
 
   mojom::CreateViewParamsPtr params = mojom::CreateViewParams::New();
 
   params->renderer_preferences = delegate_->GetRendererPrefs();
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:RVH_CRV:1a4 prePrefs\n", 25);
-#endif
+  QNX_TRACE_MSG("QNX:RVH_CRV:1a4 prePrefs\n");
   RenderViewHostImpl::GetPlatformSpecificPrefs(&params->renderer_preferences);
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:RVH_CRV:1a5 preWebPrefs\n", 28);
-#endif
+  QNX_TRACE_MSG("QNX:RVH_CRV:1a5 preWebPrefs\n");
   params->web_preferences = delegate_->GetOrCreateWebPreferences();
   params->opener_frame_token = opener_frame_token;
   params->replication_state =
@@ -478,13 +467,9 @@ bool RenderViewHostImpl::CreateRenderView(
                             frame_tree_->page_delegate()->IsInPreviewMode();
   params->attribution_support = delegate_->GetAttributionSupport();
 
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:RVH_CRV:1b preMainRfh\n", 26);
-#endif
+  QNX_TRACE_MSG("QNX:RVH_CRV:1b preMainRfh\n");
   if (main_rfh) {
-#if BUILDFLAG(IS_QNX)
-    write(2, "QNX:RVH_CRV:1c localFrame\n", 26);
-#endif
+    QNX_TRACE_MSG("QNX:RVH_CRV:1c localFrame\n");
     auto local_frame_params = mojom::CreateLocalMainFrameParams::New();
     local_frame_params->frame_token = main_rfh->GetFrameToken();
     local_frame_params->routing_id = main_frame_routing_id_;
@@ -492,14 +477,10 @@ bool RenderViewHostImpl::CreateRenderView(
     local_frame_params->frame =
         pending_frame_remote.InitWithNewEndpointAndPassReceiver();
     main_rfh->SetMojomFrameRemote(std::move(pending_frame_remote));
-#if BUILDFLAG(IS_QNX)
-    write(2, "QNX:RVH_CRV:1d bindBIB\n", 23);
-#endif
+    QNX_TRACE_MSG("QNX:RVH_CRV:1d bindBIB\n");
     main_rfh->BindBrowserInterfaceBrokerReceiver(
         local_frame_params->interface_broker.InitWithNewPipeAndPassReceiver());
-#if BUILDFLAG(IS_QNX)
-    write(2, "QNX:RVH_CRV:1e bindAIP\n", 23);
-#endif
+    QNX_TRACE_MSG("QNX:RVH_CRV:1e bindAIP\n");
     main_rfh->BindAssociatedInterfaceProviderReceiver(
         local_frame_params->associated_interface_provider_remote
             .InitWithNewEndpointAndPassReceiver());
@@ -523,16 +504,12 @@ bool RenderViewHostImpl::CreateRenderView(
           main_rfh->policy_container_host()->CreatePolicyContainerForBlink();
     }
 
-#if BUILDFLAG(IS_QNX)
-    write(2, "QNX:RVH_CRV:1f preWidget\n", 25);
-#endif
+    QNX_TRACE_MSG("QNX:RVH_CRV:1f preWidget\n");
     local_frame_params->widget_params =
         main_rfh->GetRenderWidgetHost()
             ->BindAndGenerateCreateFrameWidgetParams();
 
-#if BUILDFLAG(IS_QNX)
-    write(2, "QNX:RVH_CRV:1g preSLF\n", 22);
-#endif
+    QNX_TRACE_MSG("QNX:RVH_CRV:1g preSLF\n");
     local_frame_params->subresource_loader_factories =
         main_rfh->CreateSubresourceLoaderFactoriesForInitialEmptyDocument();
 
@@ -610,20 +587,14 @@ bool RenderViewHostImpl::CreateRenderView(
           ->GetSiteInstance()
           ->coop_related_group_token());
 
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:RVH_CRV:2 prePageBroadcast\n", 31);
-#endif
+  QNX_TRACE_MSG("QNX:RVH_CRV:2 prePageBroadcast\n");
   page_broadcast_.reset();
   params->blink_page_broadcast =
       page_broadcast_.BindNewEndpointAndPassReceiver();
 
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:RVH_CRV:3 preCreateView\n", 28);
-#endif
+  QNX_TRACE_MSG("QNX:RVH_CRV:3 preCreateView\n");
   GetAgentSchedulingGroup().CreateView(std::move(params));
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:RVH_CRV:4 postCreateView\n", 29);
-#endif
+  QNX_TRACE_MSG("QNX:RVH_CRV:4 postCreateView\n");
 
   RenderViewCreated(main_rfh);
 

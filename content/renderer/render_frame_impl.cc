@@ -50,6 +50,7 @@
 #include "base/types/optional_util.h"
 #include "base/unguessable_token.h"
 #include "base/values.h"
+#include "base/qnx_trace.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #if BUILDFLAG(IS_QNX)
@@ -2162,9 +2163,7 @@ void RenderFrameImpl::BindFrameBindingsControl(
 
 void RenderFrameImpl::BindNavigationClient(
     mojo::PendingAssociatedReceiver<mojom::NavigationClient> receiver) {
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:RFI:BindNavClient\n", 21);
-#endif
+  QNX_TRACE_MSG("QNX:RFI:BindNavClient\n");
   navigation_client_impl_ = std::make_unique<NavigationClient>(this);
   navigation_client_impl_->Bind(std::move(receiver));
 }
@@ -2668,10 +2667,7 @@ void RenderFrameImpl::CommitNavigation(
     mojom::CookieManagerInfoPtr cookie_manager_info,
     mojom::StorageInfoPtr storage_info,
     mojom::NavigationClient::CommitNavigationCallback commit_callback) {
-  {
-    const char msg[] = "QNX:RFI:CommitNav enter\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:RFI:CommitNav enter\n");
   DCHECK(navigation_client_impl_);
   DCHECK(!blink::IsRendererDebugURL(common_params->url));
   DCHECK(!NavigationTypeUtils::IsSameDocument(common_params->navigation_type));
@@ -2857,10 +2853,7 @@ void RenderFrameImpl::CommitNavigationWithParams(
     mojom::StorageInfoPtr storage_info,
     std::unique_ptr<DocumentState> document_state,
     std::unique_ptr<WebNavigationParams> navigation_params) {
-  {
-    const char msg[] = "QNX:RFI:CommitWithParams enter\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:RFI:CommitWithParams enter\n");
   // Initialize the FrameWidget at the beginning of commit because the empty
   // Document that the frame is initialized with requires it during commit.
   if (widget_params_for_lazy_widget_creation_) {
@@ -3817,10 +3810,7 @@ void RenderFrameImpl::DidCommitNavigation(
     bool should_reset_browser_interface_broker,
     const blink::ParsedPermissionsPolicy& permissions_policy_header,
     const blink::DocumentPolicyFeatureState& document_policy_header) {
-  {
-    const char msg[] = "QNX:RFI:DidCommitNav\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:RFI:DidCommitNav\n");
   CHECK_EQ(NavigationCommitState::kWillCommit, navigation_commit_state_);
   navigation_commit_state_ = NavigationCommitState::kDidCommit;
 
@@ -4098,10 +4088,7 @@ void RenderFrameImpl::DidHandleOnloadEvents() {
 }
 
 void RenderFrameImpl::DidFinishLoad() {
-  {
-    const char msg[] = "QNX:RFI:DidFinishLoad\n";
-    write(2, msg, sizeof(msg) - 1);
-  }
+  QNX_TRACE_MSG("QNX:RFI:DidFinishLoad\n");
   TRACE_EVENT1("navigation,benchmark,rail", "RenderFrameImpl::didFinishLoad",
                "id", routing_id_);
   if (!frame_->Parent()) {
@@ -4113,8 +4100,7 @@ void RenderFrameImpl::DidFinishLoad() {
 #if BUILDFLAG(IS_QNX)
   if (!frame_->Parent() &&
       base::CommandLine::ForCurrentProcess()->HasSwitch("dump-dom")) {
-    const char m[] = "QNX:RFI:DumpDom\n";
-    write(2, m, sizeof(m) - 1);
+    QNX_TRACE_MSG("QNX:RFI:DumpDom\n");
 
     auto* cmdline = base::CommandLine::ForCurrentProcess();
     auto args = cmdline->GetArgs();
@@ -4124,8 +4110,7 @@ void RenderFrameImpl::DidFinishLoad() {
         std::string mime, charset, body;
         if (net::DataURL::Parse(target_url, &mime, &charset, &body) &&
             !body.empty()) {
-          const char m2[] = "QNX:RFI:InjectData\n";
-          write(2, m2, sizeof(m2) - 1);
+          QNX_TRACE_MSG("QNX:RFI:InjectData\n");
           std::string js = "document.open();document.write(";
           js += "decodeURIComponent(\"";
           for (char c : body) {

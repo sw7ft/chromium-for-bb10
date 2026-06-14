@@ -13,8 +13,10 @@
 #include <utility>
 
 #if BUILDFLAG(IS_QNX)
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 #include <unistd.h>
 #endif
 #include "base/command_line.h"
@@ -28,6 +30,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 #include "components/custom_handlers/protocol_handler.h"
 #include "components/custom_handlers/protocol_handler_registry.h"
 #include "components/custom_handlers/simple_protocol_handler_registry_factory.h"
@@ -37,6 +40,7 @@
 #include "content/public/browser/file_select_listener.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/picture_in_picture_window_controller.h"
 #include "content/public/browser/presentation_receiver_flags.h"
 #include "content/public/browser/render_process_host.h"
@@ -65,6 +69,36 @@ base::OnceClosure& GetMainMessageLoopQuitClosure() {
   static base::NoDestructor<base::OnceClosure> closure;
   return *closure;
 }
+
+#if BUILDFLAG(IS_QNX)
+// Hard-deadline watchdog: a detached thread that is independent of the
+// Chromium message loop. On JS-heavy pages (e.g. google.com) the renderer
+// thread can stay saturated, so ExecuteJavaScriptForTests() never returns and
+// the graceful --timeout dump hangs forever. This thread sleeps for the full
+// deadline using nanosleep() (no dependency on the task scheduler) and then
+// force-terminates the process, guaranteeing --timeout always exits.
+void* QnxHardWatchdog(void* arg) {
+  int total_ms = static_cast<int>(reinterpret_cast<intptr_t>(arg));
+  struct timespec ts;
+  ts.tv_sec = total_ms / 1000;
+  ts.tv_nsec = (total_ms % 1000) * 1000000L;
+  nanosleep(&ts, nullptr);
+  const char msg[] = "QNX:HardWatchdog deadline reached, _exit\n";
+  write(2, msg, sizeof(msg) - 1);
+  _exit(0);
+  return nullptr;
+}
+
+void StartQnxHardWatchdog(int total_ms) {
+  pthread_t tid;
+  pthread_attr_t attr;
+  pthread_attr_init(&attr);
+  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+  pthread_create(&tid, &attr, &QnxHardWatchdog,
+                 reinterpret_cast<void*>(static_cast<intptr_t>(total_ms)));
+  pthread_attr_destroy(&attr);
+}
+#endif  // BUILDFLAG(IS_QNX)
 
 constexpr int kDefaultTestWindowWidthDip = 800;
 constexpr int kDefaultTestWindowHeightDip = 600;
@@ -225,9 +259,7 @@ Shell* Shell::CreateNewWindow(BrowserContext* browser_context,
                               const GURL& url,
                               const scoped_refptr<SiteInstance>& site_instance,
                               const gfx::Size& initial_size) {
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:Shell:1 CreateNewWindow\n", 27);
-#endif
+  QNX_TRACE_MSG("QNX:Shell:1 CreateNewWindow\n");
   WebContents::CreateParams create_params(browser_context, site_instance);
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kForcePresentationReceiverForTesting)) {
@@ -235,21 +267,15 @@ Shell* Shell::CreateNewWindow(BrowserContext* browser_context,
   }
   std::unique_ptr<WebContents> web_contents =
       WebContents::Create(create_params);
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:Shell:2 WebContents\n", 23);
-#endif
+  QNX_TRACE_MSG("QNX:Shell:2 WebContents\n");
   Shell* shell =
       CreateShell(std::move(web_contents), AdjustWindowSize(initial_size),
                   true /* should_set_delegate */);
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:Shell:3 CreateShell\n", 23);
-#endif
+  QNX_TRACE_MSG("QNX:Shell:3 CreateShell\n");
 
   if (!url.is_empty())
     shell->LoadURL(url);
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:Shell:4 LoadURL done\n", 25);
-#endif
+  QNX_TRACE_MSG("QNX:Shell:4 LoadURL done\n");
   return shell;
 }
 
@@ -262,8 +288,7 @@ void Shell::LoadURL(const GURL& url) {
 #if BUILDFLAG(IS_QNX)
   GURL load_url = url;
   if (url.SchemeIs(url::kDataScheme)) {
-    const char m[] = "QNX:Shell:DataToBlank\n";
-    write(2, m, sizeof(m) - 1);
+    QNX_TRACE_MSG("QNX:Shell:DataToBlank\n");
     load_url = GURL("about:blank");
   }
   LoadURLForFrame(
@@ -281,19 +306,13 @@ void Shell::LoadURL(const GURL& url) {
 void Shell::LoadURLForFrame(const GURL& url,
                             const std::string& frame_name,
                             ui::PageTransition transition_type) {
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:LoadURL:1 enter\n", 20);
-#endif
+  QNX_TRACE_MSG("QNX:LoadURL:1 enter\n");
   NavigationController::LoadURLParams params(url);
   params.frame_name = frame_name;
   params.transition_type = transition_type;
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:LoadURL:2 params\n", 21);
-#endif
+  QNX_TRACE_MSG("QNX:LoadURL:2 params\n");
   web_contents_->GetController().LoadURLWithParams(params);
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:LoadURL:3 done\n", 19);
-#endif
+  QNX_TRACE_MSG("QNX:LoadURL:3 done\n");
 }
 
 void Shell::LoadDataWithBaseURL(const GURL& url,
@@ -632,46 +651,95 @@ void Shell::NavigationStateChanged(WebContents* source,
     g_platform->SetAddressBarURL(this, source->GetVisibleURL());
 }
 
-void Shell::DidFinishLoad(RenderFrameHost* render_frame_host,
-                          const GURL& validated_url) {
-#if BUILDFLAG(IS_QNX)
-  {
-    char buf[128];
-    int n = snprintf(buf, sizeof(buf), "QNX:Shell:DFL enter main=%d dump=%d\n",
-        (int)render_frame_host->IsInPrimaryMainFrame(),
-        (int)base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpDom));
-    write(2, buf, n);
-  }
-#endif
-  if (!render_frame_host->IsInPrimaryMainFrame())
+void Shell::DumpDomAndExit(RenderFrameHost* rfh) {
+  if (dom_already_dumped_)
     return;
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpDom))
-    return;
-#if BUILDFLAG(IS_QNX)
-  { const char m[] = "QNX:Shell:DFL exec\n"; write(2, m, sizeof(m) - 1); }
-#endif
+  dom_already_dumped_ = true;
+  dump_timer_.Stop();
+  QNX_TRACE_MSG("QNX:Shell:DumpDomAndExit\n");
 
   const std::u16string script = u"document.documentElement.outerHTML";
-  render_frame_host->ExecuteJavaScriptForTests(
+  rfh->ExecuteJavaScriptForTests(
       script,
       base::BindOnce(
           [](base::Value value) {
-#if BUILDFLAG(IS_QNX)
-            { const char m[] = "QNX:Shell:DFL callback\n"; write(2, m, sizeof(m) - 1); }
-#endif
+            QNX_TRACE_MSG("QNX:Shell:DumpDom callback\n");
             std::string html;
             if (value.is_string())
               html = value.GetString();
             write(1, html.c_str(), html.size());
             write(1, "\n", 1);
 #if BUILDFLAG(IS_QNX)
-            { const char m[] = "QNX:Shell:DFL output done, exiting\n"; write(2, m, sizeof(m) - 1); }
             _exit(0);
 #else
             printf("%s\n", html.c_str());
             fflush(stdout);
 #endif
           }));
+}
+
+void Shell::OnTimeout() {
+  QNX_TRACE_MSG("QNX:Shell:OnTimeout fired\n");
+  if (dom_already_dumped_)
+    return;
+  auto* rfh = web_contents_->GetPrimaryMainFrame();
+  if (rfh)
+    DumpDomAndExit(rfh);
+}
+
+void Shell::DidStartNavigation(NavigationHandle* navigation_handle) {
+  if (!navigation_handle->IsInPrimaryMainFrame())
+    return;
+  auto* cmd = base::CommandLine::ForCurrentProcess();
+  if (!cmd->HasSwitch(switches::kDumpDom))
+    return;
+
+  if (timeout_armed_)
+    return;
+
+  std::string timeout_str = cmd->GetSwitchValueASCII(switches::kTimeout);
+  int timeout_ms = 0;
+  if (!timeout_str.empty() && base::StringToInt(timeout_str, &timeout_ms) &&
+      timeout_ms > 0) {
+    timeout_armed_ = true;
+    QNX_TRACE_FMT("QNX:Shell:StartTimer %dms\n", timeout_ms);
+    // Tier 1 (graceful): try to dump the DOM via the renderer at the deadline.
+    dump_timer_.Start(FROM_HERE, base::Milliseconds(timeout_ms),
+                      base::BindOnce(&Shell::OnTimeout,
+                                     base::Unretained(this)));
+#if BUILDFLAG(IS_QNX)
+    // Tier 2 (hard): guarantee the process exits even if the renderer is
+    // jammed and the graceful JS round-trip never completes. Grace period of
+    // 4s after the soft deadline.
+    StartQnxHardWatchdog(timeout_ms + 4000);
+#endif
+  }
+}
+
+void Shell::DOMContentLoaded(RenderFrameHost* render_frame_host) {
+  if (!render_frame_host->IsInPrimaryMainFrame())
+    return;
+  auto* cmd = base::CommandLine::ForCurrentProcess();
+  if (!cmd->HasSwitch(switches::kDumpDom))
+    return;
+  std::string trigger = cmd->GetSwitchValueASCII(switches::kDomTrigger);
+  if (trigger != "domcontentloaded")
+    return;
+  QNX_TRACE_MSG("QNX:Shell:DOMContentLoaded trigger\n");
+  DumpDomAndExit(render_frame_host);
+}
+
+void Shell::DidFinishLoad(RenderFrameHost* render_frame_host,
+                          const GURL& validated_url) {
+  QNX_TRACE_FMT("QNX:Shell:DFL enter main=%d dump=%d\n",
+                (int)render_frame_host->IsInPrimaryMainFrame(),
+                (int)base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpDom));
+  if (!render_frame_host->IsInPrimaryMainFrame())
+    return;
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpDom))
+    return;
+  QNX_TRACE_MSG("QNX:Shell:DFL exec\n");
+  DumpDomAndExit(render_frame_host);
 }
 
 JavaScriptDialogManager* Shell::GetJavaScriptDialogManager(

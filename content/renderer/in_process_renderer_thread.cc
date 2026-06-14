@@ -5,6 +5,7 @@
 #include "content/renderer/in_process_renderer_thread.h"
 
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 #include "content/public/common/content_client.h"
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/renderer/render_process.h"
@@ -34,9 +35,7 @@ InProcessRendererThread::~InProcessRendererThread() {
 }
 
 void InProcessRendererThread::Init() {
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:Renderer:1 Init\n", 20);
-#endif
+  QNX_TRACE_MSG("QNX:Renderer:1 Init\n");
   content::ContentRendererClient* client = GetContentClient()->renderer();
   if (client) {
     client->PostSandboxInitialized();
@@ -46,28 +45,18 @@ void InProcessRendererThread::Init() {
   base::android::AttachCurrentThreadWithName(thread_name());
   CHECK(!render_process_);
 #endif
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:Renderer:2 InitBlink\n", 25);
-#endif
+  QNX_TRACE_MSG("QNX:Renderer:2 InitBlink\n");
   blink::Platform::InitializeBlink();
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:Renderer:3 Scheduler\n", 25);
-#endif
+  QNX_TRACE_MSG("QNX:Renderer:3 Scheduler\n");
   std::unique_ptr<blink::scheduler::WebThreadScheduler> main_thread_scheduler =
       blink::scheduler::WebThreadScheduler::CreateMainThreadScheduler();
 
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:Renderer:4 RenderProc\n", 26);
-#endif
+  QNX_TRACE_MSG("QNX:Renderer:4 RenderProc\n");
   render_process_ = RenderProcessImpl::Create();
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:Renderer:5 RenderThread\n", 28);
-#endif
+  QNX_TRACE_MSG("QNX:Renderer:5 RenderThread\n");
   new RenderThreadImpl(params_, renderer_client_id_,
                        std::move(main_thread_scheduler));
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:Renderer:6 Done\n", 20);
-#endif
+  QNX_TRACE_MSG("QNX:Renderer:6 Done\n");
 }
 
 void InProcessRendererThread::CleanUp() {

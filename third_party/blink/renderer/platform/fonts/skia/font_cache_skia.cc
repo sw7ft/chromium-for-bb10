@@ -233,8 +233,15 @@ sk_sp<SkTypeface> FontCache::CreateTypeface(
   // TODO(https://crbug.com/1425390: Assign FontCache::font_manager_ in the
   // ctor.
   auto font_manager = font_manager_ ? font_manager_ : SkFontMgr::RefDefault();
-  return sk_sp<SkTypeface>(font_manager->matchFamilyStyle(
-      name.empty() ? nullptr : name.c_str(), font_description.SkiaFontStyle()));
+  sk_sp<SkTypeface> typeface = font_manager->matchFamilyStyle(
+      name.empty() ? nullptr : name.c_str(), font_description.SkiaFontStyle());
+#if BUILDFLAG(IS_QNX)
+  if (!typeface) {
+    typeface = font_manager->legacyMakeTypeface(
+        nullptr, font_description.SkiaFontStyle());
+  }
+#endif
+  return typeface;
 }
 
 #if !BUILDFLAG(IS_WIN)

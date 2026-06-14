@@ -18,6 +18,7 @@
 #include "content/common/content_navigation_policy.h"
 #include "content/common/features.h"
 #include "content/public/browser/commit_deferring_condition.h"
+#include "base/qnx_trace.h"
 
 namespace content {
 
@@ -157,11 +158,7 @@ void CommitDeferringConditionRunner::UninstallConditionGeneratorForTesting(
 
 void CommitDeferringConditionRunner::ProcessConditions() {
 #if BUILDFLAG(IS_QNX)
-  {
-    char _b[64];
-    int _n = snprintf(_b, sizeof(_b), "QNX:CDC:0 count=%zu\n", conditions_.size());
-    write(2, _b, _n);
-  }
+  QNX_TRACE_FMT("QNX:CDC:0 count=%zu\n", conditions_.size());
 #endif
   while (!conditions_.empty()) {
     auto resume_closure =
@@ -169,22 +166,14 @@ void CommitDeferringConditionRunner::ProcessConditions() {
                        weak_factory_.GetWeakPtr());
     CommitDeferringCondition* condition = (*conditions_.begin()).get();
 #if BUILDFLAG(IS_QNX)
-    {
-      char _b[128];
-      int _n = snprintf(_b, sizeof(_b), "QNX:CDC:chk %p\n",
+    QNX_TRACE_FMT("QNX:CDC:chk %p\n",
                         (void*)condition);
-      write(2, _b, _n);
-    }
 #endif
     is_deferred_ = false;
     auto result = condition->WillCommitNavigation(std::move(resume_closure));
 #if BUILDFLAG(IS_QNX)
-    {
-      char _b[128];
-      int _n = snprintf(_b, sizeof(_b), "QNX:CDC:res %d\n",
+    QNX_TRACE_FMT("QNX:CDC:res %d\n",
                         (int)result);
-      write(2, _b, _n);
-    }
 #endif
     switch (result) {
       case CommitDeferringCondition::Result::kDefer:
@@ -199,9 +188,7 @@ void CommitDeferringConditionRunner::ProcessConditions() {
     conditions_.erase(conditions_.begin());
   }
 
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:CDC:done allOK\n", 19);
-#endif
+  QNX_TRACE_MSG("QNX:CDC:done allOK\n");
   delegate_->OnCommitDeferringConditionChecksComplete(
       navigation_type_, candidate_prerender_frame_tree_node_id_);
 }

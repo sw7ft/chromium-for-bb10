@@ -35,6 +35,9 @@ cp "$QNX_TOOLCHAIN/x86_64-linux/arm-blackberry-qnx8eabi/lib64/gcc/arm-blackberry
 cp "$QNX_TOOLCHAIN/x86_64-linux/arm-blackberry-qnx8eabi/lib64/gcc/arm-blackberry-qnx8eabi/9.3.0/libstdc++.so.6" "$STAGING/"
 cp "$QNX_TOOLCHAIN/arm-blackberry-qnx8eabi/lib/libm.so.2" "$STAGING/"
 
+echo "Copying CA certificate bundle..."
+cp "$SCRIPT_DIR/cacert.pem" "$STAGING/"
+
 echo "Copying scripts and docs..."
 cp "$SCRIPT_DIR/run.sh" "$STAGING/"
 cp "$SCRIPT_DIR/README.md" "$STAGING/"

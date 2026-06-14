@@ -29,6 +29,7 @@
 #include "third_party/blink/renderer/platform/wtf/text/string_view.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_codec.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding_registry.h"
+#include "base/qnx_trace.h"
 
 namespace blink {
 
@@ -393,9 +394,7 @@ void TextResourceDecoder::AutoDetectEncodingIfAllowed(const char* data,
 }
 
 String TextResourceDecoder::Decode(const char* data, size_t data_len) {
-#if defined(__QNX__)
-  ::write(2, "QNX:TRD:1 entry\n", 17);
-#endif
+  QNX_TRACE_MSG("QNX:TRD:1 entry\n");
   wtf_size_t len = base::checked_cast<wtf_size_t>(data_len);
   if (!buffer_.empty()) {
     AddToBuffer(data, len);
@@ -405,9 +404,7 @@ String TextResourceDecoder::Decode(const char* data, size_t data_len) {
 
   wtf_size_t length_of_bom = 0;
   if (!checked_for_bom_) {
-#if defined(__QNX__)
-    ::write(2, "QNX:TRD:2 BOM\n", 15);
-#endif
+    QNX_TRACE_MSG("QNX:TRD:2 BOM\n");
     length_of_bom = CheckForBOM(data, len);
 
     // BOM check can fail when the available data is not enough.
@@ -439,9 +436,7 @@ String TextResourceDecoder::Decode(const char* data, size_t data_len) {
   const char* data_for_decode = data + length_of_bom;
   wtf_size_t length_for_decode = len - length_of_bom;
 
-#if defined(__QNX__)
-  ::write(2, "QNX:TRD:3 preMeta\n", 18);
-#endif
+  QNX_TRACE_MSG("QNX:TRD:3 preMeta\n");
   if (options_.GetContentType() == TextResourceDecoderOptions::kHTMLContent &&
       !checked_for_meta_charset_)
     CheckForMetaCharset(data_for_decode, length_for_decode);
@@ -455,9 +450,7 @@ String TextResourceDecoder::Decode(const char* data, size_t data_len) {
   if (!codec_)
     codec_ = NewTextCodec(encoding_);
 
-#if defined(__QNX__)
-  ::write(2, "QNX:TRD:5 preDecode\n", 20);
-#endif
+  QNX_TRACE_MSG("QNX:TRD:5 preDecode\n");
   String result = codec_->Decode(
       data_for_decode, length_for_decode, WTF::FlushBehavior::kDoNotFlush,
       options_.GetContentType() == TextResourceDecoderOptions::kXMLContent &&

@@ -35,6 +35,7 @@
 #include "net/http/http_util.h"
 #include "net/log/net_log_capture_mode.h"
 #include "net/log/net_log_values.h"
+#include "base/qnx_trace.h"
 
 using base::Time;
 
@@ -267,22 +268,14 @@ HttpResponseHeaders::HttpResponseHeaders(const std::string& raw_input)
 
 HttpResponseHeaders::HttpResponseHeaders(base::PickleIterator* iter)
     : response_code_(-1) {
-#if defined(__QNX__)
-  write(2, "QNX:HRH:ctor:0\n", 15);
-#endif
+  QNX_TRACE_MSG("QNX:HRH:ctor:0\n");
   std::string raw_input;
   if (iter->ReadString(&raw_input)) {
 #if defined(__QNX__)
-    {
-      char _b[64];
-      int _n = snprintf(_b, sizeof(_b), "QNX:HRH:ctor:1 len=%u\n", (unsigned)raw_input.size());
-      write(2, _b, _n);
-    }
+    QNX_TRACE_FMT("QNX:HRH:ctor:1 len=%u\n", (unsigned)raw_input.size());
 #endif
     Parse(raw_input);
-#if defined(__QNX__)
-    write(2, "QNX:HRH:ctor:2 parsed\n", 21);
-#endif
+    QNX_TRACE_MSG("QNX:HRH:ctor:2 parsed\n");
   }
 }
 
@@ -636,9 +629,7 @@ void HttpResponseHeaders::UpdateWithNewRange(const HttpByteRange& byte_range,
 }
 
 void HttpResponseHeaders::Parse(const std::string& raw_input) {
-#if defined(__QNX__)
-  write(2, "QNX:Parse:0\n", 12);
-#endif
+  QNX_TRACE_MSG("QNX:Parse:0\n");
   raw_headers_.reserve(raw_input.size());
 
   std::string::const_iterator line_begin = raw_input.begin();
@@ -647,24 +638,16 @@ void HttpResponseHeaders::Parse(const std::string& raw_input) {
       (line_end != raw_input.end() && (line_end + 1) != raw_input.end() &&
        *(line_end + 1) != '\0');
 #if defined(__QNX__)
-  {
-    char _b[64];
-    int _n = snprintf(_b, sizeof(_b), "QNX:Parse:1 hasH=%d atEnd=%d\n",
+  QNX_TRACE_FMT("QNX:Parse:1 hasH=%d atEnd=%d\n",
                       (int)has_headers, (int)(line_end == raw_input.end()));
-    write(2, _b, _n);
-  }
 #endif
   ParseStatusLine(line_begin, line_end, has_headers);
-#if defined(__QNX__)
-  write(2, "QNX:Parse:2 status\n", 19);
-#endif
+  QNX_TRACE_MSG("QNX:Parse:2 status\n");
   raw_headers_.push_back('\0');
 
   if (line_end == raw_input.end()) {
     raw_headers_.push_back('\0');
-#if defined(__QNX__)
-    write(2, "QNX:Parse:3 done-early\n", 23);
-#endif
+    QNX_TRACE_MSG("QNX:Parse:3 done-early\n");
     DCHECK_EQ('\0', raw_headers_[raw_headers_.size() - 2]);
     DCHECK_EQ('\0', raw_headers_[raw_headers_.size() - 1]);
     return;
@@ -871,22 +854,14 @@ void HttpResponseHeaders::ParseStatusLine(
     std::string::const_iterator line_end,
     bool has_headers) {
 #if defined(__QNX__)
-  {
-    char _b[64];
-    int _n = snprintf(_b, sizeof(_b), "QNX:PSL:0 len=%d hasH=%d\n",
+  QNX_TRACE_FMT("QNX:PSL:0 len=%d hasH=%d\n",
                       (int)(line_end - line_begin), (int)has_headers);
-    write(2, _b, _n);
-  }
 #endif
   HttpVersion parsed_http_version = ParseVersion(line_begin, line_end);
 #if defined(__QNX__)
-  {
-    char _b[64];
-    int _n = snprintf(_b, sizeof(_b), "QNX:PSL:1 ver=%d.%d\n",
+  QNX_TRACE_FMT("QNX:PSL:1 ver=%d.%d\n",
                       parsed_http_version.major_value(),
                       parsed_http_version.minor_value());
-    write(2, _b, _n);
-  }
 #endif
 
   if (parsed_http_version == HttpVersion(0, 9) && !has_headers) {
@@ -902,9 +877,7 @@ void HttpResponseHeaders::ParseStatusLine(
     http_version_ = HttpVersion(1, 0);
     raw_headers_ = "HTTP/1.0";
   }
-#if defined(__QNX__)
-  write(2, "QNX:PSL:2 clamp\n", 16);
-#endif
+  QNX_TRACE_MSG("QNX:PSL:2 clamp\n");
   if (parsed_http_version != http_version_) {
     DVLOG(1) << "assuming HTTP/" << http_version_.major_value() << "."
              << http_version_.minor_value();
@@ -912,11 +885,7 @@ void HttpResponseHeaders::ParseStatusLine(
 
   std::string::const_iterator p = std::find(line_begin, line_end, ' ');
 #if defined(__QNX__)
-  {
-    char _b[48];
-    int _n = snprintf(_b, sizeof(_b), "QNX:PSL:3 find atEnd=%d\n", (int)(p == line_end));
-    write(2, _b, _n);
-  }
+  QNX_TRACE_FMT("QNX:PSL:3 find atEnd=%d\n", (int)(p == line_end));
 #endif
 
   if (p == line_end) {
@@ -928,13 +897,7 @@ void HttpResponseHeaders::ParseStatusLine(
 
   response_code_ =
       ParseStatus(base::MakeStringPiece(p + 1, line_end), raw_headers_);
-#if defined(__QNX__)
-  {
-    char _b[48];
-    int _n = snprintf(_b, sizeof(_b), "QNX:PSL:4 code=%d\n", response_code_);
-    write(2, _b, _n);
-  }
-#endif
+  QNX_TRACE_FMT("QNX:PSL:4 code=%d\n", response_code_);
 }
 
 size_t HttpResponseHeaders::FindHeader(size_t from,

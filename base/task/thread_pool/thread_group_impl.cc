@@ -10,19 +10,13 @@
 #include <type_traits>
 #include <utility>
 
-#if BUILDFLAG(IS_QNX) && 0 /* disabled - too verbose */
-#include <unistd.h>
-#define QNX_GW(msg) write(2, msg, sizeof(msg) - 1)
-#else
-#define QNX_GW(msg) ((void)0)
-#endif
-
 #include "base/atomicops.h"
 #include "base/auto_reset.h"
 #include "base/compiler_specific.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
+#include "base/qnx_trace.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/raw_ptr.h"
@@ -174,28 +168,28 @@ class ThreadGroupImpl::ScopedCommandsExecutor
   void FlushImpl() {
     CheckedLock::AssertNoLockHeldOnCurrentThread();
 
-    QNX_GW("QNX:FI:1 wakeup\n");
+    QNX_TRACE_MSG("QNX:FI:1 wakeup\n");
     // Wake up workers.
     workers_to_wake_up_.ForEachWorker(
         [](WorkerThread* worker) { worker->WakeUp(); });
 
-    QNX_GW("QNX:FI:2 start\n");
+    QNX_TRACE_MSG("QNX:FI:2 start\n");
     // Start workers. Happens after wake ups to prevent the case where a worker
     // enters its main function, is descheduled because it wasn't woken up yet,
     // and is woken up immediately after.
     workers_to_start_.ForEachWorker([&](WorkerThread* worker) {
-      QNX_GW("QNX:FI:3 pre-Start\n");
+      QNX_TRACE_MSG("QNX:FI:3 pre-Start\n");
       worker->Start(outer_->after_start().service_thread_task_runner,
                     outer_->after_start().worker_thread_observer);
-      QNX_GW("QNX:FI:4 post-Start\n");
+      QNX_TRACE_MSG("QNX:FI:4 post-Start\n");
       if (outer_->worker_started_for_testing_)
         outer_->worker_started_for_testing_->Wait();
     });
 
-    QNX_GW("QNX:FI:5 adjust\n");
+    QNX_TRACE_MSG("QNX:FI:5 adjust\n");
     if (must_schedule_adjust_max_tasks_)
       outer_->ScheduleAdjustMaxTasks();
-    QNX_GW("QNX:FI:6 done\n");
+    QNX_TRACE_MSG("QNX:FI:6 done\n");
   }
 
   const raw_ptr<ThreadGroupImpl> outer_;
@@ -572,17 +566,17 @@ void ThreadGroupImpl::WorkerThreadDelegateImpl::OnMainEntry(
 
 RegisteredTaskSource ThreadGroupImpl::WorkerThreadDelegateImpl::GetWork(
     WorkerThread* worker) {
-  QNX_GW("QNX:GW:1 enter\n");
+  QNX_TRACE_MSG("QNX:GW:1 enter\n");
   DCHECK_CALLED_ON_VALID_THREAD(worker_thread_checker_);
   DCHECK(!read_worker().current_task_priority);
   DCHECK(!read_worker().current_shutdown_behavior);
 
-  QNX_GW("QNX:GW:2 executor\n");
+  QNX_TRACE_MSG("QNX:GW:2 executor\n");
   ScopedCommandsExecutor executor(outer_.get());
-  QNX_GW("QNX:GW:3 lock\n");
+  QNX_TRACE_MSG("QNX:GW:3 lock\n");
   CheckedAutoLock auto_lock(outer_->lock_);
 
-  QNX_GW("QNX:GW:4 contains\n");
+  QNX_TRACE_MSG("QNX:GW:4 contains\n");
   DCHECK(ContainsWorker(outer_->workers_, worker));
 
   // Use this opportunity, before assigning work to this worker, to create/wake
@@ -592,16 +586,16 @@ RegisteredTaskSource ThreadGroupImpl::WorkerThreadDelegateImpl::GetWork(
   // Note: FlushWorkerCreation() below releases |outer_->lock_|. It is thus
   // important that all other operations come after it to keep this method
   // transactional.
-  QNX_GW("QNX:GW:5 ensure\n");
+  QNX_TRACE_MSG("QNX:GW:5 ensure\n");
   outer_->EnsureEnoughWorkersLockRequired(&executor);
-  QNX_GW("QNX:GW:6 flush\n");
+  QNX_TRACE_MSG("QNX:GW:6 flush\n");
   executor.FlushWorkerCreation(&outer_->lock_);
 
-  QNX_GW("QNX:GW:7 canget\n");
+  QNX_TRACE_MSG("QNX:GW:7 canget\n");
   if (!CanGetWorkLockRequired(&executor, worker))
     return nullptr;
 
-  QNX_GW("QNX:GW:8 dequeue\n");
+  QNX_TRACE_MSG("QNX:GW:8 dequeue\n");
   RegisteredTaskSource task_source;
   TaskPriority priority;
   while (!task_source && !outer_->priority_queue_.IsEmpty()) {

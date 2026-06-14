@@ -28,6 +28,7 @@
 #include "base/task/current_thread.h"
 #include "base/task/thread_pool.h"
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 #include "components/viz/common/features.h"
 #include "content/browser/browser_plugin/browser_plugin_guest.h"
 #include "content/browser/download/drag_download_util.h"
@@ -1012,36 +1013,26 @@ RenderWidgetHostViewBase* WebContentsViewAura::CreateViewForWidget(
         render_widget_host->GetView());
   }
 
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:CBWV:1 preNew\n", 18);
-#endif
+  QNX_TRACE_MSG("QNX:CBWV:1 preNew\n");
   RenderWidgetHostViewAura* view =
       g_create_render_widget_host_view
           ? g_create_render_widget_host_view(render_widget_host)
           : new RenderWidgetHostViewAura(render_widget_host);
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:CBWV:2 preInitAsChild\n", 26);
-#endif
+  QNX_TRACE_MSG("QNX:CBWV:2 preInitAsChild\n");
   view->InitAsChild(GetRenderWidgetHostViewParent());
 
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:CBWV:3 postInitAsChild\n", 28);
-#endif
+  QNX_TRACE_MSG("QNX:CBWV:3 postInitAsChild\n");
   RenderWidgetHostImpl* host_impl =
       RenderWidgetHostImpl::From(render_widget_host);
 
   if (!host_impl->is_hidden())
     view->Show();
 
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:CBWV:4 preSetDragDrop\n", 27);
-#endif
+  QNX_TRACE_MSG("QNX:CBWV:4 preSetDragDrop\n");
   // We listen to drag drop events in the newly created view's window.
   aura::client::SetDragDropDelegate(view->GetNativeView(), this);
 
-#if BUILDFLAG(IS_QNX)
-  write(2, "QNX:CBWV:5 postSetDragDrop\n", 28);
-#endif
+  QNX_TRACE_MSG("QNX:CBWV:5 postSetDragDrop\n");
   if (view->overscroll_controller() &&
       (!web_contents_->GetDelegate() ||
        web_contents_->GetDelegate()->CanOverscrollContent())) {

@@ -39,6 +39,7 @@
 #include "base/time/time.h"
 #include "base/types/optional_util.h"
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 #include "build/chromecast_buildflags.h"
 #include "build/chromeos_buildflags.h"
 #include "components/cookie_config/cookie_store_util.h"
@@ -798,12 +799,7 @@ void NetworkContext::CreateURLLoaderFactory(
     mojo::PendingReceiver<mojom::URLLoaderFactory> receiver,
     mojom::URLLoaderFactoryParamsPtr params,
     scoped_refptr<ResourceSchedulerClient> resource_scheduler_client) {
-#if defined(__QNX__) || defined(__QNXNTO__)
-  {
-    const char m[] = "QNX:NC:CreateULF!\n";
-    ::write(2, m, sizeof(m) - 1);
-  }
-#endif
+  QNX_TRACE_MSG("QNX:NC:CreateULF!\n");
   url_loader_factories_.emplace(std::make_unique<cors::CorsURLLoaderFactory>(
       this, std::move(params), std::move(resource_scheduler_client),
       std::move(receiver), &cors_origin_access_list_,

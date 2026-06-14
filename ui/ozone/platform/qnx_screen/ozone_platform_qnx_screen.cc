@@ -5,9 +5,9 @@
 
 #include <screen/screen.h>
 #include <memory>
-#include <unistd.h>
 
 #include "base/no_destructor.h"
+#include "base/qnx_trace.h"
 #include "ui/base/cursor/cursor_factory.h"
 #include "ui/base/ime/input_method_minimal.h"
 #include "ui/display/display.h"
@@ -152,8 +152,7 @@ class OzonePlatformQnxScreen : public OzonePlatform {
   bool InitializeUI(const InitParams& params) override {
     int rc = screen_create_context(&screen_ctx_, SCREEN_APPLICATION_CONTEXT);
     if (rc != 0) {
-      const char msg[] = "QNX:Ozone: screen_create_context failed\n";
-      ::write(2, msg, sizeof(msg) - 1);
+      QNX_TRACE_MSG("QNX:Ozone: screen_create_context failed\n");
       return false;
     }
 

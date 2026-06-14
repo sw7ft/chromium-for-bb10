@@ -29,16 +29,8 @@
 
 #include "third_party/blink/renderer/core/dom/document.h"
 
-#if defined(__QNX__)
-#include <unistd.h>
-#include <string.h>
-namespace {
-inline int qnx_trace(const char* msg) {
-  ::write(2, msg, strlen(msg));
-  return 0;
-}
-}
-#endif
+#include "base/qnx_trace.h"
+#include "build/build_config.h"
 
 #include <memory>
 #include <utility>
@@ -740,11 +732,7 @@ Document::Document(const DocumentInit& initializer,
               &Document::OnAdoptedStyleSheetSet),
           static_cast<V8ObservableArrayCSSStyleSheet::DeleteAlgorithmCallback>(
               &Document::OnAdoptedStyleSheetDelete)),
-#if defined(__QNX__)
-      token_((qnx_trace("QNX:Doc:I1 postTree\n"), initializer.GetToken())),
-#else
-      token_(initializer.GetToken()),
-#endif
+      token_(QNX_TRACE_THEN("QNX:Doc:I1 postTree\n", initializer.GetToken())),
       is_initial_empty_document_(initializer.IsInitialEmptyDocument()),
       is_prerendering_(initializer.IsPrerendering()),
       evaluate_media_queries_on_style_recalc_(false),
@@ -752,11 +740,9 @@ Document::Document(const DocumentInit& initializer,
       dom_window_(initializer.GetWindow()),
       execution_context_(initializer.GetExecutionContext()),
       agent_(initializer.GetAgent()),
-#if defined(__QNX__)
-      http_refresh_scheduler_((qnx_trace("QNX:Doc:I2 preHttp\n"), MakeGarbageCollected<HttpRefreshScheduler>(this))),
-#else
-      http_refresh_scheduler_(MakeGarbageCollected<HttpRefreshScheduler>(this)),
-#endif
+      http_refresh_scheduler_(
+          QNX_TRACE_THEN("QNX:Doc:I2 preHttp\n",
+                         MakeGarbageCollected<HttpRefreshScheduler>(this))),
       well_formed_(false),
       fallback_base_url_(initializer.FallbackBaseURL()),
       cookie_url_(dom_window_ ? initializer.GetCookieUrl()
@@ -767,26 +753,18 @@ Document::Document(const DocumentInit& initializer,
       compatibility_mode_locked_(false),
       last_focus_type_(mojom::blink::FocusType::kNone),
       had_keyboard_event_(false),
-#if defined(__QNX__)
       clear_focused_element_timer_(
-          (qnx_trace("QNX:Doc:I3 preTimer\n"), GetTaskRunner(TaskType::kInternalUserInteraction)),
+          QNX_TRACE_THEN("QNX:Doc:I3 preTimer\n",
+                         GetTaskRunner(TaskType::kInternalUserInteraction)),
           this,
           &Document::ClearFocusedElementTimerFired),
-#else
-      clear_focused_element_timer_(
-          GetTaskRunner(TaskType::kInternalUserInteraction),
-          this,
-          &Document::ClearFocusedElementTimerFired),
-#endif
       dom_tree_version_(++global_tree_version_),
       style_version_(0),
       listener_types_(0),
       mutation_observer_types_(0),
-#if defined(__QNX__)
-      visited_link_state_((qnx_trace("QNX:Doc:I4 preVisit\n"), MakeGarbageCollected<VisitedLinkState>(*this))),
-#else
-      visited_link_state_(MakeGarbageCollected<VisitedLinkState>(*this)),
-#endif
+      visited_link_state_(
+          QNX_TRACE_THEN("QNX:Doc:I4 preVisit\n",
+                         MakeGarbageCollected<VisitedLinkState>(*this))),
       visually_ordered_(false),
       // https://html.spec.whatwg.org/multipage/dom.html#current-document-readiness
       // says the ready state starts as 'loading' if there's an associated
@@ -804,20 +782,15 @@ Document::Document(const DocumentInit& initializer,
       ignore_destructive_write_count_(0),
       throw_on_dynamic_markup_insertion_count_(0),
       ignore_opens_during_unload_count_(0),
-#if defined(__QNX__)
-      markers_((qnx_trace("QNX:Doc:I5 preMarkers\n"), MakeGarbageCollected<DocumentMarkerController>(*this))),
-#else
-      markers_(MakeGarbageCollected<DocumentMarkerController>(*this)),
-#endif
+      markers_(QNX_TRACE_THEN("QNX:Doc:I5 preMarkers\n",
+                             MakeGarbageCollected<DocumentMarkerController>(
+                                 *this))),
       css_target_(nullptr),
       was_discarded_(false),
       load_event_progress_(kLoadEventCompleted),
       is_freezing_in_progress_(false),
-#if defined(__QNX__)
-      script_runner_((qnx_trace("QNX:Doc:I6 preScript\n"), MakeGarbageCollected<ScriptRunner>(this))),
-#else
-      script_runner_(MakeGarbageCollected<ScriptRunner>(this)),
-#endif
+      script_runner_(QNX_TRACE_THEN("QNX:Doc:I6 preScript\n",
+                                   MakeGarbageCollected<ScriptRunner>(this))),
       script_runner_delayer_(MakeGarbageCollected<ScriptRunnerDelayer>(
           script_runner_,
           ScriptRunner::DelayReason::kMilestone)),
@@ -840,28 +813,20 @@ Document::Document(const DocumentInit& initializer,
       // kDOMManipulation to ensure that we run onload() in order with other
       // callbacks (e.g. onloadstart()) per the spec.
       // See: https://html.spec.whatwg.org/#delay-the-load-event
-#if defined(__QNX__)
-      load_event_delay_timer_((qnx_trace("QNX:Doc:I7 preLoadTmr\n"), GetTaskRunner(TaskType::kDOMManipulation)),
-                              this,
-                              &Document::LoadEventDelayTimerFired),
-#else
-      load_event_delay_timer_(GetTaskRunner(TaskType::kDOMManipulation),
-                              this,
-                              &Document::LoadEventDelayTimerFired),
-#endif
+      load_event_delay_timer_(
+          QNX_TRACE_THEN("QNX:Doc:I7 preLoadTmr\n",
+                         GetTaskRunner(TaskType::kDOMManipulation)),
+          this,
+          &Document::LoadEventDelayTimerFired),
       plugin_loading_timer_(GetTaskRunner(TaskType::kInternalLoading),
                             this,
                             &Document::PluginLoadingTimerFired),
       document_timing_(*this),
       write_recursion_is_too_deep_(false),
       write_recursion_depth_(0),
-#if defined(__QNX__)
-      scripted_animation_controller_(
-          (qnx_trace("QNX:Doc:I8 preAnim\n"), MakeGarbageCollected<ScriptedAnimationController>(domWindow()))),
-#else
-      scripted_animation_controller_(
-          MakeGarbageCollected<ScriptedAnimationController>(domWindow())),
-#endif
+      scripted_animation_controller_(QNX_TRACE_THEN(
+          "QNX:Doc:I8 preAnim\n",
+          MakeGarbageCollected<ScriptedAnimationController>(domWindow()))),
       element_data_cache_clear_timer_(
           GetTaskRunner(TaskType::kInternalUserInteraction),
           this,
@@ -879,50 +844,38 @@ Document::Document(const DocumentInit& initializer,
       // to SVGImage which does not have an associated RenderFrameHost. No URLs
       // will be associated to this source id. No DocumentCreated events will be
       // created either.
-#if defined(__QNX__)
-      ukm_source_id_((qnx_trace("QNX:Doc:I9 preUKM\n"), ukm::kInvalidSourceId)),
-      viewport_data_((qnx_trace("QNX:Doc:I10 preVP\n"), MakeGarbageCollected<ViewportData>(*this))),
-#else
-      ukm_source_id_(initializer.UkmSourceId() == ukm::kInvalidSourceId
-                         ? ukm::UkmRecorder::GetNewSourceID()
-                         : initializer.UkmSourceId()),
-      viewport_data_(MakeGarbageCollected<ViewportData>(*this)),
-#endif
+      ukm_source_id_(QNX_TRACE_THEN(
+          "QNX:Doc:I9 preUKM\n",
+          BUILDFLAG(IS_QNX)
+              ? ukm::kInvalidSourceId
+              : (initializer.UkmSourceId() == ukm::kInvalidSourceId
+                     ? ukm::UkmRecorder::GetNewSourceID()
+                     : initializer.UkmSourceId()))),
+      viewport_data_(QNX_TRACE_THEN("QNX:Doc:I10 preVP\n",
+                                    MakeGarbageCollected<ViewportData>(*this))),
       is_for_external_handler_(initializer.IsForExternalHandler()),
       fragment_directive_(MakeGarbageCollected<FragmentDirective>(*this)),
       display_lock_document_state_(
           MakeGarbageCollected<DisplayLockDocumentState>(this)),
-#if defined(__QNX__)
-      render_blocking_resource_manager_(
-          (qnx_trace("QNX:Doc:I11 preRBM\n"),
+      render_blocking_resource_manager_(QNX_TRACE_THEN(
+          "QNX:Doc:I11 preRBM\n",
           initializer.GetType() == DocumentInit::Type::kHTML
               ? MakeGarbageCollected<RenderBlockingResourceManager>(*this)
               : nullptr)),
-      data_((qnx_trace("QNX:Doc:I12 preData\n"), MakeGarbageCollected<DocumentData>(GetExecutionContext()))) {
-#else
-      render_blocking_resource_manager_(
-          initializer.GetType() == DocumentInit::Type::kHTML
-              ? MakeGarbageCollected<RenderBlockingResourceManager>(*this)
-              : nullptr),
-      data_(MakeGarbageCollected<DocumentData>(GetExecutionContext())) {
-#endif
-#if defined(__QNX__)
-  { const char m[] = "QNX:Doc:1 ctorBody\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+      data_(QNX_TRACE_THEN("QNX:Doc:I12 preData\n",
+                           MakeGarbageCollected<DocumentData>(
+                               GetExecutionContext()))) {
+  QNX_TRACE_MSG("QNX:Doc:1 ctorBody\n");
   DCHECK(agent_);
   if (base::FeatureList::IsEnabled(features::kDelayAsyncScriptExecution))
     script_runner_delayer_->Activate();
 
   if (GetFrame()) {
     DCHECK(GetFrame()->GetPage());
-#if defined(__QNX__)
-    { const char m[] = "QNX:Doc:2 preFetcher\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+    QNX_TRACE_MSG("QNX:Doc:2 preFetcher\n");
     fetcher_ = FrameFetchContext::CreateFetcherForCommittedDocument(
         *GetFrame()->Loader().GetDocumentLoader(), *this);
-#if defined(__QNX__)
-    { const char m[] = "QNX:Doc:3 postFetcher\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+    QNX_TRACE_MSG("QNX:Doc:3 postFetcher\n");
     cookie_jar_ = MakeGarbageCollected<CookieJar>(this);
   } else {
     // We disable fetches for frame-less Documents.
@@ -942,13 +895,9 @@ Document::Document(const DocumentInit& initializer,
   // Since CSSFontSelector requires Document::fetcher_ and StyleEngine owns
   // CSSFontSelector, need to initialize |style_engine_| after initializing
   // |fetcher_|.
-#if defined(__QNX__)
-  { const char m[] = "QNX:Doc:4 preStyle\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:Doc:4 preStyle\n");
   style_engine_ = MakeGarbageCollected<StyleEngine>(*this);
-#if defined(__QNX__)
-  { const char m[] = "QNX:Doc:5 postStyle\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:Doc:5 postStyle\n");
 
   root_scroller_controller_ =
       MakeGarbageCollected<RootScrollerController>(*this);
@@ -983,9 +932,7 @@ Document::Document(const DocumentInit& initializer,
 #ifndef NDEBUG
   LiveDocumentSet().insert(this);
 #endif
-#if defined(__QNX__)
-  { const char m[] = "QNX:Doc:6 ctorDone\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:Doc:6 ctorDone\n");
 }
 
 Document::~Document() {
@@ -3875,9 +3822,7 @@ void Document::close() {
 }
 
 void Document::ImplicitClose() {
-#if defined(__QNX__)
-  { const char m[] = "QNX:ImCl:1 entry\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:ImCl:1 entry\n");
   DCHECK(!InStyleRecalc());
 
   load_event_progress_ = kLoadEventInProgress;
@@ -3887,41 +3832,29 @@ void Document::ImplicitClose() {
   if (SvgExtensions())
     AccessSVGExtensions().DispatchSVGLoadEventToOutermostSVGElements();
 
-#if defined(__QNX__)
-  { const char m[] = "QNX:ImCl:2 preDocClosed\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:ImCl:2 preDocClosed\n");
   if (domWindow())
     domWindow()->DocumentWasClosed();
-#if defined(__QNX__)
-  { const char m[] = "QNX:ImCl:3 postDocClosed\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:ImCl:3 postDocClosed\n");
 
   if (GetFrame() && GetFrame()->IsMainFrame())
     GetFrame()->GetLocalFrameHostRemote().DocumentOnLoadCompleted();
 
-#if defined(__QNX__)
-  { const char m[] = "QNX:ImCl:4 preOnload\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:ImCl:4 preOnload\n");
   if (GetFrame()) {
     GetFrame()->Client()->DispatchDidHandleOnloadEvents();
   }
-#if defined(__QNX__)
-  { const char m[] = "QNX:ImCl:5 postOnload\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:ImCl:5 postOnload\n");
 
   if (!GetFrame()) {
-#if defined(__QNX__)
-    ::write(2, "QNX:ImCl:6 noFrame\n", 19);
-#endif
+    QNX_TRACE_MSG("QNX:ImCl:6 noFrame\n");
     load_event_progress_ = kLoadEventCompleted;
     return;
   }
 
   if (GetFrame()->Loader().HasProvisionalNavigation() &&
       start_time_.Elapsed() < kCLayoutScheduleThreshold) {
-#if defined(__QNX__)
-    ::write(2, "QNX:ImCl:7 prov bail\n", 21);
-#endif
+    QNX_TRACE_MSG("QNX:ImCl:7 prov bail\n");
     load_event_progress_ = kLoadEventCompleted;
     return;
   }
@@ -3933,12 +3866,8 @@ void Document::ImplicitClose() {
 
   load_event_progress_ = kLoadEventCompleted;
 #if defined(__QNX__)
-  {
-    char _b[64];
-    int _n = snprintf(_b, sizeof(_b), "QNX:ImCl:9 lv=%d\n",
+  QNX_TRACE_FMT("QNX:ImCl:9 lv=%d\n",
                       (GetFrame() && GetLayoutView()) ? 1 : 0);
-    ::write(2, _b, _n);
-  }
 #endif
 
   if (GetFrame() && GetLayoutView()) {
@@ -3997,23 +3926,15 @@ void Document::Abort() {
 }
 
 void Document::CheckCompleted() {
-#if defined(__QNX__)
-  { const char m[] = "QNX:CC:1 entry\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:CC:1 entry\n");
   if (CheckCompletedInternal()) {
-#if defined(__QNX__)
-    { const char m[] = "QNX:CC:2 didFinish\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+    QNX_TRACE_MSG("QNX:CC:2 didFinish\n");
     CHECK(GetFrame());
     GetFrame()->Loader().DidFinishNavigation(
         FrameLoader::NavigationFinishState::kSuccess);
-#if defined(__QNX__)
-    { const char m[] = "QNX:CC:3 done\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+    QNX_TRACE_MSG("QNX:CC:3 done\n");
   } else {
-#if defined(__QNX__)
-    { const char m[] = "QNX:CC:4 notComplete\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+    QNX_TRACE_MSG("QNX:CC:4 notComplete\n");
   }
 }
 
@@ -4028,20 +3949,11 @@ void Document::FetchDictionaryFromLinkHeader() {
 }
 
 bool Document::CheckCompletedInternal() {
-#if defined(__QNX__)
-  { const char m[] = "QNX:CCI:1 entry\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:CCI:1 entry\n");
   if (!ShouldComplete()) {
-#if defined(__QNX__)
-    {
-      char buf[128];
-      int n = snprintf(buf, sizeof(buf),
-          "QNX:CCI:2 !should ps=%d brc=%d dle=%d lep=%d\n",
-          (int)parsing_state_, (int)fetcher_->BlockingRequestCount(),
-          (int)IsDelayingLoadEvent(), (int)load_event_progress_);
-      ::write(2, buf, n);
-    }
-#endif
+    QNX_TRACE_FMT("QNX:CCI:2 !should ps=%d brc=%d dle=%d lep=%d\n",
+                  (int)parsing_state_, (int)fetcher_->BlockingRequestCount(),
+                  (int)IsDelayingLoadEvent(), (int)load_event_progress_);
     return false;
   }
 
@@ -7547,9 +7459,7 @@ void Document::OnPrepareToStopParsing() {
 }
 
 void Document::FinishedParsing() {
-#if defined(__QNX__)
-  { const char m[] = "QNX:FP:1 entry\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:FP:1 entry\n");
   DCHECK(!GetScriptableDocumentParser() || !parser_->IsParsing());
   DCHECK(!GetScriptableDocumentParser() || ready_state_ != kLoading);
   SetParsingState(kInDOMContentLoaded);
@@ -7557,9 +7467,7 @@ void Document::FinishedParsing() {
 
   if (document_timing_.DomContentLoadedEventStart().is_null())
     document_timing_.MarkDomContentLoadedEventStart();
-#if defined(__QNX__)
-  { const char m[] = "QNX:FP:2 preDCL\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:FP:2 preDCL\n");
   if (!ScriptForbiddenScope::IsScriptForbidden()) {
     DispatchEvent(*Event::CreateBubble(event_type_names::kDOMContentLoaded));
 
@@ -7584,13 +7492,9 @@ void Document::FinishedParsing() {
   ScriptableDocumentParser* parser = GetScriptableDocumentParser();
   well_formed_ = parser && parser->WellFormed();
 
-#if defined(__QNX__)
-  { const char m[] = "QNX:FP:3 preFrame\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+  QNX_TRACE_MSG("QNX:FP:3 preFrame\n");
   if (LocalFrame* frame = GetFrame()) {
-#if defined(__QNX__)
-    { const char m[] = "QNX:FP:4 hasFrame\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+    QNX_TRACE_MSG("QNX:FP:4 hasFrame\n");
     if (title_.empty())
       DispatchDidReceiveTitle();
 
@@ -7606,17 +7510,11 @@ void Document::FinishedParsing() {
       FontPerformance::MarkDomContentLoaded();
     }
 
-#if defined(__QNX__)
-    { const char m[] = "QNX:FP:5 preFL\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+    QNX_TRACE_MSG("QNX:FP:5 preFL\n");
     frame->Loader().FinishedParsing();
-#if defined(__QNX__)
-    { const char m[] = "QNX:FP:6 postFL\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+    QNX_TRACE_MSG("QNX:FP:6 postFL\n");
   } else {
-#if defined(__QNX__)
-    { const char m[] = "QNX:FP:7 noFrame\n"; ::write(2, m, sizeof(m) - 1); }
-#endif
+    QNX_TRACE_MSG("QNX:FP:7 noFrame\n");
   }
 
   // Schedule dropping of the ElementDataCache. We keep it alive for a while

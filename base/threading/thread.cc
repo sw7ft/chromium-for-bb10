@@ -8,16 +8,12 @@
 #include <type_traits>
 #include <utility>
 
+#include "base/qnx_trace.h"
 #if BUILDFLAG(IS_QNX)
 #include <pthread.h>
-#include <unistd.h>
-#include <cstdio>
-#define QNX_TM(msg) do { write(2, msg, sizeof(msg) - 1); } while(0)
-#define QNX_TMF(...) do { char _b[128]; int _n = snprintf(_b, sizeof(_b), __VA_ARGS__); if (_n > 0) write(2, _b, _n); } while(0)
-#else
-#define QNX_TM(msg) ((void)0)
-#define QNX_TMF(...) ((void)0)
 #endif
+#define QNX_TM(msg) QNX_TRACE_MSG(msg)
+#define QNX_TMF(...) QNX_TRACE_FMT(__VA_ARGS__)
 
 #include "base/dcheck_is_on.h"
 #include "base/functional/bind.h"

@@ -41,6 +41,7 @@
 #include "base/time/default_clock.h"
 #include "base/types/optional_util.h"
 #include "build/build_config.h"
+#include "base/qnx_trace.h"
 #include "build/chromeos_buildflags.h"
 #include "components/attribution_reporting/features.h"
 #include "components/leveldb_proto/public/proto_database_provider.h"
@@ -865,12 +866,7 @@ class StoragePartitionImpl::URLLoaderFactoryForBrowserProcess
     if (!storage_partition_) {
       return;
     }
-#if defined(__QNX__) || defined(__QNXNTO__)
-    {
-      const char m[] = "QNX:ULFBP:CLS!\n";
-      ::write(2, m, sizeof(m) - 1);
-    }
-#endif
+    QNX_TRACE_MSG("QNX:ULFBP:CLS!\n");
     storage_partition_->GetURLLoaderFactoryForBrowserProcessInternal()
         ->CreateLoaderAndStart(std::move(receiver), request_id, options,
                                url_request, std::move(client),
@@ -882,12 +878,7 @@ class StoragePartitionImpl::URLLoaderFactoryForBrowserProcess
     if (!storage_partition_) {
       return;
     }
-#if defined(__QNX__) || defined(__QNXNTO__)
-    {
-      const char m[] = "QNX:ULFBP:Clone!\n";
-      ::write(2, m, sizeof(m) - 1);
-    }
-#endif
+    QNX_TRACE_MSG("QNX:ULFBP:Clone!\n");
     storage_partition_->GetURLLoaderFactoryForBrowserProcessInternal()->Clone(
         std::move(receiver));
   }
@@ -1680,12 +1671,8 @@ std::string StoragePartitionImpl::GetPartitionDomain() {
 network::mojom::NetworkContext* StoragePartitionImpl::GetNetworkContext() {
   DCHECK(initialized_);
 #if defined(__QNX__) || defined(__QNXNTO__)
-  {
-    char m[64];
-    int n = snprintf(m, sizeof(m), "QNX:SPI:GetNetCtx bound=%d\n",
+  QNX_TRACE_FMT("QNX:SPI:GetNetCtx bound=%d\n",
                      network_context_.is_bound() ? 1 : 0);
-    ::write(2, m, n);
-  }
 #endif
   if (!network_context_.is_bound()) {
     InitNetworkContext();
@@ -3464,24 +3451,14 @@ StoragePartitionImpl::CreateURLLoaderFactoryParams() {
 
 network::mojom::URLLoaderFactory*
 StoragePartitionImpl::GetURLLoaderFactoryForBrowserProcessInternal() {
-#if defined(__QNX__) || defined(__QNXNTO__)
-  {
-    const char m[] = "QNX:SPI:GetULFInt!\n";
-    ::write(2, m, sizeof(m) - 1);
-  }
-#endif
+  QNX_TRACE_MSG("QNX:SPI:GetULFInt!\n");
   // Create the URLLoaderFactory as needed, but make sure not to reuse a
   // previously created one if the test override has changed.
   if (url_loader_factory_for_browser_process_ &&
       url_loader_factory_for_browser_process_.is_connected() &&
       is_test_url_loader_factory_for_browser_process_ !=
           !GetCreateURLLoaderFactoryCallback()) {
-#if defined(__QNX__) || defined(__QNXNTO__)
-    {
-      const char m[] = "QNX:SPI:GetULFInt cached!\n";
-      ::write(2, m, sizeof(m) - 1);
-    }
-#endif
+    QNX_TRACE_MSG("QNX:SPI:GetULFInt cached!\n");
     return url_loader_factory_for_browser_process_.get();
   }
 
