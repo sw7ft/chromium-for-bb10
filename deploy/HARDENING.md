@@ -102,8 +102,8 @@ cross-process Mojo, `ChildProcessSecurityPolicy`, origin locks at factory creati
 | Tier | example.com | google.com | wikipedia/QNX | Notes |
 |------|-------------|------------|---------------|-------|
 | **0** | PASS (~32s) | PASS (~43s, ~225KB) | PASS (~241KB) | Jun 16 2026; `./test-regression.sh 0`; post-commit timeout + cancellable watchdog |
-| 1 | PASS | PASS | FAIL (flaky) | HTTP/2 enabled; wiki may exit non-zero intermittently |
-| 2 | PASS | FAIL (flaky) | FAIL (flaky) | +MojoIpcz; re-run recommended |
+| **1** | PASS | PASS | PASS | HTTP/2 enabled; Jun 16 2026 tier 1 stable (2/2 runs 3/3) |
+| **2** | PASS | PASS | PASS | +MojoIpcz; Jun 16 2026 3/3 on Passport |
 | 3 | FAIL | FAIL | FAIL | Multi-process: HardWatchdog; real `posix_spawn` launcher wired |
 | 4 | FAIL | FAIL | FAIL | qnx_screen headful: HardWatchdog on all URLs |
 | 5 | (not run) | | | Full GPU; use `QNX_GPU_PROBE=1 ./run.sh about:blank` to probe EGL |
