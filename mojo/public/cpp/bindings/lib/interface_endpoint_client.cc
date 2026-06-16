@@ -1024,14 +1024,14 @@ bool InterfaceEndpointClient::HandleValidatedMessage(Message* message) {
     QNX_TRACE_FMT("QNX:IEC:pre tid=%x name=%u iface=%s\n",
                         (unsigned)pthread_self(),
                         message->name(),
-                        interface_name_ ? interface_name_ : "?");
+                        base::QnxSafeStr(interface_name_));
 #endif
     accepted_interface_message = incoming_receiver_->Accept(message);
 #if defined(__QNX__)
     QNX_TRACE_FMT("QNX:IEC:post tid=%x res=%d iface=%s\n",
                         (unsigned)pthread_self(),
                         (int)accepted_interface_message,
-                        interface_name_ ? interface_name_ : "?");
+                        base::QnxSafeStr(interface_name_));
 #endif
   }
 

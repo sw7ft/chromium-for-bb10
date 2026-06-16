@@ -380,7 +380,16 @@ void StackDumpSignalHandler(int signal, siginfo_t* info, void* void_context) {
     return;
   }
   {
-    char buf[512];
+    // Build the entire crash report in one buffer and emit with a single
+    // write() so it is not shredded by other threads writing to stderr.
+    static char crashbuf[8192];
+    int o = 0;
+#define CB_APP(...)                                                      \
+  do {                                                                   \
+    if (o < (int)sizeof(crashbuf) - 1)                                   \
+      o += snprintf(crashbuf + o, sizeof(crashbuf) - o, __VA_ARGS__);    \
+  } while (0)
+
     const char* signame = "?";
     if (signal == 6) signame = "SIGABRT";
     else if (signal == 11) signame = "SIGSEGV";
@@ -395,55 +404,58 @@ void StackDumpSignalHandler(int signal, siginfo_t* info, void* void_context) {
       lr = uc->uc_mcontext.cpu.gpr[14];
       sp = uc->uc_mcontext.cpu.gpr[13];
     }
-    int n = snprintf(buf, sizeof(buf),
-      "QNX:CRASH tid=%x sig=%s(%d) code=%d pc=0x%x lr=0x%x sp=0x%x\n",
-      (unsigned)pthread_self(), signame, signal, si_code, pc, lr, sp);
-    write(STDERR_FILENO, buf, n);
+    unsigned fault = info ? (unsigned)(uintptr_t)info->si_addr : 0;
+    CB_APP("\nQNX:CRASH tid=%x sig=%s(%d) code=%d fault=0x%x pc=0x%x lr=0x%x "
+           "sp=0x%x\n",
+           (unsigned)pthread_self(), signame, signal, si_code, fault, pc, lr,
+           sp);
 
     Dl_info dli;
     if (pc && dladdr((void*)pc, &dli)) {
-      n = snprintf(buf, sizeof(buf), "QNX:PC %s:%s+0x%x\n",
-        dli.dli_fname ? dli.dli_fname : "?",
-        dli.dli_sname ? dli.dli_sname : "?",
-        (unsigned)((char*)pc - (char*)dli.dli_saddr));
-      write(STDERR_FILENO, buf, n);
+      CB_APP("QNX:PC %s:%s+0x%x\n", dli.dli_fname ? dli.dli_fname : "?",
+             dli.dli_sname ? dli.dli_sname : "?",
+             (unsigned)((char*)pc - (char*)dli.dli_saddr));
     }
     if (lr && dladdr((void*)lr, &dli)) {
-      n = snprintf(buf, sizeof(buf), "QNX:LR %s:%s+0x%x\n",
-        dli.dli_fname ? dli.dli_fname : "?",
-        dli.dli_sname ? dli.dli_sname : "?",
-        (unsigned)((char*)lr - (char*)dli.dli_saddr));
-      write(STDERR_FILENO, buf, n);
+      CB_APP("QNX:LR %s:%s+0x%x\n", dli.dli_fname ? dli.dli_fname : "?",
+             dli.dli_sname ? dli.dli_sname : "?",
+             (unsigned)((char*)lr - (char*)dli.dli_saddr));
     }
-    // Also print all GPRs for offline analysis
-    for (int r = 0; r < 16; r++) {
-      unsigned rv = uc->uc_mcontext.cpu.gpr[r];
-      if (rv > 0x100000 && dladdr((void*)rv, &dli) && dli.dli_sname) {
-        n = snprintf(buf, sizeof(buf), "QNX:R%d=0x%x %s:%s+0x%x\n",
-          r, rv, dli.dli_fname ? dli.dli_fname : "?",
-          dli.dli_sname,
-          (unsigned)((char*)rv - (char*)dli.dli_saddr));
-        write(STDERR_FILENO, buf, n);
+    // content_shell is a non-PIE EXEC, so runtime addresses equal ELF vaddrs:
+    // symbolize directly with llvm-addr2line -e content_shell <abs-addr>.
+    Dl_info self_dli;
+    unsigned exe_base = 0;
+    if (dladdr((void*)&StackDumpSignalHandler, &self_dli)) {
+      exe_base = (unsigned)self_dli.dli_fbase;
+      CB_APP("QNX:EXEBASE 0x%x %s\n", exe_base,
+             self_dli.dli_fname ? self_dli.dli_fname : "?");
+    }
+    if (uc) {
+      for (int r = 0; r < 16; r += 4) {
+        CB_APP("QNX:R%d-%d 0x%x 0x%x 0x%x 0x%x\n", r, r + 3,
+               uc->uc_mcontext.cpu.gpr[r], uc->uc_mcontext.cpu.gpr[r + 1],
+               uc->uc_mcontext.cpu.gpr[r + 2], uc->uc_mcontext.cpu.gpr[r + 3]);
       }
     }
-    // Stack scan: print potential return addresses from stack
-    if (sp > 0x10000) {
-      write(STDERR_FILENO, "QNX:STACK:", 10);
+    // Stack scan: print every word that resolves into the content_shell module
+    // as an absolute address (addr2line). printf-family uses large stack
+    // frames, so scan deep enough to find the Chromium caller above libc.
+    if (sp > 0x10000 && exe_base) {
+      CB_APP("QNX:STACKABS:");
       unsigned* sptr = (unsigned*)sp;
-      for (int i = 0; i < 80 && (unsigned)(sptr + i) < 0x7fffffff; i++) {
+      for (int i = 0; i < 1024 && (unsigned)(sptr + i) < 0x7fffffff; i++) {
         unsigned val = sptr[i];
-        if (val > 0x1000000 && val < 0x6000000) {
-          Dl_info sdi;
-          if (dladdr((void*)(val & ~1), &sdi) && sdi.dli_sname) {
-            n = snprintf(buf, sizeof(buf), " [%d]%x:%s+%x",
-              i, val, sdi.dli_sname,
-              (unsigned)((char*)(val & ~1) - (char*)sdi.dli_saddr));
-            write(STDERR_FILENO, buf, n);
-          }
+        unsigned code = val & ~1u;  // clear thumb bit
+        Dl_info sdi;
+        if (code > 0x10000 && dladdr((void*)code, &sdi) &&
+            (unsigned)sdi.dli_fbase == exe_base) {
+          CB_APP(" %x", code);
         }
       }
-      write(STDERR_FILENO, "\n", 1);
+      CB_APP("\n");
     }
+#undef CB_APP
+    write(STDERR_FILENO, crashbuf, o);
   }
 #endif
 

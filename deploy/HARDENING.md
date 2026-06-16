@@ -91,7 +91,7 @@ attributed to a single change. Feature flags are re-enabled one at a time
 | **1** | PASS | PASS | PASS | +HTTP/2; Jun 16 2026 stable (2/2 runs 3/3) |
 | **2** | PASS | PASS | PASS | +MojoIpcz; Jun 16 2026 3/3 |
 | **3** | PASS | PASS | PASS | +NetworkServiceDedicatedThread (single-process); Jun 16 2026 3/3 |
-| 4 | HANG | HANG | HANG | +Viz (single-process); **init deadlock** before nav commit (27 threads in CONDVAR); watchdog never arms |
+| 4 | FLAKY | FLAKY | FLAKY | +Viz (single-process); **non-deterministic** ~40% pass / ~50% hang / partial; boot watchdog contains failures. See below. |
 | 5 | - | - | - | +ServiceWorker (single-process); blocked on tier 4 |
 | 6 | - | - | - | Multi-process; `posix_spawn` launcher wired; blocked on tier 4 |
 | 7 | - | - | - | qnx_screen on-screen (software); pending |
@@ -99,23 +99,47 @@ attributed to a single change. Feature flags are re-enabled one at a time
 
 Tier 1+ keeps `--ignore-certificate-errors`. Tier 1+ drops `--disable-http2` when `cacert.pem` is present.
 
-### Tier 4 (Viz) blocker — next investigation
+### Tier 4 (Viz) — investigation findings (Jun 16 2026)
 
-Enabling `Viz` in single-process mode deadlocks during startup, **before** the
-first navigation commits, so the post-commit `--timeout` watchdog never arms and
-the process hangs indefinitely (must be `slay -9`'d). `pidin` shows ~27 threads
-parked on `CONDVAR`/`SIGWAITINFO` — a classic init-time wait-for-thread deadlock.
+Tier 4 is **not** a hard deadlock; it is a **non-deterministic race**. Over
+repeated runs we see ~40% success (full DOM dump), ~50% hang, occasional partial
+dumps. The boot watchdog (armed at process start) now contains every failure
+mode, so the device no longer wedges and `--qnx-trace` runs are safe to repeat.
 
-Likely suspects: Viz display-compositor host init waiting on a Mojo channel or
-compositor thread that never starts on QNX. Recommended next steps:
+Two distinct symptoms, **one shared hot spot** — the out-of-process
+`cert_verifier.mojom.CertVerifierService` mojo path:
 
-1. Run `QNX_TRACE=1 ./run.sh https://example.com` at tier 4 and capture where the
-   trace stops (last `QNX:` marker before the hang).
-2. Add a **pre-commit safety watchdog** (arm `StartQnxHardWatchdog` at process
-   start, not just at navigation commit) so tier 4+ hangs self-terminate during
-   bring-up instead of wedging the device.
-3. Inspect viz host init (`components/viz/host/*`, `content/browser/compositor/*`)
-   for QNX thread-startup assumptions.
+1. **Crash (tracing-only artifact, FIXED).** Earlier SIGSEGV in `strlen` via QNX
+   libc `_Putfld` (printf) with `R0=0x1f`. Root cause: our `QNX_TRACE_FMT(...
+   iface=%s ...)` traces in `mojo/.../connector.cc` and
+   `interface_endpoint_client.cc` printed `Connector::interface_name_`, which is a
+   **garbage/dangling pointer** during racy cross-thread dispatch. The null-guard
+   (`x ? x : "?"`) did not catch a non-null garbage value, and QNX libc `%s` does
+   not tolerate it (unlike glibc). Fixed with `base::QnxSafeStr()` (range-checks
+   the pointer, prints `<bad>`); the crash only ever occurred **with**
+   `--qnx-trace`. Confirmed: 0 crashes in 16 traced runs post-fix, with
+   `iface=<bad>` appearing when the garbage pointer is hit.
+
+2. **Hang (real blocker, open).** Without tracing, a worker thread (e.g. tid 10,
+   the `MultiThreadedCertVerifier` pool) parks forever on a heap-allocated
+   `ConditionVariable` while the main thread sits in `SIGWAITINFO`. The garbage
+   `interface_name_` from (1) is strong evidence that the CertVerifierService
+   mojo endpoint/`Connector` is used in a torn/use-after-free state under the
+   Viz threading model — the likely shared root cause.
+
+Tooling added this round (see git history): atomic single-`write()` crash dump in
+`base/debug/stack_trace_posix.cc` (R0–R15 + absolute return-address scan),
+symbolizable offline with `llvm-addr2line -e out/qnx-arm/exe.unstripped/content_shell <abs-addr>`.
+
+Recommended next steps:
+
+1. Try forcing **in-process cert verification** (disable the out-of-process
+   CertVerifierService) at tier 4 to test the shared-root-cause hypothesis.
+2. With `--qnx-trace` now crash-safe, capture a clean hang trace and `pidin`
+   thread dump; symbolize the parked worker's stack.
+3. Inspect CertVerifierService endpoint lifetime/threading
+   (`services/cert_verifier/*`, mojo `Connector` teardown) for the race exposed
+   by the Viz thread topology.
 
 ## Berry daemon (experimental)
 

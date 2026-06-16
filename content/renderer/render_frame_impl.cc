@@ -4125,15 +4125,22 @@ void RenderFrameImpl::DidFinishLoad() {
       }
     }
 
+    QNX_TRACE_MSG("QNX:RFI:DD preGetDoc\n");
     blink::WebDocument doc = frame_->GetDocument();
+    QNX_TRACE_MSG("QNX:RFI:DD preDocEl\n");
     blink::WebElement doc_el = doc.DocumentElement();
+    QNX_TRACE_MSG("QNX:RFI:DD postDocEl\n");
     if (!doc_el.IsNull()) {
+      QNX_TRACE_MSG("QNX:RFI:DD preInnerHTML\n");
       std::string html = doc_el.InnerHTML().Utf8();
+      QNX_TRACE_FMT("QNX:RFI:DD postInnerHTML len=%zu\n", html.size());
       html = "<html>" + html + "</html>\n";
       write(1, html.c_str(), html.size());
+      QNX_TRACE_MSG("QNX:RFI:DD postWrite\n");
     } else {
       write(1, "\n", 1);
     }
+    QNX_TRACE_MSG("QNX:RFI:DD preExit\n");
     _exit(0);
   }
 #endif

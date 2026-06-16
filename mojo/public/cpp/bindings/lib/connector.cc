@@ -514,7 +514,7 @@ bool Connector::DispatchMessage(ScopedMessageHandle handle) {
 #if defined(__QNX__)
   QNX_TRACE_FMT("QNX:DM tid=%x iface=%s\n",
                       (unsigned)pthread_self(),
-                      interface_name_ ? interface_name_ : "?");
+                      base::QnxSafeStr(interface_name_));
 #endif
   Message message = Message::CreateFromMessageHandle(&handle);
   if (message.IsNull()) {
@@ -574,14 +574,14 @@ bool Connector::DispatchMessage(ScopedMessageHandle handle) {
                       (unsigned)pthread_self(),
                       incoming_receiver_,
                       message.name(),
-                      interface_name_ ? interface_name_ : "?");
+                      base::QnxSafeStr(interface_name_));
 #endif
   bool receiver_result =
       incoming_receiver_ && incoming_receiver_->Accept(&message);
 #if defined(__QNX__)
   QNX_TRACE_FMT("QNX:DM:post tid=%x res=%d iface=%s\n",
                       (unsigned)pthread_self(), (int)receiver_result,
-                      interface_name_ ? interface_name_ : "?");
+                      base::QnxSafeStr(interface_name_));
 #endif
   if (!weak_self)
     return receiver_result;
