@@ -56,7 +56,7 @@ for url in $URLS; do
     PASS=$((PASS + 1))
   else
     echo "FAIL (empty) $url ($bytes bytes)"
-    grep -E 'HardWatchdog|SIGSEGV|InvalidReq|bad lock' "$trace" 2>/dev/null | tail -3
+    grep -E 'HardWatchdog|BootWatchdog|SIGSEGV|InvalidReq|bad lock' "$trace" 2>/dev/null | tail -3
     FAIL=$((FAIL + 1))
   fi
 done

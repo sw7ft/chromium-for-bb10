@@ -677,6 +677,10 @@ void Shell::MaybeArmDumpTimeout(NavigationHandle* navigation_handle) {
   if (nav_url.IsAboutBlank() || nav_url.spec() == "about:blank")
     return;
 
+  // A real page committed: the boot-phase init-deadlock watchdog is no longer
+  // needed; the post-commit --timeout watchdog (if armed) covers the rest.
+  base::CancelQnxBootWatchdog();
+
   if (timeout_armed_)
     return;
 

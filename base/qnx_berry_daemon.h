@@ -20,6 +20,11 @@ bool QnxBerryDaemonEnabled();
 // Called from main() before ContentMain so early dump paths see daemon mode.
 void QnxBerryDaemonForceEnable();
 
+// True if daemon mode was force-enabled (switch/env/marker). Unlike
+// QnxBerryDaemonEnabled(), this does NOT touch CommandLine, so it is safe to
+// call from main() before ContentMain initializes the global CommandLine.
+bool QnxBerryDaemonForced();
+
 void QnxBerryDaemonSetRenderCompleteEvent(WaitableEvent* event);
 
 // Emit rendered HTML on stdout using the berry-daemon framing protocol, then

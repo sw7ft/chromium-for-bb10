@@ -87,6 +87,7 @@ int main(int argc, const char** argv) {
 #include <ucontext.h>
 #include "base/qnx_trace.h"
 #include "base/qnx_berry_daemon.h"
+#include "base/qnx_hard_watchdog.h"
 #include "gpu/qnx/gpu_qnx.h"
 
 static void qnx_hex(unsigned long v, char* buf, int len) {
@@ -179,6 +180,34 @@ int main(int argc, const char** argv) {
         if (access(marker_path, F_OK) == 0)
           base::QnxBerryDaemonForceEnable();
       }
+    }
+  }
+  // Pre-commit safety watchdog. During single-process one-shot --dump-dom
+  // bring-up, an init deadlock (e.g. Viz host) can hang before any navigation
+  // commits, so the post-commit --timeout watchdog never arms and the device
+  // wedges. Arm a generous boot-deadline watchdog now; Shell cancels it once a
+  // real page commits. Skip child processes (--type=*) and daemon mode.
+  // Override with QNX_BOOT_WATCHDOG_MS (0 disables).
+  {
+    bool is_child = false;
+    bool has_dump_dom = false;
+    for (int i = 1; i < argc; ++i) {
+      if (strncmp(argv[i], "--type=", 7) == 0)
+        is_child = true;
+      if (strcmp(argv[i], "--dump-dom") == 0)
+        has_dump_dom = true;
+    }
+    int boot_ms = 90000;
+    const char* boot_env = getenv("QNX_BOOT_WATCHDOG_MS");
+    if (boot_env && boot_env[0])
+      boot_ms = atoi(boot_env);
+    // Use QnxBerryDaemonForced() (not QnxBerryDaemonEnabled()) here: the global
+    // CommandLine is not initialized until ContentMain, and Enabled() queries
+    // it. All daemon signals are force-enabled above before this point.
+    if (!is_child && has_dump_dom && boot_ms > 0 &&
+        !base::QnxBerryDaemonForced()) {
+      QNX_TRACE_FMT("QNX:BootWatchdog armed %dms\n", boot_ms);
+      base::StartQnxBootWatchdog(boot_ms);
     }
   }
   // Determine a writable base directory from exe path or cwd.

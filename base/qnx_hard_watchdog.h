@@ -10,16 +10,27 @@ namespace base {
 
 #if BUILDFLAG(IS_QNX)
 
-// Start a detached thread that _exit(0) after |total_ms| unless cancelled.
+// Commit-phase watchdog: armed at navigation commit for the --timeout deadline.
+// Starts a detached thread that _exit(0) after |total_ms| unless cancelled.
 void StartQnxHardWatchdog(int total_ms);
 
-// Cancel an armed watchdog (e.g. before parse-time DOM dump exits cleanly).
+// Cancel the commit-phase watchdog (e.g. before parse-time DOM dump exits).
 void CancelQnxHardWatchdog();
+
+// Boot-phase watchdog: armed at process start for one-shot --dump-dom runs so an
+// init-time deadlock (e.g. Viz host) that hangs before any navigation commits
+// still self-terminates. Cancelled by Shell once a real page commits.
+void StartQnxBootWatchdog(int total_ms);
+
+// Cancel the boot-phase watchdog (e.g. on first real navigation commit).
+void CancelQnxBootWatchdog();
 
 #else
 
 inline void StartQnxHardWatchdog(int total_ms) {}
 inline void CancelQnxHardWatchdog() {}
+inline void StartQnxBootWatchdog(int total_ms) {}
+inline void CancelQnxBootWatchdog() {}
 
 #endif  // BUILDFLAG(IS_QNX)
 

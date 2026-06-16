@@ -85,12 +85,17 @@ void QnxBerryDaemonForceEnable() {
   g_berry_daemon_forced = true;
 }
 
+bool QnxBerryDaemonForced() {
+  return g_berry_daemon_forced;
+}
+
 void QnxBerryDaemonSetRenderCompleteEvent(WaitableEvent* event) {
   AutoLock lock(g_completion_lock);
   g_render_complete = event;
 }
 
 void QnxBerryDaemonEmitHtml(base::span<const char> html) {
+  CancelQnxBootWatchdog();
   CancelQnxHardWatchdog();
   if (QnxBerryDaemonEnabled()) {
     WriteLineString("@BERRY DOM " + std::to_string(html.size()));
