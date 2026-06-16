@@ -44,46 +44,32 @@ What `run.sh` uses today:
 
 ## Re-enablement tiers
 
-### Tier 1 — network & TLS hygiene
+Each tier removes **exactly one** bring-up workaround so a regression can be
+attributed to a single change. Feature flags are re-enabled one at a time
+(tiers 2-5) before the process model (tier 6) and render model (tiers 7-8).
 
-**Remove:** `--disable-http2`, `--ignore-certificate-errors` (when `SSL_CERT_FILE` set)
+| Tier | Single delta vs previous | Risk |
+|------|--------------------------|------|
+| 1 | Drop `--disable-http2` (HTTP/2 via `cacert.pem`) | Low |
+| 2 | Enable `MojoIpcz` (newer Mojo transport) | Low |
+| 3 | Enable `NetworkServiceDedicatedThread` (network thread model) | Medium |
+| 4 | Enable `Viz` (display compositor host) | Medium |
+| 5 | Enable `ServiceWorker` (last; most complex) | Medium |
+| 6 | Drop `--single-process` (multi-process; keep `--no-zygote`) | High |
+| 7 | `--ozone-platform=headless` → `qnx_screen` (on-screen, software) | High |
+| 8 | Drop `--disable-gpu --disable-gpu-compositing` (GPU path) | High |
 
-**Fix if broken:** HTTP/2 ALPN / SETTINGS / HPACK on QNX ARM string paths; verify
-`cacert.pem` covers Cloudflare-backed sites.
+**Fix-if-broken notes:**
 
-**Risk:** Low. Mostly net/ changes already have QNX string workarounds.
+- **Tier 1:** HTTP/2 ALPN / SETTINGS / HPACK on QNX ARM string paths.
+- **Tiers 2-5:** Mojo dispatch ordering, thread startup, viz host init on QNX.
+- **Tier 6:** `RenderProcessHost` launch, cross-process Mojo, `ChildProcessSecurityPolicy`,
+  origin locks at factory creation. Most QNX bypasses assume single-process
+  (Shell DCL/DFL callbacks, parse-time dump, stdout routing).
+- **Tiers 7-8:** `ui/ozone/platform/qnx_screen/*`, software vs GL path, input events.
+  `QNX_GPU_PROBE=1 ./run.sh about:blank` probes EGL.
 
-### Tier 2 — disabled features (one at a time)
-
-Re-enable each feature individually; update `QNX_DISABLED_FEATURES` in `run.sh`:
-
-1. `MojoIpcz` — newer Mojo transport; may affect cross-process later
-2. `NetworkServiceDedicatedThread` — network service thread model
-3. `Viz` — display compositor host (needed before on-screen rendering)
-4. `ServiceWorker` — last; most complex
-
-**Fix if broken:** Mojo dispatch ordering, thread startup, viz host init on QNX.
-
-### Tier 3 — multi-process
-
-**Remove:** `--single-process` (keep `--no-zygote` until zygote works)
-
-**Fix if broken:** `RenderProcessHost` launch on QNX, `/proc` or equivalent,
-cross-process Mojo, `ChildProcessSecurityPolicy`, origin locks at factory creation.
-
-**Risk:** High. Most QNX bypasses assume single-process (e.g. Shell DCL/DFL callbacks).
-
-### Tier 4 — on-screen rendering
-
-**Remove:** `--headless`, switch `--ozone-platform=headless` → `qnx_screen`
-
-**Remove (in order):** `--disable-gpu-compositing`, then `--disable-gpu`
-
-**Fix if broken:** `ui/ozone/platform/qnx_screen/*`, software vs GL path, input events.
-
-**Risk:** High. Required for a real browser window.
-
-### Tier 5 — production cleanup
+### Production cleanup (after tier 8)
 
 - Remove parse-time `--dump-dom` shortcut; restore `DidFinishLoad` / Shell timeout path
 - Remove or narrow QNX origin commit bypass (fix root cause in origin calculation)
@@ -101,14 +87,35 @@ cross-process Mojo, `ChildProcessSecurityPolicy`, origin locks at factory creati
 
 | Tier | example.com | google.com | wikipedia/QNX | Notes |
 |------|-------------|------------|---------------|-------|
-| **0** | PASS (~32s) | PASS (~43s, ~225KB) | PASS (~241KB) | Jun 16 2026; `./test-regression.sh 0`; post-commit timeout + cancellable watchdog |
-| **1** | PASS | PASS | PASS | HTTP/2 enabled; Jun 16 2026 tier 1 stable (2/2 runs 3/3) |
-| **2** | PASS | PASS | PASS | +MojoIpcz; Jun 16 2026 3/3 on Passport |
-| 3 | FAIL | FAIL | FAIL | Multi-process: HardWatchdog; real `posix_spawn` launcher wired |
-| 4 | FAIL | FAIL | FAIL | qnx_screen headful: HardWatchdog on all URLs |
-| 5 | (not run) | | | Full GPU; use `QNX_GPU_PROBE=1 ./run.sh about:blank` to probe EGL |
+| **0** | PASS (~32s) | PASS (~43s, ~225KB) | PASS (~241KB) | Jun 16 2026; post-commit timeout + cancellable watchdog |
+| **1** | PASS | PASS | PASS | +HTTP/2; Jun 16 2026 stable (2/2 runs 3/3) |
+| **2** | PASS | PASS | PASS | +MojoIpcz; Jun 16 2026 3/3 |
+| **3** | PASS | PASS | PASS | +NetworkServiceDedicatedThread (single-process); Jun 16 2026 3/3 |
+| 4 | HANG | HANG | HANG | +Viz (single-process); **init deadlock** before nav commit (27 threads in CONDVAR); watchdog never arms |
+| 5 | - | - | - | +ServiceWorker (single-process); blocked on tier 4 |
+| 6 | - | - | - | Multi-process; `posix_spawn` launcher wired; blocked on tier 4 |
+| 7 | - | - | - | qnx_screen on-screen (software); pending |
+| 8 | - | - | - | Full GPU; pending |
 
 Tier 1+ keeps `--ignore-certificate-errors`. Tier 1+ drops `--disable-http2` when `cacert.pem` is present.
+
+### Tier 4 (Viz) blocker — next investigation
+
+Enabling `Viz` in single-process mode deadlocks during startup, **before** the
+first navigation commits, so the post-commit `--timeout` watchdog never arms and
+the process hangs indefinitely (must be `slay -9`'d). `pidin` shows ~27 threads
+parked on `CONDVAR`/`SIGWAITINFO` — a classic init-time wait-for-thread deadlock.
+
+Likely suspects: Viz display-compositor host init waiting on a Mojo channel or
+compositor thread that never starts on QNX. Recommended next steps:
+
+1. Run `QNX_TRACE=1 ./run.sh https://example.com` at tier 4 and capture where the
+   trace stops (last `QNX:` marker before the hang).
+2. Add a **pre-commit safety watchdog** (arm `StartQnxHardWatchdog` at process
+   start, not just at navigation commit) so tier 4+ hangs self-terminate during
+   bring-up instead of wedging the device.
+3. Inspect viz host init (`components/viz/host/*`, `content/browser/compositor/*`)
+   for QNX thread-startup assumptions.
 
 ## Berry daemon (experimental)
 
