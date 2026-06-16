@@ -86,6 +86,8 @@ int main(int argc, const char** argv) {
 #include <signal.h>
 #include <ucontext.h>
 #include "base/qnx_trace.h"
+#include "base/qnx_berry_daemon.h"
+#include "gpu/qnx/gpu_qnx.h"
 
 static void qnx_hex(unsigned long v, char* buf, int len) {
   for (int i = len - 1; i >= 0; --i) {
@@ -141,6 +143,16 @@ int main(int argc, const char** argv) {
   for (int i = 1; i < argc; ++i) {
     if (strcmp(argv[i], "--qnx-trace") == 0)
       g_qnx_trace_enabled = true;
+    if (strcmp(argv[i], "--berry-daemon") == 0)
+      base::QnxBerryDaemonForceEnable();
+  }
+  {
+    const char* trace_env = getenv("QNX_TRACE");
+    if (trace_env && trace_env[0] == '1')
+      g_qnx_trace_enabled = true;
+    const char* berry_env = getenv("QNX_BERRY_DAEMON");
+    if (berry_env && berry_env[0] == '1')
+      base::QnxBerryDaemonForceEnable();
   }
   QNX_TRACE_MSG("QNX: main() entered\n");
   {
@@ -155,6 +167,19 @@ int main(int argc, const char** argv) {
   // Set CHROME_EXE_PATH from argv[0] so ICU loader can find data files
   if (argc > 0 && argv[0]) {
     setenv("CHROME_EXE_PATH", argv[0], 1);
+    char marker_path[1024];
+    marker_path[0] = '\0';
+    const char* last_slash = strrchr(argv[0], '/');
+    if (last_slash) {
+      size_t dir_len = static_cast<size_t>(last_slash - argv[0] + 1);
+      if (dir_len + 20 < sizeof(marker_path)) {
+        memcpy(marker_path, argv[0], dir_len);
+        memcpy(marker_path + dir_len, "berry-daemon.mode", 18);
+        marker_path[dir_len + 18] = '\0';
+        if (access(marker_path, F_OK) == 0)
+          base::QnxBerryDaemonForceEnable();
+      }
+    }
   }
   // Determine a writable base directory from exe path or cwd.
   // Force-override TMPDIR/HOME because device defaults (/tmp) may not be
@@ -181,6 +206,10 @@ int main(int argc, const char** argv) {
   if (!getenv("LOGNAME")) setenv("LOGNAME", "user", 1);
   if (!getenv("SHELL")) setenv("SHELL", "/bin/sh", 1);
   if (!getenv("LANG")) setenv("LANG", "C", 1);
+  if (getenv("QNX_GPU_PROBE")) {
+    if (gpu::qnx::InitializeGpuLibraries())
+      gpu::qnx::PrintGpuInfo();
+  }
   QNX_TRACE_MSG("QNX: env vars set, creating delegate\n");
 #endif
   content::ShellMainDelegate delegate;

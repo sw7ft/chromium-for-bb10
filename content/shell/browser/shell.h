@@ -42,6 +42,10 @@ class Shell : public WebContentsDelegate, public WebContentsObserver {
   ~Shell() override;
 
   void LoadURL(const GURL& url);
+#if BUILDFLAG(IS_QNX)
+  // Reset one-shot dump state before loading the next URL in --berry-daemon mode.
+  void ResetForBerryDaemonLoad();
+#endif
   void LoadURLForFrame(const GURL& url,
                        const std::string& frame_name,
                        ui::PageTransition);
@@ -241,7 +245,7 @@ class Shell : public WebContentsDelegate, public WebContentsObserver {
   void DidFinishLoad(RenderFrameHost* render_frame_host,
                      const GURL& validated_url) override;
   void DOMContentLoaded(RenderFrameHost* render_frame_host) override;
-  void DidStartNavigation(NavigationHandle* navigation_handle) override;
+  void DidFinishNavigation(NavigationHandle* navigation_handle) override;
 #if BUILDFLAG(IS_MAC)
   void PrimaryPageChanged(Page& page) override;
 #endif
@@ -264,6 +268,7 @@ class Shell : public WebContentsDelegate, public WebContentsObserver {
 
   void DumpDomAndExit(RenderFrameHost* rfh);
   void OnTimeout();
+  void MaybeArmDumpTimeout(NavigationHandle* navigation_handle);
 
   base::OneShotTimer dump_timer_;
   bool dom_already_dumped_ = false;

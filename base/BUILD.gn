@@ -1670,6 +1670,10 @@ component("base") {
     if (is_qnx) {
       sources += [
         "qnx_abort_override.cc",
+        "qnx_berry_daemon.cc",
+        "qnx_berry_daemon.h",
+        "qnx_hard_watchdog.cc",
+        "qnx_hard_watchdog.h",
         "qnx_string_util.h",
         "qnx_trace.cc",
         "qnx_trace.h",

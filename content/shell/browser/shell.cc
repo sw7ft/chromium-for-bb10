@@ -13,10 +13,7 @@
 #include <utility>
 
 #if BUILDFLAG(IS_QNX)
-#include <pthread.h>
-#include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
 #include <unistd.h>
 #endif
 #include "base/command_line.h"
@@ -30,6 +27,8 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "base/qnx_berry_daemon.h"
+#include "base/qnx_hard_watchdog.h"
 #include "base/qnx_trace.h"
 #include "components/custom_handlers/protocol_handler.h"
 #include "components/custom_handlers/protocol_handler_registry.h"
@@ -71,33 +70,7 @@ base::OnceClosure& GetMainMessageLoopQuitClosure() {
 }
 
 #if BUILDFLAG(IS_QNX)
-// Hard-deadline watchdog: a detached thread that is independent of the
-// Chromium message loop. On JS-heavy pages (e.g. google.com) the renderer
-// thread can stay saturated, so ExecuteJavaScriptForTests() never returns and
-// the graceful --timeout dump hangs forever. This thread sleeps for the full
-// deadline using nanosleep() (no dependency on the task scheduler) and then
-// force-terminates the process, guaranteeing --timeout always exits.
-void* QnxHardWatchdog(void* arg) {
-  int total_ms = static_cast<int>(reinterpret_cast<intptr_t>(arg));
-  struct timespec ts;
-  ts.tv_sec = total_ms / 1000;
-  ts.tv_nsec = (total_ms % 1000) * 1000000L;
-  nanosleep(&ts, nullptr);
-  const char msg[] = "QNX:HardWatchdog deadline reached, _exit\n";
-  write(2, msg, sizeof(msg) - 1);
-  _exit(0);
-  return nullptr;
-}
-
-void StartQnxHardWatchdog(int total_ms) {
-  pthread_t tid;
-  pthread_attr_t attr;
-  pthread_attr_init(&attr);
-  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-  pthread_create(&tid, &attr, &QnxHardWatchdog,
-                 reinterpret_cast<void*>(static_cast<intptr_t>(total_ms)));
-  pthread_attr_destroy(&attr);
-}
+constexpr int kQnxWatchdogSlackMs = 15000;
 #endif  // BUILDFLAG(IS_QNX)
 
 constexpr int kDefaultTestWindowWidthDip = 800;
@@ -651,6 +624,12 @@ void Shell::NavigationStateChanged(WebContents* source,
     g_platform->SetAddressBarURL(this, source->GetVisibleURL());
 }
 
+void Shell::ResetForBerryDaemonLoad() {
+  dom_already_dumped_ = false;
+  timeout_armed_ = false;
+  dump_timer_.Stop();
+}
+
 void Shell::DumpDomAndExit(RenderFrameHost* rfh) {
   if (dom_already_dumped_)
     return;
@@ -667,6 +646,12 @@ void Shell::DumpDomAndExit(RenderFrameHost* rfh) {
             std::string html;
             if (value.is_string())
               html = value.GetString();
+            if (base::QnxBerryDaemonEnabled()) {
+              base::QnxBerryDaemonEmitHtml(
+                  base::span<const char>(html.data(), html.size()));
+              return;
+            }
+            base::CancelQnxHardWatchdog();
             write(1, html.c_str(), html.size());
             write(1, "\n", 1);
 #if BUILDFLAG(IS_QNX)
@@ -678,20 +663,18 @@ void Shell::DumpDomAndExit(RenderFrameHost* rfh) {
           }));
 }
 
-void Shell::OnTimeout() {
-  QNX_TRACE_MSG("QNX:Shell:OnTimeout fired\n");
-  if (dom_already_dumped_)
-    return;
-  auto* rfh = web_contents_->GetPrimaryMainFrame();
-  if (rfh)
-    DumpDomAndExit(rfh);
-}
-
-void Shell::DidStartNavigation(NavigationHandle* navigation_handle) {
+void Shell::MaybeArmDumpTimeout(NavigationHandle* navigation_handle) {
   if (!navigation_handle->IsInPrimaryMainFrame())
     return;
+  if (!navigation_handle->HasCommitted())
+    return;
+
   auto* cmd = base::CommandLine::ForCurrentProcess();
   if (!cmd->HasSwitch(switches::kDumpDom))
+    return;
+
+  const GURL& nav_url = navigation_handle->GetURL();
+  if (nav_url.IsAboutBlank() || nav_url.spec() == "about:blank")
     return;
 
   if (timeout_armed_)
@@ -702,18 +685,36 @@ void Shell::DidStartNavigation(NavigationHandle* navigation_handle) {
   if (!timeout_str.empty() && base::StringToInt(timeout_str, &timeout_ms) &&
       timeout_ms > 0) {
     timeout_armed_ = true;
-    QNX_TRACE_FMT("QNX:Shell:StartTimer %dms\n", timeout_ms);
-    // Tier 1 (graceful): try to dump the DOM via the renderer at the deadline.
+    QNX_TRACE_FMT("QNX:Shell:StartTimer %dms (post-commit)\n", timeout_ms);
     dump_timer_.Start(FROM_HERE, base::Milliseconds(timeout_ms),
                       base::BindOnce(&Shell::OnTimeout,
                                      base::Unretained(this)));
 #if BUILDFLAG(IS_QNX)
-    // Tier 2 (hard): guarantee the process exits even if the renderer is
-    // jammed and the graceful JS round-trip never completes. Grace period of
-    // 4s after the soft deadline.
-    StartQnxHardWatchdog(timeout_ms + 4000);
+    if (!base::QnxBerryDaemonEnabled())
+      base::StartQnxHardWatchdog(timeout_ms + kQnxWatchdogSlackMs);
 #endif
   }
+}
+
+void Shell::OnTimeout() {
+  QNX_TRACE_MSG("QNX:Shell:OnTimeout fired\n");
+  if (dom_already_dumped_)
+    return;
+#if BUILDFLAG(IS_QNX)
+  // Parse-time dump in frame_loader.cc handles headless output on QNX. The JS
+  // round-trip via DumpDomAndExit hangs on heavy pages (google.com) while the
+  // network/parser may still be in flight. HardWatchdog (with extended slack)
+  // ensures we eventually exit if parse never completes.
+  if (!base::QnxBerryDaemonEnabled())
+    return;
+#endif
+  auto* rfh = web_contents_->GetPrimaryMainFrame();
+  if (rfh)
+    DumpDomAndExit(rfh);
+}
+
+void Shell::DidFinishNavigation(NavigationHandle* navigation_handle) {
+  MaybeArmDumpTimeout(navigation_handle);
 }
 
 void Shell::DOMContentLoaded(RenderFrameHost* render_frame_host) {
@@ -737,6 +738,8 @@ void Shell::DidFinishLoad(RenderFrameHost* render_frame_host,
   if (!render_frame_host->IsInPrimaryMainFrame())
     return;
   if (!base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpDom))
+    return;
+  if (base::QnxBerryDaemonEnabled())
     return;
   QNX_TRACE_MSG("QNX:Shell:DFL exec\n");
   DumpDomAndExit(render_frame_host);

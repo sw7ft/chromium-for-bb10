@@ -9,6 +9,20 @@ browser UI. Each tier keeps the previous regression suite green on Passport:
 
 Use `./test-regression.sh [tier]` on device (or via `ssh passport`).
 
+## Process cleanup (Passport thermal)
+
+Always stop stray `content_shell` before deploy or regression:
+
+```bash
+./kill-content-shell.sh
+pidin | grep content_shell   # should show nothing
+```
+
+- [`run.sh`](run.sh) traps `EXIT` and kills orphans after each run.
+- [`deploy-binary.sh`](deploy-binary.sh) kills first, then atomic `scp` → `content_shell.new` → `mv`.
+- Never run regression in the same SSH command as binary deploy.
+- Run one test at a time on a cool device; `./test-regression.sh --fast` for example.com only.
+
 ## Current baseline (tier 0 — bring-up)
 
 What `run.sh` uses today:
@@ -83,6 +97,27 @@ cross-process Mojo, `ChildProcessSecurityPolicy`, origin locks at factory creati
 | `--no-sandbox` | Unless a QNX-specific sandbox is implemented |
 | `--no-zygote` | Until fork-based zygote is viable on QNX |
 
+## Regression results (Passport, bundle v1)
+
+| Tier | example.com | google.com | wikipedia/QNX | Notes |
+|------|-------------|------------|---------------|-------|
+| **0** | PASS (~32s) | PASS (~43s, ~225KB) | PASS (~241KB) | Jun 16 2026; `./test-regression.sh 0`; post-commit timeout + cancellable watchdog |
+| 1 | PASS | PASS | FAIL (flaky) | HTTP/2 enabled; wiki may exit non-zero intermittently |
+| 2 | PASS | FAIL (flaky) | FAIL (flaky) | +MojoIpcz; re-run recommended |
+| 3 | FAIL | FAIL | FAIL | Multi-process: HardWatchdog; real `posix_spawn` launcher wired |
+| 4 | FAIL | FAIL | FAIL | qnx_screen headful: HardWatchdog on all URLs |
+| 5 | (not run) | | | Full GPU; use `QNX_GPU_PROBE=1 ./run.sh about:blank` to probe EGL |
+
+Tier 1+ keeps `--ignore-certificate-errors`. Tier 1+ drops `--disable-http2` when `cacert.pem` is present.
+
+## Berry daemon (experimental)
+
+TCP command channel on `127.0.0.1:8767` (`LOAD <url>` / `QUIT`). Framed stdout: `@BERRY DOM <len>\\n<html>\\n@BERRY END`.
+
+- `./test-daemon.sh` waits for the TCP port (stderr buffering makes log-grep unreliable).
+- Berry Proxy: one-shot default (`BERRY_USE_DAEMON=0`); set `BERRY_USE_DAEMON=1` to try daemon mode.
+- Cold start to listening port can take 30–90s on Passport.
+
 ## Usage
 
 ```bash
@@ -98,5 +133,5 @@ QNX_HARDENING_TIER=1 ./run.sh https://www.google.com
 
 ## Success criteria per tier
 
-All three HTTPS URLs produce nonzero DOM output within 90s, no SIGSEGV, no hang past
-hard watchdog (tier 0 only).
+All three HTTPS URLs produce nonzero DOM output within 90s `--timeout` (armed at
+navigation **commit**, not start) + 15s HardWatchdog slack on QNX, no SIGSEGV.

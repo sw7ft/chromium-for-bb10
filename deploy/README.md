@@ -154,6 +154,80 @@ export LD_LIBRARY_PATH=.:$LD_LIBRARY_PATH
 | Local HTTP | `http://127.0.0.1:8001/` | Working |
 | External HTTP | `http://example.com` | Working |
 | HTTPS | `https://example.com` | Working |
+| Complex HTTPS | `https://www.google.com`, Wikipedia | Working (30–45s) |
+
+## Deploy and regression (Passport)
+
+From the **build host** (when `ssh passport` works):
+
+```bash
+cd /root/chromium/src/deploy
+./deploy-binary.sh          # kill orphans, atomic scp → content_shell.new → mv
+# wait for scp to finish — do not run tests in the same command
+scp run.sh test-regression.sh kill-content-shell.sh passport:.../berry-browser-bundle/
+```
+
+Or use the all-in-one helper: `./verify-passport.sh` (deploy + google check + tier 0).
+
+On **device**:
+
+```bash
+cd /accounts/devuser/berry-deploy/berry-browser-bundle
+./kill-content-shell.sh
+./test-regression.sh --fast 0     # example.com only (~30s)
+./test-regression.sh --google 0   # google.com only (~45s)
+./test-regression.sh 0            # full tier 0 (~140s)
+```
+
+Trace logging: `./run.sh URL --qnx-trace` (run.sh sets `QNX_TRACE=1`; do not pass the flag directly to `content_shell` on QNX).
+
+## Berry Proxy (BB10 stock browser + headless Chromium)
+
+Use the **stock BB10 browser** (ES5 WebKit) as a front-end while **Chromium headless**
+renders modern pages on the device.
+
+1. Point at your **Node.js 22** install (BB10 builds need `--jitless`; use the
+   wrapper script if you have one, not `node.bin` directly).
+2. Start the proxy:
+
+```bash
+cd /accounts/devuser/berry-deploy
+BERRY_NODE=/path/to/your/node ./start-proxy.sh
+```
+
+3. In the BB10 browser open: **http://127.0.0.1:8765/**
+
+Enter a URL or pick a bookmark. First load often takes 30–60 seconds. The proxy
+returns static HTML/CSS from `--dump-dom`; JavaScript on the target site already
+ran in Chromium, not in WebKit.
+
+### Node.js 22 on device
+
+If Node is already installed (e.g. Term49 / side-loaded v22), set `BERRY_NODE`:
+
+```bash
+export BERRY_NODE=/accounts/1000/shared/misc/node/node   # example
+./start-proxy.sh
+```
+
+Quick check:
+
+```bash
+"$BERRY_NODE" -e "console.log(process.version)"
+```
+
+Optional: copy the deploy bundle’s `node/` folder only if you do **not** already
+have Node on the device.
+
+### Proxy endpoints
+
+| URL | Purpose |
+|-----|---------|
+| `http://127.0.0.1:8765/` | ES5-friendly browse form |
+| `http://127.0.0.1:8765/render?url=https://example.com` | Rendered page |
+| `http://127.0.0.1:8765/health` | JSON health check |
+
+Environment: `BERRY_PROXY_PORT`, `BERRY_PROXY_TIMEOUT_MS` (default 120000).
 
 ## Known Limitations
 
@@ -167,6 +241,4 @@ export LD_LIBRARY_PATH=.:$LD_LIBRARY_PATH
 
 - BlackBerry 10 device (tested on Passport with OS 10.3.x / QNX 8.0.0)
 - SSH access to the device
-- ~120 MB free storage
-ce
-- ~120 MB free storage
+- ~120 MB free storage (+ ~53 MB if bundling Node.js for Berry Proxy)
