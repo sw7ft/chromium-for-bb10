@@ -534,6 +534,7 @@ component("skia") {
   if (is_qnx) {
     sources += [
       "//third_party/skia/src/ports/SkFontMgr_custom.cpp",
+      "//third_party/skia/src/ports/SkFontMgr_custom_directory.cpp",
       "//third_party/skia/src/ports/SkFontMgr_custom_empty.cpp",
     ]
   }

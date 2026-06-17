@@ -526,11 +526,17 @@ LayoutTheme& LayoutTheme::NativeTheme() {
 }
 }  // namespace blink
 
-// Skia font manager — QNX has no fontconfig; use Skia's empty font mgr so
+// Skia font manager — QNX has no fontconfig. BB10 devices ship TrueType fonts
+// under /usr/fonts/font_repository (DejaVu, Monotype: Verdana/Times/Arial/...),
+// so build a directory-backed font manager from them. The path is overridable
+// via QNX_FONT_DIR. If no fonts are found we fall back to the empty font mgr so
 // FontCache never hits CrashWithFontInfo when fallback runs.
+#include <cstdlib>
+
 #include "third_party/skia/include/core/SkFontMgr.h"
 #include "third_party/skia/include/core/SkTypeface.h"
 #include "third_party/skia/include/ports/SkFontConfigInterface.h"
+#include "third_party/skia/include/ports/SkFontMgr_directory.h"
 #include "third_party/skia/include/ports/SkFontMgr_empty.h"
 
 namespace {
@@ -561,6 +567,12 @@ sk_sp<SkFontConfigInterface> SkFontConfigInterface::RefGlobal() {
 
 namespace skia {
 sk_sp<SkFontMgr> CreateDefaultSkFontMgr() {
+  const char* font_dir = getenv("QNX_FONT_DIR");
+  if (!font_dir || !font_dir[0])
+    font_dir = "/usr/fonts/font_repository";
+  sk_sp<SkFontMgr> mgr = SkFontMgr_New_Custom_Directory(font_dir);
+  if (mgr && mgr->countFamilies() > 0)
+    return mgr;
   return SkFontMgr_New_Custom_Empty();
 }
 }  // namespace skia
