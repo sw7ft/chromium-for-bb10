@@ -339,7 +339,19 @@ void StackDumpSignalHandler(int signal, siginfo_t* info, void* void_context) {
   // PC/LR + a stack scan and RETURN (do not abort). Used to find busy-spin
   // hot paths on JS-heavy pages. Triggered by sending SIGUSR2 repeatedly.
   if (signal == SIGUSR2) {
-    char sbuf[512];
+    // Per-thread stack sampler (non-fatal): emit one atomic line with this
+    // thread's PC/LR and every stack word that resolves into the content_shell
+    // module as an absolute address. Symbolize offline with
+    //   llvm-addr2line -e out/qnx-arm/exe.unstripped/content_shell <abs-addr>
+    // The boot watchdog broadcasts SIGUSR2 to all threads before _exit so a
+    // hang produces a full set of deadlock backtraces.
+    static char sbuf[4096];
+    int so = 0;
+#define SB_APP(...)                                                      \
+  do {                                                                   \
+    if (so < (int)sizeof(sbuf) - 1)                                      \
+      so += snprintf(sbuf + so, sizeof(sbuf) - so, __VA_ARGS__);         \
+  } while (0)
     ucontext_t* suc = (ucontext_t*)void_context;
     unsigned spc = 0, slr = 0, ssp = 0;
     if (suc) {
@@ -347,36 +359,33 @@ void StackDumpSignalHandler(int signal, siginfo_t* info, void* void_context) {
       slr = suc->uc_mcontext.cpu.gpr[14];
       ssp = suc->uc_mcontext.cpu.gpr[13];
     }
+    SB_APP("QNX:SAMPLE tid=%x pc=0x%x lr=0x%x", (unsigned)pthread_self(), spc,
+           slr);
+    Dl_info self_dli;
+    unsigned exe_base = 0;
+    if (dladdr((void*)&StackDumpSignalHandler, &self_dli))
+      exe_base = (unsigned)self_dli.dli_fbase;
     Dl_info sdli;
-    int sn = snprintf(sbuf, sizeof(sbuf), "QNX:SAMPLE tid=%x pc=0x%x",
-                      (unsigned)pthread_self(), spc);
-    write(STDERR_FILENO, sbuf, sn);
-    if (spc && dladdr((void*)spc, &sdli) && sdli.dli_sname) {
-      sn = snprintf(sbuf, sizeof(sbuf), " PC=%s+0x%x", sdli.dli_sname,
-                    (unsigned)((char*)spc - (char*)sdli.dli_saddr));
-      write(STDERR_FILENO, sbuf, sn);
-    }
-    if (slr && dladdr((void*)slr, &sdli) && sdli.dli_sname) {
-      sn = snprintf(sbuf, sizeof(sbuf), " LR=%s+0x%x", sdli.dli_sname,
-                    (unsigned)((char*)slr - (char*)sdli.dli_saddr));
-      write(STDERR_FILENO, sbuf, sn);
-    }
-    write(STDERR_FILENO, " ST:", 4);
-    if (ssp > 0x10000) {
+    if (spc && dladdr((void*)spc, &sdli) && sdli.dli_sname)
+      SB_APP(" PC=%s+0x%x", sdli.dli_sname,
+             (unsigned)((char*)spc - (char*)sdli.dli_saddr));
+    if (slr && dladdr((void*)slr, &sdli) && sdli.dli_sname)
+      SB_APP(" LR=%s+0x%x", sdli.dli_sname,
+             (unsigned)((char*)slr - (char*)sdli.dli_saddr));
+    SB_APP(" ABS:");
+    if (ssp > 0x10000 && exe_base) {
       unsigned* sp2 = (unsigned*)ssp;
-      for (int i = 0; i < 80; i++) {
-        unsigned val = sp2[i];
-        if (val > 0x1000000 && val < 0x6000000) {
-          Dl_info s2;
-          if (dladdr((void*)(val & ~1u), &s2) && s2.dli_sname) {
-            sn = snprintf(sbuf, sizeof(sbuf), " %s+%x", s2.dli_sname,
-                          (unsigned)((char*)(val & ~1u) - (char*)s2.dli_saddr));
-            write(STDERR_FILENO, sbuf, sn);
-          }
-        }
+      for (int i = 0; i < 400 && (unsigned)(sp2 + i) < 0x7fffffff; i++) {
+        unsigned code = sp2[i] & ~1u;
+        Dl_info s2;
+        if (code > 0x10000 && dladdr((void*)code, &s2) &&
+            (unsigned)s2.dli_fbase == exe_base)
+          SB_APP(" %x", code);
       }
     }
-    write(STDERR_FILENO, "\n", 1);
+    SB_APP("\n");
+#undef SB_APP
+    write(STDERR_FILENO, sbuf, so);
     return;
   }
   {

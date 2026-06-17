@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cstdio>
 #include <pthread.h>
+#include <signal.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -25,10 +26,35 @@ struct WatchdogState {
   std::atomic<bool> cancelled{false};
   int total_ms = 0;
   const char* label = "HardWatchdog";
+  bool dump_threads = false;
 };
 
 WatchdogState g_commit_watchdog;
 WatchdogState g_boot_watchdog;
+
+// Before exiting on a deadline, ask every thread to dump its stack via the
+// SIGUSR2 sampler (registered in base/debug/stack_trace_posix.cc). On QNX a
+// pthread_t is the integer tid, so brute-force the low tid range; nonexistent
+// tids return ESRCH and are skipped. A short pause between signals lets each
+// handler emit its (atomic) line without interleaving.
+void DumpAllThreadStacks() {
+  const char hdr[] = "QNX:Watchdog dumping all thread stacks (SIGUSR2)\n";
+  write(2, hdr, sizeof(hdr) - 1);
+  pthread_t self = pthread_self();
+  for (int tid = 1; tid <= 64; ++tid) {
+    pthread_t t = static_cast<pthread_t>(tid);
+    if (t == self)
+      continue;
+    if (pthread_kill(t, SIGUSR2) != 0)
+      continue;
+    struct timespec ts;
+    ts.tv_sec = 0;
+    ts.tv_nsec = 30 * 1000 * 1000L;  // 30ms
+    nanosleep(&ts, nullptr);
+  }
+  const char done[] = "QNX:Watchdog stack dump done\n";
+  write(2, done, sizeof(done) - 1);
+}
 
 void* WatchdogThread(void* arg) {
   WatchdogState* wd = static_cast<WatchdogState*>(arg);
@@ -50,13 +76,17 @@ void* WatchdogThread(void* arg) {
                    wd->label);
   if (n > 0)
     write(2, msg, static_cast<size_t>(n));
+  if (wd->dump_threads)
+    DumpAllThreadStacks();
   _exit(0);
   return nullptr;
 }
 
-void StartWatchdog(WatchdogState* wd, int total_ms, const char* label) {
+void StartWatchdog(WatchdogState* wd, int total_ms, const char* label,
+                   bool dump_threads) {
   wd->total_ms = total_ms;
   wd->label = label;
+  wd->dump_threads = dump_threads;
   wd->cancelled.store(false, std::memory_order_release);
   pthread_t tid;
   pthread_attr_t attr;
@@ -69,7 +99,8 @@ void StartWatchdog(WatchdogState* wd, int total_ms, const char* label) {
 }  // namespace
 
 void StartQnxHardWatchdog(int total_ms) {
-  StartWatchdog(&g_commit_watchdog, total_ms, "HardWatchdog");
+  StartWatchdog(&g_commit_watchdog, total_ms, "HardWatchdog",
+                /*dump_threads=*/false);
 }
 
 void CancelQnxHardWatchdog() {
@@ -77,7 +108,8 @@ void CancelQnxHardWatchdog() {
 }
 
 void StartQnxBootWatchdog(int total_ms) {
-  StartWatchdog(&g_boot_watchdog, total_ms, "BootWatchdog");
+  StartWatchdog(&g_boot_watchdog, total_ms, "BootWatchdog",
+                /*dump_threads=*/true);
 }
 
 void CancelQnxBootWatchdog() {

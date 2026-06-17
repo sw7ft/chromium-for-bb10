@@ -36,8 +36,13 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) IgnoreErrorsCertVerifier
       const char* user_data_dir_switch,
       std::unique_ptr<net::CertVerifier> verifier);
 
+  // When |ignore_all| is true (set by the plain --ignore-certificate-errors
+  // switch), Verify short-circuits to OK for every chain without consulting the
+  // wrapped verifier. On platforms without a system trust store (e.g. QNX) this
+  // also avoids the per-request CertVerifierService mojo round-trip entirely.
   IgnoreErrorsCertVerifier(std::unique_ptr<net::CertVerifier> verifier,
-                           SPKIHashSet allowlist);
+                           SPKIHashSet allowlist,
+                           bool ignore_all = false);
 
   IgnoreErrorsCertVerifier(const IgnoreErrorsCertVerifier&) = delete;
   IgnoreErrorsCertVerifier& operator=(const IgnoreErrorsCertVerifier&) = delete;
@@ -64,6 +69,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) IgnoreErrorsCertVerifier
 
   std::unique_ptr<net::CertVerifier> verifier_;
   SPKIHashSet allowlist_;
+  bool ignore_all_ = false;
 };
 
 }  // namespace network

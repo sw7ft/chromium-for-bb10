@@ -91,7 +91,7 @@ attributed to a single change. Feature flags are re-enabled one at a time
 | **1** | PASS | PASS | PASS | +HTTP/2; Jun 16 2026 stable (2/2 runs 3/3) |
 | **2** | PASS | PASS | PASS | +MojoIpcz; Jun 16 2026 3/3 |
 | **3** | PASS | PASS | PASS | +NetworkServiceDedicatedThread (single-process); Jun 16 2026 3/3 |
-| 4 | FLAKY | FLAKY | FLAKY | +Viz (single-process); **non-deterministic** ~40% pass / ~50% hang / partial; boot watchdog contains failures. See below. |
+| 4 | FLAKY | FLAKY | FLAKY | +Viz (single-process); cert mojo race **FIXED** (11/15 pass, was ~40%); residual ~20% hang in in-process GPU/Viz init. Boot watchdog contains failures. See below. |
 | 5 | - | - | - | +ServiceWorker (single-process); blocked on tier 4 |
 | 6 | - | - | - | Multi-process; `posix_spawn` launcher wired; blocked on tier 4 |
 | 7 | - | - | - | qnx_screen on-screen (software); pending |
@@ -101,45 +101,63 @@ Tier 1+ keeps `--ignore-certificate-errors`. Tier 1+ drops `--disable-http2` whe
 
 ### Tier 4 (Viz) — investigation findings (Jun 16 2026)
 
-Tier 4 is **not** a hard deadlock; it is a **non-deterministic race**. Over
-repeated runs we see ~40% success (full DOM dump), ~50% hang, occasional partial
-dumps. The boot watchdog (armed at process start) now contains every failure
-mode, so the device no longer wedges and `--qnx-trace` runs are safe to repeat.
+Tier 4 is **not** a hard deadlock; it is a **non-deterministic race**. The boot
+watchdog (armed at process start) contains every failure mode, so the device
+never wedges. We found **two independent failure vectors**; one is now fixed.
 
-Two distinct symptoms, **one shared hot spot** — the out-of-process
-`cert_verifier.mojom.CertVerifierService` mojo path:
+**Vector A — CertVerifierService mojo race (FIXED).**
+Every HTTPS load triggered the out-of-process `cert_verifier.mojom.CertVerifierService`
+mojo path. On QNX there is **no system trust store**, so the builtin path builder
+fails every chain (`CertVerifyProcBuiltin ... failed: No matching issuer found`,
+no AIA fetcher) and then must hand the verdict back across the
+network-service↔cert-verifier mojo pipe. Under the Viz thread topology that
+cross-thread reply raced:
+- *Crash (tracing-only):* SIGSEGV in QNX libc `_Putfld`/`strlen` (`R0=0x1f`) when
+  `QNX_TRACE_FMT(... iface=%s ...)` printed a torn `Connector::interface_name_`.
+  Fixed earlier with `base::QnxSafeStr()`.
+- *Hang:* a cert worker parked forever on a heap `ConditionVariable` waiting for
+  the verdict to be delivered; the page never progressed past the TLS handshake.
 
-1. **Crash (tracing-only artifact, FIXED).** Earlier SIGSEGV in `strlen` via QNX
-   libc `_Putfld` (printf) with `R0=0x1f`. Root cause: our `QNX_TRACE_FMT(...
-   iface=%s ...)` traces in `mojo/.../connector.cc` and
-   `interface_endpoint_client.cc` printed `Connector::interface_name_`, which is a
-   **garbage/dangling pointer** during racy cross-thread dispatch. The null-guard
-   (`x ? x : "?"`) did not catch a non-null garbage value, and QNX libc `%s` does
-   not tolerate it (unlike glibc). Fixed with `base::QnxSafeStr()` (range-checks
-   the pointer, prints `<bad>`); the crash only ever occurred **with**
-   `--qnx-trace`. Confirmed: 0 crashes in 16 traced runs post-fix, with
-   `iface=<bad>` appearing when the garbage pointer is hit.
+**Fix:** since bring-up always passes `--ignore-certificate-errors`, the full
+verify + mojo round-trip is pure overhead that also races. `IgnoreErrorsCertVerifier`
+already short-circuits to `net::OK` *before* calling the wrapped (mojo) verifier
+for allowlisted SPKIs — but only when `--ignore-certificate-errors-spki-list` is
+set. We extended `MaybeWrapCertVerifier` so the plain `--ignore-certificate-errors`
+switch engages an **ignore-all** mode that short-circuits every chain. This
+bypasses the `MojoCertVerifier` round-trip entirely (verifier stack is
+`IgnoreErrors → Caching → Coalescing → CertAndCT → MojoCertVerifier`), so the
+racy pipe is never exercised. Bonus: faster HTTPS on **all** tiers (no per-request
+path building). Confirmed: `CertVerifyProcBuiltin` log gone (0/15 runs), tier-4
+success 11/15 (was ~40%).
 
-2. **Hang (real blocker, open).** Without tracing, a worker thread (e.g. tid 10,
-   the `MultiThreadedCertVerifier` pool) parks forever on a heap-allocated
-   `ConditionVariable` while the main thread sits in `SIGWAITINFO`. The garbage
-   `interface_name_` from (1) is strong evidence that the CertVerifierService
-   mojo endpoint/`Connector` is used in a torn/use-after-free state under the
-   Viz threading model — the likely shared root cause.
+**Vector B — in-process GPU/Viz init hang (OPEN, ~20%).**
+Residual tier-4 hangs now occur *earlier*, during in-process GPU/Viz bring-up:
+the process reaches `DevTools listening`, the GPU thread logs
+`gpu_init.cc: Vulkan not supported with in process gpu`, then init never
+completes. Main + IO threads are healthy (idle in the libevent pump); a
+Viz-init task simply never finishes. The genuinely-stuck thread (GPU/Viz)
+**masks SIGUSR2**, so the watchdog's all-thread sampler cannot capture it.
 
-Tooling added this round (see git history): atomic single-`write()` crash dump in
-`base/debug/stack_trace_posix.cc` (R0–R15 + absolute return-address scan),
-symbolizable offline with `llvm-addr2line -e out/qnx-arm/exe.unstripped/content_shell <abs-addr>`.
+Tooling added this round (see git history):
+- atomic single-`write()` crash dump in `base/debug/stack_trace_posix.cc`
+  (R0–R15 + absolute return-address scan), symbolizable offline with
+  `llvm-addr2line -e out/qnx-arm/exe.unstripped/content_shell <abs-addr>`.
+- **All-thread stack dump on watchdog deadline**: the boot watchdog broadcasts
+  SIGUSR2 to all tids before `_exit`; each responding thread emits one atomic
+  `QNX:SAMPLE tid=.. pc=.. ABS: <exe-relative addrs>` line. Caveat: signal-masked
+  threads (GPU, blocked workers) don't respond.
 
-Recommended next steps:
+Recommended next steps (Vector B):
 
-1. Try forcing **in-process cert verification** (disable the out-of-process
-   CertVerifierService) at tier 4 to test the shared-root-cause hypothesis.
-2. With `--qnx-trace` now crash-safe, capture a clean hang trace and `pidin`
-   thread dump; symbolize the parked worker's stack.
-3. Inspect CertVerifierService endpoint lifetime/threading
-   (`services/cert_verifier/*`, mojo `Connector` teardown) for the race exposed
-   by the Viz thread topology.
+1. To inspect the masked GPU/Viz thread, add a QNX `devctl`/`/proc/<pid>` thread
+   register+stack reader (debugger-style) instead of signal sampling, OR unmask
+   SIGUSR2 on `PlatformThread`s during bring-up.
+2. Investigate the in-process GPU/Viz init path (`VizMainImpl`, `GpuServiceImpl`,
+   `GpuChannelEstablish`) for a startup task that never runs under the QNX
+   single-process + headless Viz topology.
+3. Decide strategically: Viz provides little benefit while still headless +
+   `--disable-gpu`; consider deferring Viz until on-screen (tier 7) and pursuing
+   other hardening (e.g. multi-process) first.
 
 ## Berry daemon (experimental)
 

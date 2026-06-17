@@ -35,22 +35,38 @@ std::unique_ptr<CertVerifier> IgnoreErrorsCertVerifier::MaybeWrapCertVerifier(
     const base::CommandLine& command_line,
     const char* user_data_dir_switch,
     std::unique_ptr<CertVerifier> verifier) {
+  // The plain --ignore-certificate-errors switch (defined in content) requests
+  // that all certificate errors be ignored. We treat it as "ignore every
+  // chain": Verify short-circuits to OK without invoking the wrapped verifier.
+  // This is important on platforms with no system trust store (QNX), where the
+  // builtin verifier would otherwise fail every chain and force a per-request
+  // round-trip over the (race-prone) CertVerifierService mojo pipe.
+  const bool ignore_all = command_line.HasSwitch("ignore-certificate-errors");
+  const bool has_spki_list =
+      command_line.HasSwitch(switches::kIgnoreCertificateErrorsSPKIList);
   if ((user_data_dir_switch && !command_line.HasSwitch(user_data_dir_switch)) ||
-      !command_line.HasSwitch(switches::kIgnoreCertificateErrorsSPKIList)) {
+      (!ignore_all && !has_spki_list)) {
     return verifier;
   }
-  auto spki_list =
-      base::SplitString(command_line.GetSwitchValueASCII(
-                            switches::kIgnoreCertificateErrorsSPKIList),
-                        ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
+  SPKIHashSet allowlist;
+  if (has_spki_list) {
+    auto spki_list =
+        base::SplitString(command_line.GetSwitchValueASCII(
+                              switches::kIgnoreCertificateErrorsSPKIList),
+                          ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
+    allowlist = CreateSPKIHashSet(spki_list);
+  }
   return std::make_unique<IgnoreErrorsCertVerifier>(
-      std::move(verifier), CreateSPKIHashSet(spki_list));
+      std::move(verifier), std::move(allowlist), ignore_all);
 }
 
 IgnoreErrorsCertVerifier::IgnoreErrorsCertVerifier(
     std::unique_ptr<CertVerifier> verifier,
-    SPKIHashSet allowlist)
-    : verifier_(std::move(verifier)), allowlist_(std::move(allowlist)) {}
+    SPKIHashSet allowlist,
+    bool ignore_all)
+    : verifier_(std::move(verifier)),
+      allowlist_(std::move(allowlist)),
+      ignore_all_(ignore_all) {}
 
 IgnoreErrorsCertVerifier::~IgnoreErrorsCertVerifier() {}
 
@@ -79,21 +95,24 @@ int IgnoreErrorsCertVerifier::Verify(const RequestParams& params,
     }
   }
 
-  // Intersect SPKI hashes from the chain with the allowlist.
-  auto allowlist_begin = allowlist_.begin();
-  auto allowlist_end = allowlist_.end();
-  auto fingerprints_begin = spki_fingerprints.begin();
-  auto fingerprints_end = spki_fingerprints.end();
-  bool ignore_errors = false;
-  while (allowlist_begin != allowlist_end &&
-         fingerprints_begin != fingerprints_end) {
-    if (*allowlist_begin < *fingerprints_begin) {
-      ++allowlist_begin;
-    } else if (*fingerprints_begin < *allowlist_begin) {
-      ++fingerprints_begin;
-    } else {
-      ignore_errors = true;
-      break;
+  // Intersect SPKI hashes from the chain with the allowlist. When ignore_all_
+  // is set we skip the intersection and ignore every chain unconditionally.
+  bool ignore_errors = ignore_all_;
+  if (!ignore_errors) {
+    auto allowlist_begin = allowlist_.begin();
+    auto allowlist_end = allowlist_.end();
+    auto fingerprints_begin = spki_fingerprints.begin();
+    auto fingerprints_end = spki_fingerprints.end();
+    while (allowlist_begin != allowlist_end &&
+           fingerprints_begin != fingerprints_end) {
+      if (*allowlist_begin < *fingerprints_begin) {
+        ++allowlist_begin;
+      } else if (*fingerprints_begin < *allowlist_begin) {
+        ++fingerprints_begin;
+      } else {
+        ignore_errors = true;
+        break;
+      }
     }
   }
 
