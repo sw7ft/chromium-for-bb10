@@ -90,8 +90,8 @@ attributed to a single change. Feature flags are re-enabled one at a time
 | **0** | PASS (~32s) | PASS (~43s, ~225KB) | PASS (~241KB) | Jun 16 2026; post-commit timeout + cancellable watchdog |
 | **1** | PASS | PASS | PASS | +HTTP/2; Jun 16 2026 stable (2/2 runs 3/3) |
 | **2** | PASS | PASS | PASS | +MojoIpcz; Jun 16 2026 3/3 |
-| **3** | PASS | PASS | PASS | +NetworkServiceDedicatedThread (single-process); Jun 16 2026 3/3 |
-| 4 | FLAKY | FLAKY | FLAKY | +Viz (single-process); cert mojo race **FIXED** (11/15 pass, was ~40%); residual ~20% hang in in-process GPU/Viz init. Boot watchdog contains failures. See below. |
+| **3** | FLAKY | FLAKY | FLAKY | +NetworkServiceDedicatedThread (single-process); ~25% baseline startup stall (9/12), masked by tiny earlier sample. See Vector B. |
+| 4 | FLAKY | FLAKY | FLAKY | +Viz (single-process); cert mojo race **FIXED** (11/15, was ~40%); residual ~= tier-3 baseline startup stall (not Viz). Boot watchdog contains failures. See below. |
 | 5 | - | - | - | +ServiceWorker (single-process); blocked on tier 4 |
 | 6 | - | - | - | Multi-process; `posix_spawn` launcher wired; blocked on tier 4 |
 | 7 | - | - | - | qnx_screen on-screen (software); pending |
@@ -130,34 +130,53 @@ racy pipe is never exercised. Bonus: faster HTTPS on **all** tiers (no per-reque
 path building). Confirmed: `CertVerifyProcBuiltin` log gone (0/15 runs), tier-4
 success 11/15 (was ~40%).
 
-**Vector B — in-process GPU/Viz init hang (OPEN, ~20%).**
-Residual tier-4 hangs now occur *earlier*, during in-process GPU/Viz bring-up:
-the process reaches `DevTools listening`, the GPU thread logs
-`gpu_init.cc: Vulkan not supported with in process gpu`, then init never
-completes. Main + IO threads are healthy (idle in the libevent pump); a
-Viz-init task simply never finishes. The genuinely-stuck thread (GPU/Viz)
-**masks SIGUSR2**, so the watchdog's all-thread sampler cannot capture it.
+**Vector B — quiescent startup stall (OPEN, ~20-25%, BASELINE not Viz).**
+This is **not** Viz-specific. Tier 3 (Viz disabled) run ~12-20x shows the
+**same** ~20-25% failure (hang or empty/partial dump); the earlier "tier 3
+3/3 stable" was too small a sample. Tier 4's extra instability was almost
+entirely Vector A; with that fixed, tier 4 (11/15) ~= tier 3 (9/12) baseline.
+The `gpu_init.cc: Vulkan not supported with in process gpu` log is a red
+herring: it prints at tier 3 too (an in-process GPU thread always starts) and
+is just a LOG line, not the hang.
 
-Tooling added this round (see git history):
+**Full /proc all-thread dump of a live hang (all 26 threads) shows every thread
+idle in a normal wait** — no blocked owner, no GPU-init frame:
+- tid 1 browser main: `BrowserMainLoop::RunMainMessageLoop -> RunLoop::Run ->
+  MessagePumpLibevent -> event_base_loop -> select_dispatch` (idle, pumping).
+- IO threads (`BrowserProcessIOThread`, `ChildIOThread`), the
+  `NetworkServiceDedicatedThread`, the HTTP cache thread, the in-process
+  renderer/blink threads, `cc::SingleThreadTaskGraphRunner`, and all
+  `ThreadPool` workers: idle in `MessagePumpDefault::Run` / `WaitForWork` /
+  `ConditionVariable::Wait`.
+
+So the failure is a **lost-wakeup / lost-task quiescent deadlock** in the
+startup->first-navigation handoff: the browser comes fully up (`DevTools
+listening`) but the initial navigation never proceeds and no thread has work.
+No active network request, no renderer work — the triggering task/mojo message
+for the first load appears to be dropped under a QNX startup race.
+
+Tooling added (committed):
 - atomic single-`write()` crash dump in `base/debug/stack_trace_posix.cc`
-  (R0–R15 + absolute return-address scan), symbolizable offline with
+  (R0-R15 + absolute return-address scan), symbolizable offline with
   `llvm-addr2line -e out/qnx-arm/exe.unstripped/content_shell <abs-addr>`.
-- **All-thread stack dump on watchdog deadline**: the boot watchdog broadcasts
-  SIGUSR2 to all tids before `_exit`; each responding thread emits one atomic
-  `QNX:SAMPLE tid=.. pc=.. ABS: <exe-relative addrs>` line. Caveat: signal-masked
-  threads (GPU, blocked workers) don't respond.
+- all-thread SIGUSR2 sampler on watchdog deadline (caveat: signal-masked
+  threads don't respond — superseded for hangs by the /proc reader below).
+- **`qnx_stack.c` + `deploy/capture-hang.sh`**: a `/proc/<pid>/as` thread
+  register+stack reader that works on *every* thread regardless of signal
+  mask. `capture-hang.sh` launches content_shell, waits past the healthy
+  finish time, and on a hang dumps all tids to `/tmp/stacks.txt`. This is the
+  decisive tool and produced the all-idle finding above.
 
 Recommended next steps (Vector B):
 
-1. To inspect the masked GPU/Viz thread, add a QNX `devctl`/`/proc/<pid>` thread
-   register+stack reader (debugger-style) instead of signal sampling, OR unmask
-   SIGUSR2 on `PlatformThread`s during bring-up.
-2. Investigate the in-process GPU/Viz init path (`VizMainImpl`, `GpuServiceImpl`,
-   `GpuChannelEstablish`) for a startup task that never runs under the QNX
-   single-process + headless Viz topology.
-3. Decide strategically: Viz provides little benefit while still headless +
-   `--disable-gpu`; consider deferring Viz until on-screen (tier 7) and pursuing
-   other hardening (e.g. multi-process) first.
+1. Trace the startup->first-load task flow on the UI thread (Shell window
+   creation + `Shell::LoadURL` / `NavigationController::LoadURL` post) to find
+   which expected task/mojo message is lost in the ~20% hang. Stacks are
+   exhausted (all idle); this needs event/task tracing, not stack dumps.
+2. Suspect a `PostTask`/mojo message racing with message-loop or interface
+   bring-up that occasionally drops its wakeup on QNX.
+3. The fault predates Viz, so it gates *every* tier — worth fixing before
+   pushing further up the ladder.
 
 ## Berry daemon (experimental)
 
