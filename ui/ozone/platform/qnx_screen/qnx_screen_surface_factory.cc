@@ -88,8 +88,11 @@ class QnxScreenCanvas : public SurfaceOzoneCanvas {
       // Format: "QFB1" magic, int32 width, height, rowbytes (LE), then raw
       // N32 (BGRA premul) pixels. Convert to PNG on the host.
       static const char* dump_path = getenv("QNX_FB_DUMP");
+      static int dump_seq = 0;
       if (dump_path && dump_path[0]) {
-        FILE* f = fopen(dump_path, "wb");
+        char namebuf[512];
+        snprintf(namebuf, sizeof(namebuf), "%s.%03d", dump_path, dump_seq++);
+        FILE* f = fopen(namebuf, "wb");
         if (f) {
           int32_t w = pixmap.width();
           int32_t hh = pixmap.height();

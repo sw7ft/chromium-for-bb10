@@ -252,9 +252,11 @@ void DelegatedFrameHost::EmbedSurface(
   TRACE_EVENT2("viz", "DelegatedFrameHost::EmbedSurface", "surface_id",
                new_local_surface_id.ToString(), "deadline_policy",
                deadline_policy.ToString());
-  QNX_TRACE_FMT("QNX:DFH:embed vis=%d size=%dx%d\n",
+  QNX_TRACE_FMT("QNX:DFH:embed vis=%d size=%dx%d sink=%s lsid=%s\n",
                 (int)client_->DelegatedFrameHostIsVisible(),
-                new_dip_size.width(), new_dip_size.height());
+                new_dip_size.width(), new_dip_size.height(),
+                frame_sink_id_.ToString().c_str(),
+                new_local_surface_id.ToString().c_str());
 
   const viz::SurfaceId* primary_surface_id =
       client_->DelegatedFrameHostGetLayer()->GetSurfaceId();

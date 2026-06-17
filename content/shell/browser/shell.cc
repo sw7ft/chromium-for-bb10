@@ -258,22 +258,10 @@ void Shell::RenderFrameCreated(RenderFrameHost* frame_host) {
 }
 
 void Shell::LoadURL(const GURL& url) {
-#if BUILDFLAG(IS_QNX)
-  GURL load_url = url;
-  if (url.SchemeIs(url::kDataScheme)) {
-    QNX_TRACE_MSG("QNX:Shell:DataToBlank\n");
-    load_url = GURL("about:blank");
-  }
-  LoadURLForFrame(
-      load_url, std::string(),
-      ui::PageTransitionFromInt(ui::PAGE_TRANSITION_TYPED |
-                                ui::PAGE_TRANSITION_FROM_ADDRESS_BAR));
-#else
   LoadURLForFrame(
       url, std::string(),
       ui::PageTransitionFromInt(ui::PAGE_TRANSITION_TYPED |
                                 ui::PAGE_TRANSITION_FROM_ADDRESS_BAR));
-#endif
 }
 
 void Shell::LoadURLForFrame(const GURL& url,

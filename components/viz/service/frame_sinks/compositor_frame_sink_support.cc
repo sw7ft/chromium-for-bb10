@@ -18,12 +18,16 @@
 #include "base/task/sequenced_task_runner.h"
 #include "base/time/time.h"
 #include "base/trace_event/typed_macros.h"
+#include "base/qnx_trace.h"
 #include "build/build_config.h"
 #include "cc/base/features.h"
 #include "components/viz/common/features.h"
 #include "components/viz/common/frame_sinks/begin_frame_source.h"
 #include "components/viz/common/quads/compositor_frame.h"
 #include "components/viz/common/quads/compositor_render_pass.h"
+#include "components/viz/common/quads/draw_quad.h"
+#include "components/viz/common/quads/solid_color_draw_quad.h"
+#include "components/viz/common/quads/surface_draw_quad.h"
 #include "components/viz/common/resources/bitmap_allocation.h"
 #include "components/viz/common/surfaces/surface_info.h"
 #include "components/viz/common/surfaces/video_capture_target.h"
@@ -720,6 +724,35 @@ SubmitResult CompositorFrameSinkSupport::MaybeSubmitCompositorFrame(
   DCHECK(local_surface_id.is_valid());
   DCHECK(!frame.render_pass_list.empty());
   DCHECK(!frame.size_in_pixels().IsEmpty());
+
+  QNX_TRACE_FMT("QNX:SUB sink=%s lsid=%s size=%dx%d passes=%d\n",
+                frame_sink_id_.ToString().c_str(),
+                local_surface_id.ToString().c_str(),
+                frame.size_in_pixels().width(),
+                frame.size_in_pixels().height(),
+                (int)frame.render_pass_list.size());
+  if (g_qnx_trace_enabled && !frame.render_pass_list.empty()) {
+    const auto& root = frame.render_pass_list.back();
+    QNX_TRACE_FMT("QNX:RP sink=%s quads=%d\n", frame_sink_id_.ToString().c_str(),
+                  (int)root->quad_list.size());
+    int n = 0;
+    for (auto* q : root->quad_list) {
+      if (++n > 6)
+        break;
+      if (q->material == DrawQuad::Material::kSurfaceContent) {
+        auto* sq = SurfaceDrawQuad::MaterialCast(q);
+        QNX_TRACE_FMT("QNX:Q surface ref=%s\n",
+                      sq->surface_range.end().ToString().c_str());
+      } else if (q->material == DrawQuad::Material::kSolidColor) {
+        auto* sc = SolidColorDrawQuad::MaterialCast(q);
+        QNX_TRACE_FMT("QNX:Q solid r=%d g=%d b=%d a=%d\n",
+                      (int)(sc->color.fR * 255), (int)(sc->color.fG * 255),
+                      (int)(sc->color.fB * 255), (int)(sc->color.fA * 255));
+      } else {
+        QNX_TRACE_FMT("QNX:Q mat=%d\n", (int)q->material);
+      }
+    }
+  }
 
   CHECK(callback_received_begin_frame_);
   CHECK(callback_received_receive_ack_);
