@@ -1,2 +1,5 @@
+# On-device deploy artifacts (large binaries / bundles) — do not commit
+berry-browser-bundle/
 bb10-content-shell/
-bb10-content-shell.tar.gz
+*.zip
+*.tar.gz

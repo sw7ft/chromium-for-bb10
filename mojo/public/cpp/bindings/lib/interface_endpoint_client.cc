@@ -676,10 +676,36 @@ bool InterfaceEndpointClient::SendMessageWithResponder(
 
   base::WeakPtr<InterfaceEndpointClient> weak_self =
       weak_ptr_factory_.GetWeakPtr();
+#if defined(__QNX__)
+  // ALWAYS-ON (not gated by g_qnx_trace_enabled): sync calls are low-volume, so
+  // this won't induce the boot-time slowdown that full tracing does, and it lets
+  // us catch a sync call that hangs during startup/commit (before any runtime
+  // SIGUSR1 trace gate could be flipped).
+  {
+    char _qb[256];
+    int _qn = snprintf(_qb, sizeof(_qb),
+                       "QNX:SYNC:wait tid=%x name=%u excl=%d iface=%s\n",
+                       (unsigned)pthread_self(), message_name,
+                       (int)exclusive_wait, base::QnxSafeStr(interface_name_));
+    if (_qn > 0)
+      ::write(2, _qb, _qn);
+  }
+#endif
   if (exclusive_wait)
     controller_->SyncWatchExclusive(request_id);
   else
     controller_->SyncWatch(response_received);
+#if defined(__QNX__)
+  {
+    char _qb[256];
+    int _qn = snprintf(_qb, sizeof(_qb),
+                       "QNX:SYNC:done tid=%x name=%u recv=%d iface=%s\n",
+                       (unsigned)pthread_self(), message_name,
+                       (int)response_received, base::QnxSafeStr(interface_name_));
+    if (_qn > 0)
+      ::write(2, _qb, _qn);
+  }
+#endif
   // Make sure that this instance hasn't been destroyed.
   if (weak_self) {
     DCHECK(base::Contains(sync_responses_, request_id));

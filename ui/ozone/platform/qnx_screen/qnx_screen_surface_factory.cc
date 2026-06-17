@@ -6,6 +6,10 @@
 #include <screen/screen.h>
 #include <unistd.h>
 
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+
 #include "base/memory/ptr_util.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkSurface.h"
@@ -77,6 +81,26 @@ class QnxScreenCanvas : public SurfaceOzoneCanvas {
         memcpy(dst, src, copy_stride);
         src += pixmap.rowBytes();
         dst += stride;
+      }
+
+      // Debug-only: dump the composited software framebuffer so first-pixels
+      // can be verified off-device. Gated on env so it has no production cost.
+      // Format: "QFB1" magic, int32 width, height, rowbytes (LE), then raw
+      // N32 (BGRA premul) pixels. Convert to PNG on the host.
+      static const char* dump_path = getenv("QNX_FB_DUMP");
+      if (dump_path && dump_path[0]) {
+        FILE* f = fopen(dump_path, "wb");
+        if (f) {
+          int32_t w = pixmap.width();
+          int32_t hh = pixmap.height();
+          int32_t rb = static_cast<int32_t>(pixmap.rowBytes());
+          fwrite("QFB1", 1, 4, f);
+          fwrite(&w, sizeof(w), 1, f);
+          fwrite(&hh, sizeof(hh), 1, f);
+          fwrite(&rb, sizeof(rb), 1, f);
+          fwrite(pixmap.addr(), 1, static_cast<size_t>(rb) * hh, f);
+          fclose(f);
+        }
       }
     }
 

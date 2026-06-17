@@ -35,6 +35,7 @@
  */
 
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
+#include "base/qnx_berry_daemon.h"
 #include "base/qnx_trace.h"
 
 #if defined(__QNX__)
@@ -162,6 +163,23 @@ void QnxDumpDomAndExitIfRequested(LocalFrame* frame, const char* trigger_point) 
   if (!cmdline->HasSwitch("dump-dom"))
     return;
 
+  // Only the browser process should emit DOM output (stdout is wired there).
+  if (cmdline->HasSwitch("type"))
+    return;
+
+#if defined(__QNX__)
+  // Multi-process: renderer stdout is not the browser's; dump from Shell instead.
+  if (!cmdline->HasSwitch("single-process"))
+    return;
+#endif
+
+  if (base::QnxBerryDaemonEnabled()) {
+    if (frame != &frame->LocalFrameRoot())
+      return;
+    if (frame->GetDocument()->Url().IsAboutBlankURL())
+      return;
+  }
+
   const std::string trigger = cmdline->GetSwitchValueASCII("dom-trigger");
   const bool want_dcl = (trigger == "domcontentloaded");
   if (want_dcl) {
@@ -179,11 +197,10 @@ void QnxDumpDomAndExitIfRequested(LocalFrame* frame, const char* trigger_point) 
   if (doc_el) {
     std::string html = "<html>" + doc_el->innerHTML().Utf8() + "</html>\n";
     QNX_TRACE_MSG("QNX:FLFP:DumpDom\n");
-    write(1, html.c_str(), html.size());
+    base::QnxBerryDaemonEmitHtml(base::span<const char>(html.data(), html.size()));
   } else {
-    write(1, "\n", 1);
+    base::QnxBerryDaemonEmitHtml(base::span<const char>());
   }
-  _exit(0);
 }
 #endif
 

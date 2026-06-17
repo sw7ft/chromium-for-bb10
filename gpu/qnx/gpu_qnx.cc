@@ -5,7 +5,9 @@
 // This avoids a hard link dependency on libEGL/libGLESv2 and
 // allows graceful software fallback when GPU libs aren't present.
 
-#ifdef __QNXNTO__
+#include "build/build_config.h"
+
+#if BUILDFLAG(IS_QNX)
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -212,4 +214,4 @@ void ShutdownGpu() {
 }  // namespace qnx
 }  // namespace gpu
 
-#endif  // __QNXNTO__
+#endif  // BUILDFLAG(IS_QNX)

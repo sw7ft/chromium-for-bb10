@@ -405,8 +405,17 @@ static_library("content_shell_lib") {
     sources += [
       "browser/berry_browser_chrome.cc",
       "browser/berry_browser_chrome.h",
+      "browser/qnx_berry_daemon_host.cc",
+      "browser/qnx_berry_daemon_host.h",
       "browser/shell_platform_delegate_qnx.cc",
       "browser/shell_web_contents_view_delegate_aura.cc",
+    ]
+    deps += [
+      "//gpu/qnx:qnx_gpu",
+      "//ui/aura",
+      "//ui/aura:test_support",
+      "//ui/events",
+      "//ui/wm",
     ]
   } else if (use_aura) {
     deps += [

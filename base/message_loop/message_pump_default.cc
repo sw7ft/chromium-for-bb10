@@ -9,6 +9,12 @@
 #include "base/synchronization/waitable_event.h"
 #include "build/build_config.h"
 
+#if BUILDFLAG(IS_QNX)
+#include <pthread.h>
+
+#include "base/qnx_trace.h"
+#endif
+
 #if BUILDFLAG(IS_APPLE)
 #include <mach/thread_policy.h>
 
@@ -39,6 +45,11 @@ void MessagePumpDefault::Run(Delegate* delegate) {
 
     Delegate::NextWorkInfo next_work_info = delegate->DoWork();
     bool has_more_immediate_work = next_work_info.is_immediate();
+#if BUILDFLAG(IS_QNX)
+    QNX_TRACE_FMT("QNX:MPD:DoWork tid=%x p=%p imm=%d\n",
+                  (unsigned)pthread_self(), (void*)this,
+                  (int)has_more_immediate_work);
+#endif
     if (!keep_running_)
       break;
 
@@ -53,9 +64,26 @@ void MessagePumpDefault::Run(Delegate* delegate) {
       continue;
 
     if (next_work_info.delayed_run_time.is_max()) {
+#if BUILDFLAG(IS_QNX)
+      QNX_TRACE_FMT("QNX:MPD:Wait tid=%x p=%p inf=1\n",
+                    (unsigned)pthread_self(), (void*)this);
+#endif
       event_.Wait();
+#if BUILDFLAG(IS_QNX)
+      QNX_TRACE_FMT("QNX:MPD:Wake tid=%x p=%p inf=1\n",
+                    (unsigned)pthread_self(), (void*)this);
+#endif
     } else {
+#if BUILDFLAG(IS_QNX)
+      QNX_TRACE_FMT("QNX:MPD:Wait tid=%x p=%p inf=0 ms=%lld\n",
+                    (unsigned)pthread_self(), (void*)this,
+                    (long long)next_work_info.remaining_delay().InMilliseconds());
+#endif
       event_.TimedWait(next_work_info.remaining_delay());
+#if BUILDFLAG(IS_QNX)
+      QNX_TRACE_FMT("QNX:MPD:Wake tid=%x p=%p inf=0\n",
+                    (unsigned)pthread_self(), (void*)this);
+#endif
     }
     // Since event_ is auto-reset, we don't need to do anything special here
     // other than service each delegate method.
@@ -69,6 +97,10 @@ void MessagePumpDefault::Quit() {
 void MessagePumpDefault::ScheduleWork() {
   // Since this can be called on any thread, we need to ensure that our Run
   // loop wakes up.
+#if BUILDFLAG(IS_QNX)
+  QNX_TRACE_FMT("QNX:MPD:Sig tid=%x p=%p\n",
+                (unsigned)pthread_self(), (void*)this);
+#endif
   event_.Signal();
 }
 

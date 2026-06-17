@@ -13,6 +13,7 @@
 #include "base/task/delay_policy.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/trace_event/trace_event.h"
+#include "base/qnx_trace.h"
 #include "components/viz/common/features.h"
 #include "components/viz/service/performance_hint/hint_session.h"
 
@@ -209,6 +210,7 @@ void DisplayScheduler::ReportFrameTime(
 
 bool DisplayScheduler::DrawAndSwap() {
   TRACE_EVENT0("viz", "DisplayScheduler::DrawAndSwap");
+  QNX_TRACE_MSG("QNX:DS:drawswap\n");
   DCHECK_LT(pending_swaps_,
             std::max(pending_swap_params_.max_pending_swaps,
                      pending_swap_params_.max_pending_swaps_120hz.value_or(0)));
@@ -233,6 +235,8 @@ bool DisplayScheduler::OnBeginFrame(const BeginFrameArgs& args) {
   base::TimeTicks now = base::TimeTicks::Now();
   TRACE_EVENT2("viz", "DisplayScheduler::BeginFrame", "args", args.AsValue(),
                "now", now);
+  QNX_TRACE_FMT("QNX:DS:onbf type=%d needs_draw=%d\n", (int)args.type,
+                (int)needs_draw_);
 
   if (inside_surface_damaged_) {
     // Repost this so that we don't run a missed BeginFrame on the same
@@ -340,6 +344,7 @@ int DisplayScheduler::MaxPendingSwaps() const {
 }
 
 void DisplayScheduler::SetNeedsOneBeginFrame(bool needs_draw) {
+  QNX_TRACE_FMT("QNX:DS:need1bf draw=%d\n", (int)needs_draw);
   // If we are not currently observing BeginFrames because needs_draw_ is false,
   // we will stop observing again after one BeginFrame in AttemptDrawAndSwap().
   StartObservingBeginFrames();
@@ -521,6 +526,9 @@ bool DisplayScheduler::AttemptDrawAndSwap() {
   // boost (regardless of whether we actually drew anything).
   frame_boost_deadline_timer_.Stop();
 
+  QNX_TRACE_FMT("QNX:DS:attempt needs_draw=%d visible=%d osl=%d rfm=%d\n",
+                (int)needs_draw_, (int)visible_, (int)output_surface_lost_,
+                (int)damage_tracker_->root_frame_missing());
   if (ShouldDraw()) {
     if (pending_swaps_ < MaxPendingSwaps())
       return DrawAndSwap();

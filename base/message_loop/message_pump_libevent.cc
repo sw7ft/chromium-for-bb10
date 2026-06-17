@@ -9,7 +9,10 @@
 
 #if defined(__QNX__) || defined(__QNXNTO__)
 #include <fcntl.h>
+#include <pthread.h>
 #include <sys/socket.h>
+
+#include "base/qnx_trace.h"
 #endif
 
 #include <memory>
@@ -357,7 +360,16 @@ void MessagePumpLibevent::Run(Delegate* delegate) {
     // is conditionally interrupted to look for more work if we are aware of a
     // delayed task that will need servicing.
     delegate->BeforeWait();
+#if defined(__QNX__) || defined(__QNXNTO__)
+    QNX_TRACE_FMT("QNX:MPL:Wait tid=%x p=%p timer=%d\n",
+                  (unsigned)pthread_self(), (void*)this, (int)did_set_timer);
+#endif
     event_base_loop(event_base_.get(), EVLOOP_ONCE);
+#if defined(__QNX__) || defined(__QNXNTO__)
+    QNX_TRACE_FMT("QNX:MPL:Woke tid=%x p=%p io=%d\n",
+                  (unsigned)pthread_self(), (void*)this,
+                  (int)processed_io_events_);
+#endif
 
     // We previously setup a timer to break out the event loop to look for more
     // work. Now that we're here delete the event.
@@ -395,6 +407,11 @@ void MessagePumpLibevent::ScheduleWork() {
   // Tell libevent (in a threadsafe way) that it should break out of its loop.
   char buf = 0;
   long nwrite = HANDLE_EINTR(write(wakeup_pipe_in_, &buf, 1));
+#if defined(__QNX__) || defined(__QNXNTO__)
+  QNX_TRACE_FMT("QNX:MPL:Sig tid=%x p=%p fd=%d nwrite=%ld errno=%d\n",
+                (unsigned)pthread_self(), (void*)this, wakeup_pipe_in_,
+                nwrite, (int)errno);
+#endif
   DPCHECK(nwrite == 1 || errno == EAGAIN) << "nwrite:" << nwrite;
 }
 
@@ -494,6 +511,10 @@ void MessagePumpLibevent::OnWakeup(int socket, short flags, void* context) {
               "context", context);
 #endif
   MessagePumpLibevent* that = static_cast<MessagePumpLibevent*>(context);
+#if defined(__QNX__) || defined(__QNXNTO__)
+  QNX_TRACE_FMT("QNX:MPL:OnWakeup tid=%x p=%p fd=%d\n",
+                (unsigned)pthread_self(), (void*)that, socket);
+#endif
   DCHECK(that->wakeup_pipe_out_ == socket);
 
   // Remove and discard the wakeup byte(s).

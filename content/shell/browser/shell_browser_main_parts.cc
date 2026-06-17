@@ -35,9 +35,11 @@
 #include "content/public/common/result_codes.h"
 #include "content/public/common/url_constants.h"
 #include "content/shell/android/shell_descriptors.h"
-#include "content/shell/browser/shell.h"
+#include "content/shell/browser/qnx_berry_daemon_host.h"
+#include "base/qnx_berry_daemon.h"
 #include "content/shell/browser/shell_browser_context.h"
 #include "content/shell/browser/shell_devtools_manager_delegate.h"
+#include "content/shell/browser/shell.h"
 #include "content/shell/browser/shell_platform_delegate.h"
 #include "content/shell/common/shell_switches.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
@@ -165,15 +167,27 @@ void ShellBrowserMainParts::InitializeBrowserContexts() {
 
 void ShellBrowserMainParts::InitializeMessageLoopContext() {
 #if BUILDFLAG(IS_QNX)
-  GURL url = GetStartupURL();
   auto* cmdline = base::CommandLine::ForCurrentProcess();
-  if (cmdline->HasSwitch("dump-dom")) {
+  // Subprocesses must not create Shell windows or emit startup DOM dumps.
+  if (cmdline->HasSwitch(switches::kProcessType))
+    return;
+
+  GURL url = GetStartupURL();
+  if (base::QnxBerryDaemonEnabled()) {
+    Shell::CreateNewWindow(browser_context_.get(), GURL("about:blank"), nullptr,
+                           gfx::Size());
+    return;
+  }
+  if (cmdline->HasSwitch(switches::kDumpDom)) {
     std::string spec = url.spec();
     bool is_blank = spec.empty() || spec == "about:" || spec == "about:blank";
     if (is_blank) {
-      const char out[] = "<html><head></head><body></body></html>\n";
-      ::write(1, out, sizeof(out) - 1);
-      _exit(0);
+      const char* berry_env = getenv("QNX_BERRY_DAEMON");
+      if (!berry_env || berry_env[0] != '1') {
+        const char out[] = "<html><head></head><body></body></html>\n";
+        ::write(1, out, sizeof(out) - 1);
+        _exit(0);
+      }
     }
   }
 #endif
@@ -230,6 +244,12 @@ int ShellBrowserMainParts::PreMainMessageLoopRun() {
 void ShellBrowserMainParts::WillRunMainMessageLoop(
     std::unique_ptr<base::RunLoop>& run_loop) {
   Shell::SetMainMessageLoopQuitClosure(run_loop->QuitClosure());
+#if BUILDFLAG(IS_QNX)
+  if (base::QnxBerryDaemonEnabled() &&
+      !base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kProcessType)) {
+    StartQnxBerryDaemonHost();
+  }
+#endif
 }
 
 void ShellBrowserMainParts::PostMainMessageLoopRun() {

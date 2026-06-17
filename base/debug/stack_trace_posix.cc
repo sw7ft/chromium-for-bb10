@@ -22,6 +22,7 @@
 #include <ucontext.h>
 #include <arm/context.h>
 #include <dlfcn.h>
+#include <unwind.h>
 #endif
 
 #include <algorithm>
@@ -330,6 +331,43 @@ void AlarmSignalHandler(int signal, siginfo_t* info, void* void_context) {
 #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ANDROID) ||
         // BUILDFLAG(IS_CHROMEOS)
 
+#if BUILDFLAG(IS_QNX)
+namespace {
+// State for the .ARM.exidx/CFI unwind performed inside the SIGUSR2 sampler.
+struct QnxUnwindCtx {
+  char* buf;
+  int cap;
+  int off;
+  int depth;
+};
+// Emits the real return-address chain (with inline dladdr symbolization) for the
+// current thread. On ARM32-Thumb frame pointers are not unwindable, but the
+// binary ships .ARM.exidx/CFI tables and QNX's signal trampoline carries CFI, so
+// _Unwind_Backtrace crosses the signal frame into the interrupted code. This is
+// the only reliable backtrace mechanism on this target.
+_Unwind_Reason_Code QnxUnwindTrace(struct _Unwind_Context* ctx, void* arg) {
+  QnxUnwindCtx* u = static_cast<QnxUnwindCtx*>(arg);
+  if (u->depth++ > 48)
+    return _URC_END_OF_STACK;
+  unsigned ip = static_cast<unsigned>(_Unwind_GetIP(ctx));
+  if (!ip)
+    return _URC_NO_REASON;
+  ip &= ~1u;
+  if (u->off >= u->cap - 80)
+    return _URC_END_OF_STACK;
+  Dl_info di;
+  if (dladdr(reinterpret_cast<void*>(ip), &di) && di.dli_sname) {
+    u->off += snprintf(u->buf + u->off, u->cap - u->off, " %x(%s+0x%x)", ip,
+                       di.dli_sname,
+                       static_cast<unsigned>((char*)ip - (char*)di.dli_saddr));
+  } else {
+    u->off += snprintf(u->buf + u->off, u->cap - u->off, " %x", ip);
+  }
+  return _URC_NO_REASON;
+}
+}  // namespace
+#endif  // BUILDFLAG(IS_QNX)
+
 void StackDumpSignalHandler(int signal, siginfo_t* info, void* void_context) {
   // NOTE: This code MUST be async-signal safe.
   // NO malloc or stdio is allowed here.
@@ -382,6 +420,14 @@ void StackDumpSignalHandler(int signal, siginfo_t* info, void* void_context) {
             (unsigned)s2.dli_fbase == exe_base)
           SB_APP(" %x", code);
       }
+    }
+    // Real CFI/.ARM.exidx unwind (reliable on ARM32-Thumb, unlike the scan and
+    // unlike frame pointers): the actual symbolized return-address chain.
+    SB_APP(" UNW:");
+    {
+      QnxUnwindCtx uctx = {sbuf, (int)sizeof(sbuf), so, 0};
+      _Unwind_Backtrace(&QnxUnwindTrace, &uctx);
+      so = uctx.off;
     }
     SB_APP("\n");
 #undef SB_APP

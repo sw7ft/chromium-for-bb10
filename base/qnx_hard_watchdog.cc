@@ -116,6 +116,10 @@ void CancelQnxBootWatchdog() {
   g_boot_watchdog.cancelled.store(true, std::memory_order_release);
 }
 
+void QnxDumpAllThreadStacks() {
+  DumpAllThreadStacks();
+}
+
 }  // namespace base
 
 #endif  // BUILDFLAG(IS_QNX)

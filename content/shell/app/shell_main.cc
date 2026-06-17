@@ -98,6 +98,21 @@ static void qnx_hex(unsigned long v, char* buf, int len) {
   }
 }
 
+// Runtime trace gate: sending SIGUSR1 flips on g_qnx_trace_enabled so we can
+// boot fully untraced (no stderr backpressure / timing distortion) and then
+// enable QNX_TRACE_* output just before issuing a decisive probe action.
+// Setting a plain bool is async-signal-safe enough here (single writer, all
+// reader threads poll it frequently).
+static void qnx_usr1_trace_handler(int /*sig*/) {
+  g_qnx_trace_enabled = true;
+  static const char msg[] = "QNX:TRACE: enabled via SIGUSR1; dumping threads\n";
+  write(2, msg, sizeof(msg) - 1);
+  // Dump every thread's real (CFI-unwound) backtrace. pthread_kill/nanosleep/
+  // write are async-signal-safe, so this is safe from the handler and lets us
+  // capture a hung process's full thread state on demand.
+  base::QnxDumpAllThreadStacks();
+}
+
 static void qnx_segv_handler(int sig, siginfo_t* info, void* ctx) {
   char line[128];
   ucontext_t* uc = (ucontext_t*)ctx;
@@ -164,6 +179,11 @@ int main(int argc, const char** argv) {
     sigemptyset(&sa.sa_mask);
     sigaction(SIGSEGV, &sa, nullptr);
     sigaction(SIGBUS, &sa, nullptr);
+    struct sigaction usr1;
+    memset(&usr1, 0, sizeof(usr1));
+    usr1.sa_handler = qnx_usr1_trace_handler;
+    sigemptyset(&usr1.sa_mask);
+    sigaction(SIGUSR1, &usr1, nullptr);
   }
   // Set CHROME_EXE_PATH from argv[0] so ICU loader can find data files
   if (argc > 0 && argv[0]) {

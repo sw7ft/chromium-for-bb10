@@ -338,42 +338,8 @@ class ZygoteForkDelegate;
 int ZygoteMain(std::vector<std::unique_ptr<ZygoteForkDelegate>> delegates) { return 0; }
 }  // namespace content
 
-// --- ChildProcessLauncherHelper platform methods ---
-#include "content/browser/child_process_launcher_helper.h"
-namespace content::internal {
-void ChildProcessLauncherHelper::SetProcessPriorityOnLauncherThread(
-    base::Process process, base::Process::Priority priority) {}
-void ChildProcessLauncherHelper::ForceNormalProcessTerminationSync(
-    ChildProcessLauncherHelper::Process process) {}
-void ChildProcessLauncherHelper::BeforeLaunchOnClientThread() {}
-bool ChildProcessLauncherHelper::BeforeLaunchOnLauncherThread(
-    PosixFileDescriptorInfo& files_to_register,
-    base::LaunchOptions* options) { return true; }
-void ChildProcessLauncherHelper::AfterLaunchOnLauncherThread(
-    const ChildProcessLauncherHelper::Process& process,
-    const base::LaunchOptions* options) {}
-absl::optional<mojo::NamedPlatformChannel>
-ChildProcessLauncherHelper::CreateNamedPlatformChannelOnLauncherThread() {
-  return absl::nullopt;
-}
-std::unique_ptr<PosixFileDescriptorInfo>
-ChildProcessLauncherHelper::GetFilesToMap() { return nullptr; }
-ChildProcessTerminationInfo
-ChildProcessLauncherHelper::GetTerminationInfo(
-    const ChildProcessLauncherHelper::Process& process, bool known_dead) { return {}; }
-bool ChildProcessLauncherHelper::IsUsingLaunchOptions() { return false; }
-ChildProcessLauncherHelper::Process
-ChildProcessLauncherHelper::LaunchProcessOnLauncherThread(
-    const base::LaunchOptions* options,
-    std::unique_ptr<PosixFileDescriptorInfo> files_to_register,
-    bool* is_synchronous_launch, int* launch_result) {
-  *is_synchronous_launch = false;
-  *launch_result = 1;
-  return Process();
-}
-bool ChildProcessLauncherHelper::TerminateProcess(
-    const base::Process& process, int exit_code) { return false; }
-}  // namespace content::internal
+// --- ChildProcessLauncherHelper platform methods are in
+// child_process_launcher_helper_qnx.cc (content/browser) for QNX.
 
 // --- NativeEventObserver ---
 // Defined with matching ABI but no base class for QNX

@@ -25,6 +25,12 @@ void StartQnxBootWatchdog(int total_ms);
 // Cancel the boot-phase watchdog (e.g. on first real navigation commit).
 void CancelQnxBootWatchdog();
 
+// On-demand: pthread_kill(SIGUSR2) every thread so each emits its own
+// (CFI-unwound, symbolized) backtrace via the sampler in stack_trace_posix.cc.
+// Async-signal-safe (pthread_kill/nanosleep/write only), so it is safe to call
+// directly from a signal handler to dump a hung process's full thread state.
+void QnxDumpAllThreadStacks();
+
 #else
 
 inline void StartQnxHardWatchdog(int total_ms) {}

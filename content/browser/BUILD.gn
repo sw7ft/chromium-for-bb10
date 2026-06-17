@@ -2583,6 +2583,9 @@ source_set("browser") {
       "posix_file_descriptor_info_impl.cc",
       "posix_file_descriptor_info_impl.h",
     ]
+    if (is_qnx) {
+      sources += [ "child_process_launcher_helper_qnx.cc" ]
+    }
   }
 
   # Watching the local file system via the File System Access API is not

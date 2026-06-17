@@ -4,7 +4,6 @@
 
 #include "services/metrics/public/cpp/ukm_source_id.h"
 
-#include <cmath>
 #include <string>
 
 #include "base/atomic_sequence_num.h"
@@ -18,10 +17,23 @@ namespace {
 
 const int64_t kLowBitsMask = (INT64_C(1) << 32) - 1;
 
-int64_t GetNumTypeBits() {
-  return std::ceil(
-      std::log2(static_cast<double>(static_cast<int64_t>(SourceIdObj::Type::kMaxValue) + 1)));
-}
+// Number of bits needed to represent all SourceIdObj::Type values, i.e.
+// ceil(log2(kMaxValue + 1)). Computed at compile time so there is NO
+// function-local `static` guard on this hot path. std::ceil/std::log2 are not
+// constexpr, which is why this used to be a function-local static; but on
+// platforms whose libstdc++ serializes every static-init guard on a single
+// global condition variable without futex support (e.g. QNX), a re-entrant
+// acquire of this guard during navigation commit deadlocks the thread forever
+// (__cxa_guard_acquire never returns). A compile-time constant is behavior-
+// identical and removes the guard entirely.
+constexpr int64_t kNumTypeBits = []() {
+  const int64_t max = static_cast<int64_t>(SourceIdObj::Type::kMaxValue);
+  int64_t bits = 0;
+  while ((INT64_C(1) << bits) <= max)
+    ++bits;
+  return bits;
+}();
+constexpr int64_t kTypeMask = (INT64_C(1) << kNumTypeBits) - 1;
 
 }  // namespace
 
@@ -43,13 +55,6 @@ SourceIdObj SourceIdObj::New() {
 
 // static
 SourceIdObj SourceIdObj::FromOtherId(int64_t other_id, SourceIdObj::Type type) {
-  // Note on syntax: std::ceil and std::log2 are not constexpr functions thus
-  // these variables cannot be initialized statically in the global scope above.
-  // Function static initialization here is thread safe; so they are initialized
-  // at most once.
-  static const int64_t kNumTypeBits = GetNumTypeBits();
-  static const int64_t kTypeMask = (INT64_C(1) << kNumTypeBits) - 1;
-
   const int64_t type_bits = static_cast<int64_t>(type);
   DCHECK_EQ(type_bits, type_bits & kTypeMask);
   // Stores the type of the source ID in its lower bits, and shift the rest of
@@ -59,8 +64,6 @@ SourceIdObj SourceIdObj::FromOtherId(int64_t other_id, SourceIdObj::Type type) {
 }
 
 SourceIdObj::Type SourceIdObj::GetType() const {
-  static const int64_t kNumTypeBits = GetNumTypeBits();
-  static const int64_t kTypeMask = (INT64_C(1) << kNumTypeBits) - 1;
   return static_cast<SourceIdObj::Type>(value_ & kTypeMask);
 }
 

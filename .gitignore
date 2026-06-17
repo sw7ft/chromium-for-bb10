@@ -307,3 +307,8 @@ vs-chromium-project.txt
 
 # Ignore the default results output directory for tools/run-swarmed.py
 /results
+
+# QNX/BB10 on-device helper binaries (ARM ELF), not source
+/qnx_sampler
+/qnx_stack
+/qnx_stop

@@ -178,6 +178,270 @@ Recommended next steps (Vector B):
 3. The fault predates Viz, so it gates *every* tier — worth fixing before
    pushing further up the ladder.
 
+### Vector B is now DETERMINISTIC via CDP (Jun 17 2026) — gates the browser plan
+
+Implementing Phase 1 of the CDP-screencast browser plan turned the ~20% flake
+into a **100%, minimal, deterministic repro** that localizes the fault to the
+**renderer**, with the browser process fully healthy.
+
+Transport finding (works): Chromium's port-based DevTools (`net::HttpServer`)
+is **broken on QNX** — it rejects HTTP/1.0 (`http_server.cc(454)`) and **hangs
+with no response on HTTP/1.1** (the WS upgrade and `/json` never reply; tunnel
+connects then RST/timeout). The working transport is **`--remote-debugging-pipe`**
+(CDP over fd3 in / fd4 out, `\0`-delimited JSON; `read_fd=3`, `write_fd=4`).
+Node v22 is bundled on-device (`./node/node`) and drives the pipe natively via
+`stdio:[…,'pipe','pipe']` (Puppeteer's pipe transport). Probe:
+`deploy/cdp-pipe-probe.js` (host helper `deploy/cdp-probe.js` / `cdp-probe.py`).
+
+What works over the pipe (browser process):
+- `Target.getTargets`, `Target.setAutoAttach{flatten:true}` → a `page` session
+  `sessionId` is delivered (event can arrive *before* the setAutoAttach ack —
+  capture it eagerly).
+
+What hangs — **every** renderer-touching command, single- AND multi-process:
+- `Page.captureScreenshot` (even of `about:blank`; `--run-all-compositor-stages-
+  before-draw` does not help) — needs a renderer-submitted CompositorFrame that
+  never arrives.
+- `Runtime.evaluate '1+1'` — renderer main-thread JS never runs the inbound msg.
+- `Page.printToPDF` — compositor-free Blink paint also hangs.
+- `Page.enable` (renderer half) — never acks.
+
+Conclusion: once the renderer goes **idle** after startup, browser→renderer work
+(tasks/mojo/timers) is **not delivered/woken** — so the renderer compositor never
+produces a frame and the DevTools agent never runs. The browser side is fine
+(browser-level CDP responds instantly). This is the same lost-wakeup as Vector B,
+now reproducible on demand. Note `dump-dom` "works ~75%" only because that path
+drives the renderer immediately at startup and needs **no CompositorFrame**;
+it does not prove the renderer compositor/idle-wakeup works.
+
+Already-present QNX wakeup patches (so these are *not* the remaining bug):
+- `base/message_loop/message_pump_libevent.cc`: IO-thread wakeup uses a
+  `socketpair` (not `pipe`) because QNX `select()` only reports readability on
+  socket FDs; `OnWakeup` drains all bytes.
+- `mojo/core/channel_posix.cc`: socket-based channel, `IOV_MAX` define, QNX trace.
+
+Implication for the plan: **Phase 1 = NO-GO** for the naive design. The CDP
+screencast/print/screenshot paths all require the renderer to produce
+output, which is exactly what is wedged. Warm-daemon-on-`about:blank` makes it
+*worse* (100% vs ~25%) because it depends on waking an idle renderer. The
+prerequisite "build tweak" the plan anticipated is **root-causing the renderer
+idle-wakeup / browser→renderer delivery stall** — this gates every rendering
+approach (headless OR on-screen), not just CDP.
+
+Decisive next experiment: in multi-process with `QNX_TRACE`/`--qnx-trace`, send
+`Runtime.evaluate` and check the **renderer** process for `QNX:Mojo:Read` —
+if absent, the renderer IO thread's socket watch isn't notified (libevent/select
+on the channel FD); if present, the IO→main `WaitableEvent` wakeup is lost.
+
+Further evidence gathered (Jun 17 2026, same session):
+- **Not slowness — a true stall.** `Runtime.evaluate '1+1'` to the page session
+  does not return even with a **180s** timeout (no tracing). 3 min is far beyond
+  any init time on this device.
+- **No DevTools agent ever engages.** A full single-process `QNX_TRACE` capture
+  of an `eval` stall (`/tmp/engine.log`, ~10k lines) shows **zero**
+  `blink.mojom.DevToolsAgent`/`DevToolsSession` mojo activity. blink frame
+  interfaces *do* bind (`Widget`, `FrameWidget`, `PageBroadcast`,
+  `LocalFrameHost`, `BrowserInterfaceBroker`, `AssociatedInterfaceProvider`), so
+  the frame partly comes up, but the renderer DevTools agent never binds/runs.
+- **Tracing is too slow to reach steady state.** With `QNX_TRACE=1` the device is
+  so throttled by per-task `write(2)` that at 60s it is *still* running browser
+  init tasks (blob storage, disk-cache `SyncInit`, accessibility, audio monitor).
+  So in-trace "hangs at ICU" were measurement artifacts (SSH/stderr backpressure
+  + slowdown), not the bug. Drive trace output into a drained file
+  (`ENGINE_LOG=`) and use long `ATTACH_TIMEOUT`/`CALL_TIMEOUT`.
+- **Primitives audited, look correct.** `condition_variable_posix.cc` uses
+  `CLOCK_MONOTONIC` (constructor + `clock_gettime`); the idle wait is an infinite
+  `pthread_cond_wait` (clock-independent), so a QNX monotonic-clock quirk would
+  cause busy-spin, not this hang. `waitable_event_posix.cc` is the standard
+  lock+CV wait-list. The IO-thread wakeup pipe is already a `socketpair`.
+- Net (SUPERSEDED below): earlier reading was a renderer lost-wakeup. Dynamic
+  instrumentation (Jun 17 2026 PM) disproves that — see UPDATE.
+
+### UPDATE (Jun 17 2026 PM) — root cause re-localized to the BROWSER UI thread
+
+Method: runtime trace gate (`SIGUSR1` flips `g_qnx_trace_enabled` in
+`shell_main.cc` — boot untraced, enable just before the probe action), plus
+per-pump trace in `MessagePumpDefault` (`QNX:MPD:*`) and `MessagePumpLibevent`
+(`QNX:MPL:*`), plus all-thread `/proc` register/stack reads via `qnx_stack`
+on the held (`HOLD=1 HOLD_CMD=eval`) process, symbolized offline against
+`out/qnx-arm/exe.unstripped/content_shell` (non-PIE EXEC, text
+`0x826e80..0x5811e10`).
+
+Findings (deterministic, single-process `MODE=eval` of `1+1` on `about:blank`):
+- **The renderer is healthy.** Trace shows the renderer commits about:blank
+  (`RFI:CommitNav`/`DidCommitNav`/`DidFinishLoad`) AND **receives and dispatches
+  the DevTools command** — `QNX:IEC` Accept of `blink.mojom.DevToolsAgent` then
+  `blink.mojom.DevToolsSession` both return `res=1` on the renderer main thread.
+  The earlier "no DevTools agent activity" was a trace-timing artifact of booting
+  under heavy trace; with the SIGUSR1 gate the agent clearly engages.
+- **The browser UI thread deadlocks during navigation commit.** All threads were
+  sampled twice 1s apart: tid=1 (browser main), the renderer main, and the
+  storage thread all have **identical pc/lr/sp** across samples → truly blocked,
+  not spinning. tid=1's symbolized stack scan is the commit path:
+  `mojo::Connector::OnWatcherHandleReady` → `RenderFrameHostImpl::
+  DidCommitNavigationInternal` → `PageFactory::Create`/`PageImpl::PageImpl` →
+  `Navigator::DidNavigate` → `WebContentsImpl::DidFinishNavigation` →
+  `NotifyObservers` → `PerformanceManagerTabHelper::DidFinishNavigation` →
+  `PerformanceManagerImpl::CallOnGraphImpl` → `PostTask`/`PostDelayedTask`, then
+  a libc `pthread_cond_wait`. So browser-main blocks on a **synchronous
+  primitive while still inside `DidCommitNavigation`** and never returns to its
+  message loop.
+- **That is why there is no renderer output.** The renderer produces/returns the
+  eval result, but browser-main never runs its loop again, so the response is
+  never forwarded to the `--remote-debugging-pipe` writer → CDP call times out.
+  Same mechanism blocks every renderer round-trip (screenshot/screencast/PDF),
+  matching the 100% deterministic "renderer never produces output" symptom.
+- **tid=1 is NOT parked in either message pump.** No `QNX:MPD:Wait tid=1` and no
+  `QNX:MPL:Wait tid=1` anywhere in 10k trace lines; its blocked pc is the condvar
+  primitive (distinct from the libevent IO threads which block in `select`). So
+  this is a real synchronous deadlock, not a lost pump wakeup.
+- **leveldb LOCK failures are a red herring.** `ChromiumEnv::LockFile`
+  (`storage::DomStorageDatabase` / `shared_proto_db`) fails to take the lock on
+  QNX (the spammed `...LOCK: No further details (LockFile::1)` warnings), retries
+  for only ~1s (`kMaxRetryDuration`) then returns an error and the thread goes
+  idle. Reproduces with a fresh unique `--user-data-dir`, so it is not a stale
+  lock and not the deadlock — but `FilesystemProxy::LockFile` on QNX is worth a
+  separate fix (QNX fs likely lacks the fcntl/flock semantics leveldb expects).
+
+### UPDATE 2 (Jun 17 2026, later) — primitive isolation via instrumentation
+
+Added always-on (ungated) QNX traces around each candidate blocking primitive and
+re-ran `MODE=eval`, plus read live thread states with `pidin -p <pid>`:
+- **Mojo `[Sync]` calls — ruled out.** Traced `InterfaceEndpointClient`'s
+  `SyncWatch`/`SyncWatchExclusive` (`QNX:SYNC:wait/done`). **Zero** sync calls in
+  the whole run → tid=1 is not in a mojo sync call.
+- **`base::WaitableEvent::Wait()` — ruled out.** Traced entry/exit for non-idle
+  waits (`QNX:WE:wait/ret`, gated on `!only_used_while_idle_`). All 16 matched; no
+  unmatched wait on tid=1.
+  (Note: `__builtin_return_address(1)` crashes under `-fomit-frame-pointer` on this
+  toolchain — it turned the hang into a deterministic SIGSEGV. Use only
+  `__builtin_return_address(0)`.)
+- **`base::ConditionVariable::Wait()` — ruled out for tid=1.** Traced entry/exit
+  (`QNX:CV:wait/ret`). The only unmatched waits are the expected idle parks:
+  16× `WaitableEvent::TimedWaitImpl` (pump/threadpool idle) + 1×
+  `cc::SingleThreadTaskGraphRunner::Run` (raster idle). **tid=1 emits no CV line
+  at all.**
+- **`pidin` thread states (28 threads, all parked):** tid=1 = `CONDVAR (0x7d635fc)`
+  — and that condvar object is **not** on tid=1's stack (idle SyncWaiter condvars
+  sit at `0x7ffxxxxx` stack addresses). So tid=1 blocks on a **heap/member condvar
+  that is NOT a `base::ConditionVariable`/`WaitableEvent`** — i.e. a raw
+  `pthread_cond_t` / `std::condition_variable` owned by some subsystem. tid=1's
+  `lr` is inside libc (the wait is invoked by a library function, not directly by
+  content_shell code), consistent with `std::condition_variable`. All other
+  threads are benign (`CONDVAR` idle, `SIGWAITINFO`, one `REPLY` = the DevTools
+  pipe reader doing a blocking fd read).
+
+Net: browser UI thread deterministically parks in a **non-base condvar during
+`DidCommitNavigation`** (stack: `DidCommitNavigationInternal` → `PageImpl` ctor →
+`Navigator::DidNavigate` → `WebContentsImpl::DidFinishNavigation` →
+`PerformanceManagerTabHelper::DidFinishNavigation` → `CallOnGraphImpl` →
+`PostTask`/`PostDelayedTask`). Renderer is healthy and Accepts the eval; the
+response is never delivered because browser-main never returns to its loop.
+
+Remaining unknown: the exact owner of condvar `0x7d635fc`. The qnx_stack scan
+can't order frames (clang release omits frame pointers), so the top frames may be
+stale. To finish:
+- (a) **clean unwind**: build with `-fno-omit-frame-pointer` (or teach `qnx_stack`
+  to use `.eh_frame`) and re-read tid=1 — names the exact caller in one shot; or
+- (b) **bisect** commit-time subsystems likely to use a raw/std condvar: in-process
+  Viz/GPU SharedImage path (`gpu::ClientSharedImageInterface::CreateSharedImage`
+  appears deeper in tid=1's stack; in-process GPU is degraded — "Vulkan not
+  supported with in process gpu"), then PerformanceManager. Disable each and
+  re-run `MODE=eval`.
+
+Instrumentation seam reference (all `#if BUILDFLAG(IS_QNX)`):
+`shell_main.cc` SIGUSR1 trace gate + on-demand `QnxDumpAllThreadStacks()`;
+`message_pump_default.cc` `QNX:MPD:*`; `message_pump_libevent.cc` `QNX:MPL:*`;
+`interface_endpoint_client.cc` `QNX:SYNC:*`; `waitable_event.cc` `QNX:WE:*`;
+`condition_variable_posix.cc` `QNX:CV:*`; `stack_trace_posix.cc` SIGUSR2 sampler
+(`QNX:SAMPLE ... UNW:` real-unwind attempt); `qnx_hard_watchdog.cc`
+`QnxDumpAllThreadStacks()` (pthread_kill(SIGUSR2) broadcast, reaches tid=1).
+
+### UPDATE 3 — all in-process unwinders fail on ARM32-Thumb/QNX
+
+Three independent backtrace mechanisms were tried to name tid=1's exact blocking
+frame; **all fail on this target**, so the stale top-frames from the scan can NOT
+be trusted:
+1. **Frame pointers** — `enable_frame_pointers` defaults false for `current_cpu
+   == "arm"` and `can_unwind_with_frame_pointers` is forced false for ARM+Thumb
+   (compiler.gni; clang LLVM bug 18505). A frame-pointer build would not produce
+   unwindable stacks here.
+2. **Raw stack scan** (`qnx_stack` / SIGUSR2 `ABS:`) — lists every stack word that
+   resolves into the module, but cannot order them; tops are demonstrably stale
+   (e.g. it showed `CallOnGraphImpl`→`PostTask`, but that path is a pure async
+   post that cannot block — confirmed by reading `performance_manager_impl.cc`).
+3. **`_Unwind_Backtrace`** (`.ARM.exidx`/CFI) from the SIGUSR2 handler — spins on
+   a single IP (48× identical) and never advances: QNX's signal trampoline / the
+   in-handler PC has no traversable CFI, so the libgcc unwinder cannot compute the
+   caller.
+
+Net: WHERE is nailed (browser-main, non-base heap condvar, during the
+`DidCommitNavigation` window, both single- and multi-process), but WHAT (the exact
+owning subsystem) cannot be obtained by stack unwinding on this platform.
+
+Only viable path left to the exact culprit: **semantic bisect** — add always-on
+`ENTER`/`EXIT` traces (like the `QNX:*` seams above) around browser-UI commit
+functions and narrow by which one logs ENTER but never EXIT. Start at
+`RenderFrameHostImpl::DidCommitNavigationInternal` and walk into its children
+(compositor/GPU frame-sink setup, `PageImpl` ctor, `Navigator::DidNavigate`).
+Each step is a content-lib rebuild (~3-4 min).
+
+Working harness produced this session (reusable for the fix):
+- `deploy/cdp-pipe-probe.js` — Node pipe-CDP client (spawns content_shell with
+  `--remote-debugging-pipe`, fd3/fd4, `\0` JSON). Envs: `MODE=eval|pdf|bcmd`,
+  `NONAV=1`, `HOLD=1 HOLD_CMD=eval|shot|none`, `NOATTACH=1`, `NOSINGLE=1`,
+  `EXTRA="<flags>"`, `QNX_TRACE=1`, `ENGINE_LOG=<path>`, `ATTACH_TIMEOUT`,
+  `CALL_TIMEOUT`.
+
+### UPDATE 4 (Jun 17 2026) — ROOT CAUSE FOUND & FIXED: recursive static-init in UKM
+
+The commit freeze is **fixed**. `Runtime.evaluate`, `Browser.getVersion`,
+`Target.getTargets`, navigation and DOM all work over CDP now.
+
+How it was found (no working stack unwinder needed):
+1. `MODE=bcmd` (new) proved the wedge is **not** triggered by the eval/screenshot
+   command: even `Browser.getVersion` hangs, and it hangs with `NOATTACH=1` (no CDP
+   sent at all) — so the **browser UI thread wedges a few seconds into interactive
+   startup**, independent of any command. `--dump-dom` (reader) dodges it by exiting
+   first. Disabling `Viz` / `NetworkServiceDedicatedThread` / the tier-0 feature set
+   did **not** fix it (only shifted timing).
+2. Existing `QNX:RT`/`IEC` task traces (no rebuild) showed tid=1's last task is a
+   mojo `Accept` during the about:blank commit, after which it parks on a **non-base
+   condvar** (base `WaitableEvent`/`ConditionVariable`/`WaitMany`/mojo `[Sync]` all
+   already instrumented and ruled out).
+3. Global symbol interposition of `pthread_cond_wait` (a `--wrap` linker hook only
+   catches executable callers and **missed** it — the wait is made from a shared
+   lib) named the caller: `libstdc++.so.6 + 0x7a339` = **`__cxa_guard_acquire`**.
+4. Interposing `__cxa_guard_acquire`/`release` named the exact static: the guard
+   for the function-local `static`s in `ukm::SourceIdObj::FromOtherId`
+   (`services/metrics/public/cpp/ukm_source_id.cc`), inlined into
+   `ukm::ConvertToSourceId`. The trace `GA:enter g=X → GA:exit ret=1 → GA:enter g=X
+   (stuck)`, with **no other thread touching guard X**, is a **same-thread
+   re-entrant** guard acquire.
+
+Why it hangs on QNX specifically: QNX libstdc++ is built **without futex**, so
+`__cxa_guard_acquire` serializes ALL static-init guards on a single global mutex +
+condvar and does **not** detect same-thread recursion (no `recursive_init_error`);
+the thread waits on its own in-progress guard forever. (On Linux/futex builds the
+same code self-detects and throws, so this never manifested upstream.)
+
+Fix (`services/metrics/public/cpp/ukm_source_id.cc`): replace the lazy
+function-local `static const kNumTypeBits = GetNumTypeBits()` /
+`kTypeMask` in `FromOtherId`/`GetType` with namespace-scope **`constexpr`**
+constants (`kNumTypeBits = ceil(log2(kMaxValue+1))` computed at compile time).
+This removes the runtime guard entirely; behaviour is identical on all platforms.
+Validated on-device with a clean binary (no diagnostic scaffolding): eval returns,
+browser-side commands return, navigation works.
+
+REMAINING (separate, was masked behind the freeze): `Page.captureScreenshot`
+still hangs, but the browser is now **quiescent and healthy** (tid=1 = SIGWAITINFO
+idle, all threads idle, no deadlock) — it is waiting on a **compositor frame that
+is never produced** in headless/software mode on QNX. This is the frame-production
+/ "renderer-output" problem, not a deadlock, and is the next item for the
+interactive (screencast) browser. The reader/DOM path remains fully working.
+- `deploy/cdp-probe.js` / `deploy/cdp-probe.py` — host/device WS clients (kept for
+  reference; the WS/HTTP DevTools server is unusable on QNX).
+
 ## Berry daemon (experimental)
 
 TCP command channel on `127.0.0.1:8767` (`LOAD <url>` / `QUIT`). Framed stdout: `@BERRY DOM <len>\\n<html>\\n@BERRY END`.

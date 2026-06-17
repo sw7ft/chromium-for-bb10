@@ -6,6 +6,13 @@
 
 #include "base/threading/scoped_blocking_call.h"
 #include "base/trace_event/base_tracing.h"
+#include "build/build_config.h"
+
+#if BUILDFLAG(IS_QNX)
+#include <pthread.h>
+#include <cstdio>
+#include <unistd.h>
+#endif
 
 namespace base {
 
@@ -20,7 +27,31 @@ void WaitableEvent::Signal() {
 }
 
 void WaitableEvent::Wait() {
+#if BUILDFLAG(IS_QNX)
+  // ALWAYS-ON, low-volume: log only *non-idle* infinite waits (real synchronous
+  // blocks; pump/threadpool idle waits set only_used_while_idle_ and are
+  // skipped). The caller return address names exactly who is blocking; an
+  // unmatched WE:wait for a given tid is a thread stuck in a sync wait.
+  if (!only_used_while_idle_) {
+    char _qb[128];
+    int _qn = snprintf(_qb, sizeof(_qb),
+                       "QNX:WE:wait tid=%x ev=%p ra0=%p\n",
+                       (unsigned)pthread_self(), (void*)this,
+                       __builtin_return_address(0));
+    if (_qn > 0)
+      ::write(2, _qb, _qn);
+  }
+#endif
   const bool result = TimedWait(TimeDelta::Max());
+#if BUILDFLAG(IS_QNX)
+  if (!only_used_while_idle_) {
+    char _qb[96];
+    int _qn = snprintf(_qb, sizeof(_qb), "QNX:WE:ret tid=%x ev=%p\n",
+                       (unsigned)pthread_self(), (void*)this);
+    if (_qn > 0)
+      ::write(2, _qb, _qn);
+  }
+#endif
   DCHECK(result) << "TimedWait() should never fail with infinite timeout";
 }
 

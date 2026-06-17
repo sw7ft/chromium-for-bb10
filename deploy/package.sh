@@ -19,6 +19,11 @@ mkdir -p "$STAGING/www"
 echo "Copying binary..."
 cp "$BUILD_DIR/content_shell" "$STAGING/"
 
+if [ -f "$BUILD_DIR/libtest_trace_processor.so" ]; then
+  echo "Copying libtest_trace_processor.so (tracing test helper linked by content_shell)..."
+  cp "$BUILD_DIR/libtest_trace_processor.so" "$STAGING/"
+fi
+
 echo "Copying resource paks..."
 cp "$BUILD_DIR/content_shell.pak" "$STAGING/"
 cp "$BUILD_DIR/shell_resources.pak" "$STAGING/"
@@ -40,8 +45,12 @@ cp "$SCRIPT_DIR/cacert.pem" "$STAGING/"
 
 echo "Copying scripts and docs..."
 cp "$SCRIPT_DIR/run.sh" "$STAGING/"
+cp "$SCRIPT_DIR/test-regression.sh" "$STAGING/"
+cp "$SCRIPT_DIR/start-proxy.sh" "$STAGING/"
+cp "$SCRIPT_DIR/proxy-server.js" "$STAGING/"
 cp "$SCRIPT_DIR/README.md" "$STAGING/"
-chmod +x "$STAGING/run.sh"
+cp "$SCRIPT_DIR/HARDENING.md" "$STAGING/"
+chmod +x "$STAGING/run.sh" "$STAGING/test-regression.sh" "$STAGING/start-proxy.sh"
 
 echo "Creating sample test page..."
 cat > "$STAGING/www/index.html" <<'HTMLEOF'

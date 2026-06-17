@@ -62,6 +62,7 @@ const char kTimeout[] = "timeout";
 
 // Which event triggers the DOM dump: "load" (default) or "domcontentloaded".
 const char kDomTrigger[] = "dom-trigger";
+const char kBerryDaemon[] = "berry-daemon";
 
 bool IsRunWebTestsSwitchPresent() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(

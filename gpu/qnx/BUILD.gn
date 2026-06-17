@@ -1,0 +1,10 @@
+# Copyright 2026 SW7FT. All rights reserved.
+# QNX EGL/GLES2 dynamic loader helpers (Adreno 330 on BB10).
+
+source_set("qnx_gpu") {
+  sources = [
+    "gpu_qnx.cc",
+    "gpu_qnx.h",
+  ]
+  deps = [ "//base" ]
+}

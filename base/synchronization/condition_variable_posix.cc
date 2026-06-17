@@ -15,6 +15,12 @@
 #include "build/build_config.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
+#if BUILDFLAG(IS_QNX)
+#include <pthread.h>
+#include <cstdio>
+#include <unistd.h>
+#endif
+
 #if BUILDFLAG(IS_APPLE)
 #include <atomic>
 
@@ -102,7 +108,29 @@ void ConditionVariable::Wait() {
 #if DCHECK_IS_ON()
   user_lock_->CheckHeldAndUnmark();
 #endif
+#if BUILDFLAG(IS_QNX)
+  // Always-on: an unmatched CV:wait for a tid is a thread stuck in an infinite
+  // pthread_cond_wait. ra0 names the direct caller (e.g. WaitableEvent
+  // SyncWaiter, ThreadPool, or the synchronous-block site we are hunting).
+  {
+    char _qb[112];
+    int _qn = snprintf(_qb, sizeof(_qb), "QNX:CV:wait tid=%x cv=%p ra0=%p\n",
+                       (unsigned)pthread_self(), (void*)this,
+                       __builtin_return_address(0));
+    if (_qn > 0)
+      ::write(2, _qb, _qn);
+  }
+#endif
   int rv = pthread_cond_wait(&condition_, user_mutex_);
+#if BUILDFLAG(IS_QNX)
+  {
+    char _qb[80];
+    int _qn = snprintf(_qb, sizeof(_qb), "QNX:CV:ret tid=%x cv=%p\n",
+                       (unsigned)pthread_self(), (void*)this);
+    if (_qn > 0)
+      ::write(2, _qb, _qn);
+  }
+#endif
   DCHECK_EQ(0, rv);
 #if DCHECK_IS_ON()
   user_lock_->CheckUnheldAndMark();

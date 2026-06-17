@@ -15,6 +15,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/observer_list.h"
 #include "base/trace_event/trace_event.h"
+#include "base/qnx_trace.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "cc/base/switches.h"
@@ -88,6 +89,7 @@ void DelegatedFrameHost::WasShown(
         record_tab_switch_time_request) {
   // Cancel any pending frame eviction and unpause it if paused.
   SetFrameEvictionStateAndNotifyObservers(FrameEvictionState::kNotStarted);
+  QNX_TRACE_MSG("QNX:DFH:wasshown\n");
 
   frame_evictor_->SetVisible(true);
   if (record_tab_switch_time_request && compositor_) {
@@ -250,6 +252,9 @@ void DelegatedFrameHost::EmbedSurface(
   TRACE_EVENT2("viz", "DelegatedFrameHost::EmbedSurface", "surface_id",
                new_local_surface_id.ToString(), "deadline_policy",
                deadline_policy.ToString());
+  QNX_TRACE_FMT("QNX:DFH:embed vis=%d size=%dx%d\n",
+                (int)client_->DelegatedFrameHostIsVisible(),
+                new_dip_size.width(), new_dip_size.height());
 
   const viz::SurfaceId* primary_surface_id =
       client_->DelegatedFrameHostGetLayer()->GetSurfaceId();
