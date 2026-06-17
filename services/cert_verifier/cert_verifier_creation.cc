@@ -112,7 +112,7 @@ class CertVerifyProcFactoryImpl : public net::CertVerifyProcFactory {
 #elif defined(__QNX__) || defined(__QNXNTO__)
     return net::CreateCertVerifyProcBuiltin(std::move(cert_net_fetcher),
                                             std::move(crl_set),
-                                            net::CreateEmptySystemTrustStore());
+                                            net::CreateSslSystemTrustStore());
 #else
     return net::CertVerifyProc::CreateSystemVerifyProc(
         std::move(cert_net_fetcher), std::move(crl_set));

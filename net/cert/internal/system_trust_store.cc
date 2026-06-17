@@ -18,6 +18,7 @@
 
 #include <memory>
 
+#include "base/containers/span.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
@@ -305,6 +306,73 @@ void InitializeTrustStoreAndroid() {
 void InitializeTrustStoreAndroid() {}
 
 #endif  // CHROME_ROOT_STORE_SUPPORTED
+
+#elif defined(__QNX__) || defined(__QNXNTO__)
+
+// QNX has no system trust store. BB10 devices don't expose a usable CA store,
+// so load trust anchors from a PEM bundle shipped next to the binary (the
+// Chrome Root Store, root_store.certs). The path is overridable via
+// QNX_CA_BUNDLE.
+namespace {
+
+constexpr char kDefaultQnxCaBundle[] = "./root_store.certs";
+
+class QnxSystemCerts {
+ public:
+  QnxSystemCerts() {
+    const char* env_path = getenv("QNX_CA_BUNDLE");
+    base::FilePath filename(env_path && env_path[0] ? env_path
+                                                    : kDefaultQnxCaBundle);
+    std::string certs_file;
+    if (!base::ReadFileToString(filename, &certs_file)) {
+      LOG(ERROR) << "QNX: cannot load CA bundle from " << filename.value();
+      return;
+    }
+    CertificateList certs = X509Certificate::CreateCertificateListFromBytes(
+        base::as_bytes(base::make_span(certs_file)),
+        X509Certificate::FORMAT_PEM_CERT_SEQUENCE);
+    int added = 0;
+    for (const auto& cert : certs) {
+      CertErrors errors;
+      auto parsed = ParsedCertificate::Create(
+          bssl::UpRef(cert->cert_buffer()),
+          x509_util::DefaultParseCertificateOptions(), &errors);
+      if (!parsed)
+        continue;
+      system_trust_store_.AddTrustAnchor(std::move(parsed));
+      ++added;
+    }
+    LOG(INFO) << "QNX: loaded " << added << " trust anchors from "
+              << filename.value();
+  }
+
+  TrustStoreInMemory* system_trust_store() { return &system_trust_store_; }
+
+ private:
+  TrustStoreInMemory system_trust_store_;
+};
+
+QnxSystemCerts& GetQnxSystemCerts() {
+  static base::NoDestructor<QnxSystemCerts> certs;
+  return *certs;
+}
+
+}  // namespace
+
+class SystemTrustStoreQnx : public SystemTrustStore {
+ public:
+  TrustStore* GetTrustStore() override {
+    return GetQnxSystemCerts().system_trust_store();
+  }
+
+  bool IsKnownRoot(const ParsedCertificate* trust_anchor) const override {
+    return GetQnxSystemCerts().system_trust_store()->Contains(trust_anchor);
+  }
+};
+
+std::unique_ptr<SystemTrustStore> CreateSslSystemTrustStore() {
+  return std::make_unique<SystemTrustStoreQnx>();
+}
 
 #endif
 

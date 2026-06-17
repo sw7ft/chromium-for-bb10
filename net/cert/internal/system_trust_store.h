@@ -46,7 +46,7 @@ class SystemTrustStore {
 #endif
 };
 
-#if BUILDFLAG(IS_FUCHSIA)
+#if BUILDFLAG(IS_FUCHSIA) || defined(__QNX__) || defined(__QNXNTO__)
 // Creates an instance of SystemTrustStore that wraps the current platform's SSL
 // trust store. This cannot return nullptr.
 NET_EXPORT std::unique_ptr<SystemTrustStore> CreateSslSystemTrustStore();
