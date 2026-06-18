@@ -7,6 +7,8 @@
 
 #include "base/qnx_trace.h"
 #include "ui/base/cursor/platform_cursor.h"
+#include "ui/events/event.h"
+#include "ui/events/platform/platform_event_source.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_window_manager.h"
 
 namespace ui {
@@ -78,10 +80,19 @@ QnxScreenWindow::QnxScreenWindow(PlatformWindowDelegate* delegate,
   }
 
   manager_->AddWindow(widget_, this);
+
+  // Receive touch/keyboard events from QnxScreenEventSource and route them to
+  // the Aura WindowTreeHost (our delegate), which feeds the gesture recognizer
+  // and web content.
+  if (PlatformEventSource::GetInstance())
+    PlatformEventSource::GetInstance()->AddPlatformEventDispatcher(this);
+
   delegate_->OnAcceleratedWidgetAvailable(widget_);
 }
 
 QnxScreenWindow::~QnxScreenWindow() {
+  if (PlatformEventSource::GetInstance())
+    PlatformEventSource::GetInstance()->RemovePlatformEventDispatcher(this);
   manager_->RemoveWindow(widget_);
   if (window_) {
     screen_destroy_window(window_);
@@ -172,6 +183,15 @@ void QnxScreenWindow::SetWindowIcons(const gfx::ImageSkia& window_icon,
                                      const gfx::ImageSkia& app_icon) {}
 
 void QnxScreenWindow::SizeConstraintsChanged() {}
+
+bool QnxScreenWindow::CanDispatchEvent(const PlatformEvent& event) {
+  return visible_;
+}
+
+uint32_t QnxScreenWindow::DispatchEvent(const PlatformEvent& event) {
+  delegate_->DispatchEvent(event);
+  return POST_DISPATCH_STOP_PROPAGATION;
+}
 
 void QnxScreenWindow::PostBuffer() {
   if (!window_ || !visible_)

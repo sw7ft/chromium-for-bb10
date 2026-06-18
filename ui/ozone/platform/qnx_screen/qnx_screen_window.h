@@ -6,6 +6,7 @@
 
 #include <screen/screen.h>
 
+#include "ui/events/platform/platform_event_dispatcher.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/platform_window/platform_window.h"
@@ -15,7 +16,7 @@ namespace ui {
 
 class QnxScreenWindowManager;
 
-class QnxScreenWindow : public PlatformWindow {
+class QnxScreenWindow : public PlatformWindow, public PlatformEventDispatcher {
  public:
   QnxScreenWindow(PlatformWindowDelegate* delegate,
                   QnxScreenWindowManager* manager,
@@ -60,6 +61,10 @@ class QnxScreenWindow : public PlatformWindow {
                       const gfx::ImageSkia& app_icon) override;
   void SizeConstraintsChanged() override;
   void PrepareForShutdown() override;
+
+  // PlatformEventDispatcher:
+  bool CanDispatchEvent(const PlatformEvent& event) override;
+  uint32_t DispatchEvent(const PlatformEvent& event) override;
 
   void PostBuffer();
 

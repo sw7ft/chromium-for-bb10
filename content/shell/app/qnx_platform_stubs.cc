@@ -417,9 +417,13 @@ int CalculateIdleTime() { return 0; }
 bool CheckIdleStateIsLocked() { return false; }
 }  // namespace ui
 
+// QNX has no platform clipboard backend; use Chromium's in-memory clipboard so
+// selection/copy paths (e.g. updating the selection buffer on click) work and
+// don't CHECK-fail on a null clipboard.
 #include "ui/base/clipboard/clipboard.h"
+#include "ui/base/clipboard/clipboard_non_backed.h"
 namespace ui {
-Clipboard* Clipboard::Create() { return nullptr; }
+Clipboard* Clipboard::Create() { return new ClipboardNonBacked; }
 }  // namespace ui
 
 #include "ui/shell_dialogs/select_file_dialog.h"
