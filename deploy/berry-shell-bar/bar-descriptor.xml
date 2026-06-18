@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<qnx xmlns="http://www.qnx.com/schemas/application/1.0">
+    <id>com.sw7ft.BerryShell</id>
+
+    <name>Berry Browser</name>
+    <versionNumber>1.0.0</versionNumber>
+    <buildId>1</buildId>
+    <description>Chromium content_shell browser for BlackBerry 10 (QNX, on-screen via qnx_screen).</description>
+    <author>sw7ft</author>
+
+    <!-- Native entry point: a tiny launcher that sets LD_LIBRARY_PATH / CA
+         bundle and execs content_shell with the qnx_screen flags. -->
+    <asset path="launcher" entry="true" type="Qnx/Elf">launcher</asset>
+
+    <!-- Chromium binary + its runtime libraries (the rest come from the OS). -->
+    <asset path="payload/content_shell" type="Qnx/Elf">content_shell</asset>
+    <asset path="payload/libstdc++.so.6" type="Qnx/Elf">libstdc++.so.6</asset>
+    <asset path="payload/libgcc_s.so.1" type="Qnx/Elf">libgcc_s.so.1</asset>
+    <asset path="payload/libm.so.2" type="Qnx/Elf">libm.so.2</asset>
+
+    <!-- Chromium data/resource files (loaded relative to the working dir). -->
+    <asset path="payload/content_shell.pak">content_shell.pak</asset>
+    <asset path="payload/shell_resources.pak">shell_resources.pak</asset>
+    <asset path="payload/ui_resources_100_percent.pak">ui_resources_100_percent.pak</asset>
+    <asset path="payload/icudtl.dat">icudtl.dat</asset>
+    <asset path="payload/snapshot_blob.bin">snapshot_blob.bin</asset>
+    <asset path="payload/root_store.certs">root_store.certs</asset>
+
+    <icon>
+      <image>icon.png</image>
+    </icon>
+    <asset path="icons/icon.png">icon.png</asset>
+
+    <initialWindow>
+      <autoOrients>true</autoOrients>
+      <systemChrome>none</systemChrome>
+      <transparent>false</transparent>
+    </initialWindow>
+
+    <!-- Native code execution is required for content_shell. -->
+    <permission system="true">run_native</permission>
+    <permission>access_internet</permission>
+    <permission>access_shared</permission>
+    <permission>run_when_backgrounded</permission>
+
+    <!-- Ensure bundled libs are found at run-time (launcher also sets this). -->
+    <env var="LD_LIBRARY_PATH" value="app/native"/>
+</qnx>

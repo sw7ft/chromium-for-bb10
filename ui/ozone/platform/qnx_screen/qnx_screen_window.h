@@ -76,6 +76,7 @@ class QnxScreenWindow : public PlatformWindow, public PlatformEventDispatcher {
   gfx::Rect bounds_;
   bool visible_ = false;
   gfx::AcceleratedWidget widget_;
+  char group_name_[64] = {0};
 };
 
 }  // namespace ui

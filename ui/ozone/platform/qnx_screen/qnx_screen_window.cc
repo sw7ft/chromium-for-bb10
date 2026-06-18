@@ -4,6 +4,10 @@
 #include "ui/ozone/platform/qnx_screen/qnx_screen_window.h"
 
 #include <screen/screen.h>
+#include <unistd.h>
+
+#include <cstdio>
+#include <cstdlib>
 
 #include "base/qnx_trace.h"
 #include "ui/base/cursor/platform_cursor.h"
@@ -27,11 +31,44 @@ QnxScreenWindow::QnxScreenWindow(PlatformWindowDelegate* delegate,
       bounds_(bounds) {
   widget_ = static_cast<gfx::AcceleratedWidget>(g_next_widget_id++);
 
+  // On the BB10 single-window display we fill the whole panel rather than honor
+  // content_shell's 800x600 default. Default to the Passport's 1440x1440;
+  // QNX_SCREEN_WIDTH/HEIGHT override for other panels/bring-up. Overriding
+  // bounds_ here (before OnAcceleratedWidgetAvailable) makes Chromium's
+  // compositor render at full size too, so the page isn't a small patch.
+  int disp_w = 1440;
+  int disp_h = 1440;
+  if (const char* e = getenv("QNX_SCREEN_WIDTH")) {
+    int v = atoi(e);
+    if (v > 0)
+      disp_w = v;
+  }
+  if (const char* e = getenv("QNX_SCREEN_HEIGHT")) {
+    int v = atoi(e);
+    if (v > 0)
+      disp_h = v;
+  }
+  bounds_ = gfx::Rect(0, 0, disp_w, disp_h);
+
   int rc = screen_create_window(&window_, ctx_);
   if (rc != 0) {
     QNX_TRACE_MSG("QNX:OzWin: screen_create_window failed\n");
     return;
   }
+
+  // On BB10 the Navigator only routes touch/keyboard input to windows that
+  // belong to a window group it manages. A bare top-level window still gets
+  // composited (the page draws), but taps go nowhere. Create a window group so
+  // the Navigator recognizes this as the app's main window and forwards input.
+  // (This mirrors what Qt's/SDL's QNX backends do for top-level windows.)
+  snprintf(group_name_, sizeof(group_name_), "berryshell_%d", getpid());
+  if (screen_create_window_group(window_, group_name_) != 0)
+    QNX_TRACE_MSG("QNX:OzWin: screen_create_window_group failed\n");
+
+  // Make sure the window participates in input hit-testing.
+  int sensitivity = SCREEN_SENSITIVITY_ALWAYS;
+  screen_set_window_property_iv(window_, SCREEN_PROPERTY_SENSITIVITY,
+                                &sensitivity);
 
   int format = SCREEN_FORMAT_RGBX8888;
   screen_set_window_property_iv(window_, SCREEN_PROPERTY_FORMAT, &format);
@@ -46,11 +83,23 @@ QnxScreenWindow::QnxScreenWindow(PlatformWindowDelegate* delegate,
   screen_set_window_property_iv(window_, SCREEN_PROPERTY_SOURCE_SIZE, size);
   screen_set_window_property_iv(window_, SCREEN_PROPERTY_BUFFER_SIZE, size);
 
+  // The Navigator composites app windows with an orientation transform; our
+  // buffer is drawn upright, so allow correcting the rotation without a rebuild.
+  // QNX_SCREEN_ROTATION = 0/90/180/270 (counter-clockwise degrees).
+  int rotation = 0;
+  if (const char* e = getenv("QNX_SCREEN_ROTATION")) {
+    rotation = atoi(e);
+  }
+  screen_set_window_property_iv(window_, SCREEN_PROPERTY_ROTATION, &rotation);
+
   int zorder = 100;
   screen_set_window_property_iv(window_, SCREEN_PROPERTY_ZORDER, &zorder);
 
   int visible = 1;
   screen_set_window_property_iv(window_, SCREEN_PROPERTY_VISIBLE, &visible);
+  // The window is created visible at the Screen level; reflect that in visible_
+  // so CanDispatchEvent() lets input through even if Aura never calls Show().
+  visible_ = true;
 
   rc = screen_create_window_buffers(window_, 2);
   if (rc != 0) {
@@ -105,7 +154,12 @@ gfx::Rect QnxScreenWindow::GetBoundsInPixels() const {
 }
 
 void QnxScreenWindow::SetBoundsInPixels(const gfx::Rect& bounds) {
-  bounds_ = bounds;
+  // Single full-screen browser: content_shell asks to size the window to its
+  // 800x600 default, which would shrink the on-screen window (SIZE/SOURCE_SIZE)
+  // to a small patch of the panel while the compositor stays full-size. Ignore
+  // shrink requests and keep the window pinned to the full display size, so the
+  // page fills the screen. We still report the pinned bounds so web content
+  // lays out at full size.
   if (window_) {
     int size[2] = {bounds_.width(), bounds_.height()};
     screen_set_window_property_iv(window_, SCREEN_PROPERTY_SIZE, size);
@@ -189,6 +243,10 @@ bool QnxScreenWindow::CanDispatchEvent(const PlatformEvent& event) {
 }
 
 uint32_t QnxScreenWindow::DispatchEvent(const PlatformEvent& event) {
+  static int s_dispatch_count = 0;
+  if (s_dispatch_count++ < 8)
+    QNX_TRACE_FMT("QNX:OzWin: dispatch->delegate #%d vis=%d\n",
+                  s_dispatch_count, visible_ ? 1 : 0);
   delegate_->DispatchEvent(event);
   return POST_DISPATCH_STOP_PROPAGATION;
 }

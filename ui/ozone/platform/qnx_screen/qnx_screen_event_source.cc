@@ -1,6 +1,7 @@
 #include "ui/ozone/platform/qnx_screen/qnx_screen_event_source.h"
 #include <screen/screen.h>
 #include <unistd.h>
+#include "base/qnx_trace.h"
 #include "base/time/time.h"
 #include "ui/events/event.h"
 #include "ui/events/types/event_type.h"
@@ -30,11 +31,17 @@ QnxScreenEventSource::~QnxScreenEventSource() {
 }
 
 void QnxScreenEventSource::PollEvents() {
+  // Liveness: confirm the poll timer is firing on-device (--qnx-trace only).
+  static unsigned long s_poll_count = 0;
+  if ((s_poll_count++ % 1250) == 0)
+    QNX_TRACE_FMT("QNX:Evt: poll alive #%lu\n", s_poll_count);
+
   while (true) {
     if (screen_get_event(ctx_, event_, 0) != 0) break;
     int type = SCREEN_EVENT_NONE;
     screen_get_event_property_iv(event_, SCREEN_PROPERTY_TYPE, &type);
     if (type == SCREEN_EVENT_NONE) break;
+    QNX_TRACE_FMT("QNX:Evt: got screen event type=%d\n", type);
     ProcessEvent(event_);
   }
 
@@ -62,6 +69,7 @@ void QnxScreenEventSource::ProcessEvent(screen_event_t ev) {
 void QnxScreenEventSource::ProcessTouchEvent(screen_event_t ev, int type) {
   int pos[2] = {0, 0};
   screen_get_event_property_iv(ev, SCREEN_PROPERTY_POSITION, pos);
+  QNX_TRACE_FMT("QNX:Touch: type=%d pos=(%d,%d)\n", type, pos[0], pos[1]);
 
   auto touch_cb = GetQnxScreenTouchCallback();
   if (touch_cb) {

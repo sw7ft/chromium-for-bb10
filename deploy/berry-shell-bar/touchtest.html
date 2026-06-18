@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;
+    background:#202830;font-family:sans-serif;}
+  #c{position:absolute;top:0;left:0;}
+  #t{position:absolute;top:10px;left:10px;color:#0f0;font-size:48px;
+    white-space:pre;z-index:10;}
+  .corner{position:absolute;width:120px;height:120px;background:#c33;opacity:.6;}
+  #tl{top:0;left:0;background:#3c3;}
+  #tr{top:0;right:0;background:#33c;}
+  #bl{bottom:0;left:0;background:#cc3;}
+  #br{bottom:0;right:0;background:#c3c;}
+</style>
+</head>
+<body>
+  <div id="tl" class="corner"></div>
+  <div id="tr" class="corner"></div>
+  <div id="bl" class="corner"></div>
+  <div id="br" class="corner"></div>
+  <canvas id="c"></canvas>
+  <div id="t">touch test ready</div>
+<script>
+  var c = document.getElementById('c');
+  var t = document.getElementById('t');
+  function size(){ c.width=window.innerWidth; c.height=window.innerHeight; }
+  size();
+  window.addEventListener('resize', size);
+  var n = 0;
+  var colors = ['#f00','#0f0','#0ff','#ff0','#f0f','#fff'];
+  function mark(x, y, tag){
+    n++;
+    var g = c.getContext('2d');
+    g.fillStyle = colors[n % colors.length];
+    g.beginPath(); g.arc(x, y, 40, 0, 7); g.fill();
+    g.fillStyle='#fff'; g.font='24px sans-serif';
+    g.fillText(n+'', x+45, y);
+    t.textContent = tag+' #'+n+'\n('+Math.round(x)+','+Math.round(y)+')'+
+      '\nvp '+window.innerWidth+'x'+window.innerHeight;
+    document.body.style.background = '#'+((n*987654)%0xffffff).toString(16);
+  }
+  window.addEventListener('touchstart', function(e){
+    var p = e.changedTouches[0];
+    mark(p.clientX, p.clientY, 'touch');
+    e.preventDefault();
+  }, {passive:false});
+  window.addEventListener('click', function(e){
+    mark(e.clientX, e.clientY, 'click');
+  });
+</script>
+</body>
+</html>
