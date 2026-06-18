@@ -19,6 +19,7 @@
 #include <pthread.h>
 #include <cstdio>
 #include <unistd.h>
+#include "base/qnx_trace.h"
 #endif
 
 #if BUILDFLAG(IS_APPLE)
@@ -109,10 +110,11 @@ void ConditionVariable::Wait() {
   user_lock_->CheckHeldAndUnmark();
 #endif
 #if BUILDFLAG(IS_QNX)
-  // Always-on: an unmatched CV:wait for a tid is a thread stuck in an infinite
-  // pthread_cond_wait. ra0 names the direct caller (e.g. WaitableEvent
-  // SyncWaiter, ThreadPool, or the synchronous-block site we are hunting).
-  {
+  // Diagnostic (gated on --qnx-trace): an unmatched CV:wait for a tid is a
+  // thread stuck in an infinite pthread_cond_wait. ra0 names the direct caller
+  // (e.g. WaitableEvent SyncWaiter, ThreadPool, or a synchronous-block site).
+  // Off by default — a write(2) per CV op is far too expensive for normal runs.
+  if (g_qnx_trace_enabled) {
     char _qb[112];
     int _qn = snprintf(_qb, sizeof(_qb), "QNX:CV:wait tid=%x cv=%p ra0=%p\n",
                        (unsigned)pthread_self(), (void*)this,
@@ -123,7 +125,7 @@ void ConditionVariable::Wait() {
 #endif
   int rv = pthread_cond_wait(&condition_, user_mutex_);
 #if BUILDFLAG(IS_QNX)
-  {
+  if (g_qnx_trace_enabled) {
     char _qb[80];
     int _qn = snprintf(_qb, sizeof(_qb), "QNX:CV:ret tid=%x cv=%p\n",
                        (unsigned)pthread_self(), (void*)this);

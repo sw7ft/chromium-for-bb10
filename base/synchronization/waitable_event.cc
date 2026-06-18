@@ -12,6 +12,7 @@
 #include <pthread.h>
 #include <cstdio>
 #include <unistd.h>
+#include "base/qnx_trace.h"
 #endif
 
 namespace base {
@@ -32,7 +33,8 @@ void WaitableEvent::Wait() {
   // blocks; pump/threadpool idle waits set only_used_while_idle_ and are
   // skipped). The caller return address names exactly who is blocking; an
   // unmatched WE:wait for a given tid is a thread stuck in a sync wait.
-  if (!only_used_while_idle_) {
+  // Gated on --qnx-trace; off by default.
+  if (g_qnx_trace_enabled && !only_used_while_idle_) {
     char _qb[128];
     int _qn = snprintf(_qb, sizeof(_qb),
                        "QNX:WE:wait tid=%x ev=%p ra0=%p\n",
@@ -44,7 +46,7 @@ void WaitableEvent::Wait() {
 #endif
   const bool result = TimedWait(TimeDelta::Max());
 #if BUILDFLAG(IS_QNX)
-  if (!only_used_while_idle_) {
+  if (g_qnx_trace_enabled && !only_used_while_idle_) {
     char _qb[96];
     int _qn = snprintf(_qb, sizeof(_qb), "QNX:WE:ret tid=%x ev=%p\n",
                        (unsigned)pthread_self(), (void*)this);
