@@ -28,6 +28,14 @@ git apply "$SCRIPT_DIR/patches/qnx-port.patch"
 echo "   Patch applied."
 echo
 
+if [ -f "$SCRIPT_DIR/patches/mp-gpu-navigation.patch" ]; then
+  echo "== Applying multi-process / GPU navigation patch..."
+  git apply --stat "$SCRIPT_DIR/patches/mp-gpu-navigation.patch"
+  git apply "$SCRIPT_DIR/patches/mp-gpu-navigation.patch"
+  echo "   MP/GPU patch applied."
+  echo
+fi
+
 echo "== Copying new QNX files (21 files)..."
 cp -r "$SCRIPT_DIR/src/"* "$CHROMIUM_SRC/"
 echo "   Files copied."

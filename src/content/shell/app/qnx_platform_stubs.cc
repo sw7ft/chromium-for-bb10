@@ -5,6 +5,10 @@
 
 #if BUILDFLAG(IS_QNX)
 
+#include <dlfcn.h>
+#include <errno.h>
+#include <pthread.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -12,6 +16,7 @@
 #include <memory>
 #include <ostream>
 #include <string>
+#include <typeinfo>
 #include <unordered_set>
 #include <vector>
 
@@ -24,6 +29,7 @@
 #include "base/files/file_path_watcher.h"
 #include "base/files/scoped_file.h"
 #include "base/functional/callback.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/no_destructor.h"
 #include "base/process/memory.h"
 #include "base/process/process.h"
@@ -68,6 +74,86 @@ size_t strlen(const char* s) {
 // QNX may also resolve to this ISR-optimized name
 __attribute__((visibility("default"), used, noinline))
 size_t __strlen_isr(const char* s) { return strlen(s); }
+
+// Strong strncpy: QNX 8.0's <string_chk.h> (_FORTIFY_SOURCE) emits a weak
+// out-of-line strncpy under clang that recurses into itself, which the
+// optimizer collapses to an infinite loop (`b.n .`). Any TU built with
+// fortify can inject that trap into the link, hijacking every strncpy call
+// (observed: browser + renderer threads spinning at 100% CPU inside
+// breakpad's SetKeyValue). This strong definition wins over the weak trap.
+// Fortify is also disabled for QNX in build/config/compiler/BUILD.gn.
+// (Defined under a different C++ name with an asm label, because the fortify
+// header already declares strncpy as always_inline in this TU.)
+char* qnx_strncpy_impl(char* dst, const char* src, size_t n) __asm__("strncpy");
+__attribute__((visibility("default"), used, noinline))
+char* qnx_strncpy_impl(char* dst, const char* src, size_t n) {
+  size_t i = 0;
+  for (; i < n && src[i] != '\0'; ++i)
+    dst[i] = src[i];
+  for (; i < n; ++i)
+    dst[i] = '\0';
+  return dst;
+}
+
+// QNX diagnostic: interpose std::__throw_system_error(int) to capture the
+// error code and the exact (inline) caller before the exception machinery
+// runs. Forwards to the real libstdc++ implementation.
+#if 0  // Disabled after QNX page-load bring-up.
+typedef void (*qnx_tse_t)(int);
+__attribute__((visibility("default"), used, noreturn))
+void _ZSt20__throw_system_errori(int err) {
+  char b[160];
+  int n = snprintf(b, sizeof(b), "QNX:TSE err=%d from=%p tid=%d\n", err,
+                   __builtin_return_address(0), (int)pthread_self());
+  if (n > 0) write(2, b, n);
+  static qnx_tse_t real_tse = nullptr;
+  if (!real_tse)
+    real_tse = (qnx_tse_t)dlsym(RTLD_NEXT, "_ZSt20__throw_system_errori");
+  if (real_tse) real_tse(err);
+  abort();
+}
+#endif
+
+#if 0  // Disabled after QNX page-load bring-up.
+// QNX diagnostic: interpose __cxa_throw to find code throwing C++ exceptions
+// in a loop (observed: threads pegged in the unwinder's dl/phdr scans during
+// page load). Logs the first throws and every 1000th, then forwards to the
+// real libstdc++ implementation.
+typedef void (*qnx_cxa_throw_t)(void*, void*, void (*)(void*));
+__attribute__((visibility("default"), used))
+void __cxa_throw(void* ex, void* tinfo, void (*dest)(void*)) {
+  static qnx_cxa_throw_t real_throw = nullptr;
+  static unsigned long count = 0;
+  unsigned long c = __atomic_add_fetch(&count, 1, __ATOMIC_RELAXED);
+  if (c <= 20 || (c % 1000) == 0) {
+    const char* name =
+        tinfo ? reinterpret_cast<const std::type_info*>(tinfo)->name() : "?";
+    char b[256];
+    int n = snprintf(b, sizeof(b),
+                     "QNX:THROW #%lu type=%s from=%p tid=%d errno=%d\n", c,
+                     name, __builtin_return_address(0), (int)pthread_self(),
+                     errno);
+    if (n > 0) write(2, b, n);
+    void* sp;
+    __asm__ volatile("mov %0, sp" : "=r"(sp));
+    uintptr_t* sp_ptr = (uintptr_t*)sp;
+    int found = 0;
+    for (int i = 0; i < 512 && found < 24; i++) {
+      uintptr_t word = sp_ptr[i];
+      if (word > 0x800000 && word < 0x8000000) {
+        n = snprintf(b, sizeof(b), "QNX:THROWSTK[%d]=0x%lx\n", i,
+                     (unsigned long)word);
+        if (n > 0) write(2, b, n);
+        found++;
+      }
+    }
+  }
+  if (!real_throw)
+    real_throw = (qnx_cxa_throw_t)dlsym(RTLD_NEXT, "__cxa_throw");
+  if (real_throw) real_throw(ex, tinfo, dest);
+  abort();  // __cxa_throw must not return.
+}
+#endif
 
 // With -femulated-tls, Clang uses __emutls_get_address (from libgcc_eh.a)
 // instead of native ARM TLS.  These stubs are kept as safe fallbacks in case
@@ -129,7 +215,16 @@ void TerminateOnThread() {}
 
 void PlatformThreadBase::SetName(const std::string& name) {}
 
-size_t GetDefaultThreadStackSize(const pthread_attr_t& attributes) { return 0; }
+size_t GetDefaultThreadStackSize(const pthread_attr_t& attributes) {
+  // Returning 0 means "use the platform default stack". On Linux that is ~8MB,
+  // but QNX's default pthread stack is only a few hundred KB - far too small for
+  // Chromium's deep compositor/Skia raster and V8 call chains, which overflow it
+  // and crash with SIGSEGV/SIGBUS at an address next to the stack pointer a few
+  // seconds after a page starts rendering. Give every Chromium-created thread an
+  // 8MB stack to match Linux. The reservation is virtual (committed on demand),
+  // so this is cheap on the 32-bit address space.
+  return 8 * 1024 * 1024;
+}
 
 ProcessId GetParentProcessId(ProcessHandle process) { return 1; }
 
@@ -253,42 +348,8 @@ class ZygoteForkDelegate;
 int ZygoteMain(std::vector<std::unique_ptr<ZygoteForkDelegate>> delegates) { return 0; }
 }  // namespace content
 
-// --- ChildProcessLauncherHelper platform methods ---
-#include "content/browser/child_process_launcher_helper.h"
-namespace content::internal {
-void ChildProcessLauncherHelper::SetProcessPriorityOnLauncherThread(
-    base::Process process, base::Process::Priority priority) {}
-void ChildProcessLauncherHelper::ForceNormalProcessTerminationSync(
-    ChildProcessLauncherHelper::Process process) {}
-void ChildProcessLauncherHelper::BeforeLaunchOnClientThread() {}
-bool ChildProcessLauncherHelper::BeforeLaunchOnLauncherThread(
-    PosixFileDescriptorInfo& files_to_register,
-    base::LaunchOptions* options) { return true; }
-void ChildProcessLauncherHelper::AfterLaunchOnLauncherThread(
-    const ChildProcessLauncherHelper::Process& process,
-    const base::LaunchOptions* options) {}
-absl::optional<mojo::NamedPlatformChannel>
-ChildProcessLauncherHelper::CreateNamedPlatformChannelOnLauncherThread() {
-  return absl::nullopt;
-}
-std::unique_ptr<PosixFileDescriptorInfo>
-ChildProcessLauncherHelper::GetFilesToMap() { return nullptr; }
-ChildProcessTerminationInfo
-ChildProcessLauncherHelper::GetTerminationInfo(
-    const ChildProcessLauncherHelper::Process& process, bool known_dead) { return {}; }
-bool ChildProcessLauncherHelper::IsUsingLaunchOptions() { return false; }
-ChildProcessLauncherHelper::Process
-ChildProcessLauncherHelper::LaunchProcessOnLauncherThread(
-    const base::LaunchOptions* options,
-    std::unique_ptr<PosixFileDescriptorInfo> files_to_register,
-    bool* is_synchronous_launch, int* launch_result) {
-  *is_synchronous_launch = false;
-  *launch_result = 1;
-  return Process();
-}
-bool ChildProcessLauncherHelper::TerminateProcess(
-    const base::Process& process, int exit_code) { return false; }
-}  // namespace content::internal
+// --- ChildProcessLauncherHelper platform methods are in
+// child_process_launcher_helper_qnx.cc (content/browser) for QNX.
 
 // --- NativeEventObserver ---
 // Defined with matching ABI but no base class for QNX
@@ -366,9 +427,13 @@ int CalculateIdleTime() { return 0; }
 bool CheckIdleStateIsLocked() { return false; }
 }  // namespace ui
 
+// QNX has no platform clipboard backend; use Chromium's in-memory clipboard so
+// selection/copy paths (e.g. updating the selection buffer on click) work and
+// don't CHECK-fail on a null clipboard.
 #include "ui/base/clipboard/clipboard.h"
+#include "ui/base/clipboard/clipboard_non_backed.h"
 namespace ui {
-Clipboard* Clipboard::Create() { return nullptr; }
+Clipboard* Clipboard::Create() { return new ClipboardNonBacked; }
 }  // namespace ui
 
 #include "ui/shell_dialogs/select_file_dialog.h"
@@ -390,31 +455,40 @@ gfx::Image& ResourceBundle::GetNativeImageNamed(int resource_id) {
 // =====================================================================
 // GL/GPU stubs
 // =====================================================================
-#include "ui/gl/gl_context.h"
-#include "ui/gl/gl_surface.h"
-#include "ui/gl/gl_display.h"
-#include "ui/gl/gl_implementation.h"
-namespace gl::init {
-scoped_refptr<GLContext> CreateGLContext(GLShareGroup* share_group,
-                                         GLSurface* compatible_surface,
-                                         const GLContextAttribs& attribs) { return nullptr; }
-scoped_refptr<GLSurface> CreateOffscreenGLSurfaceWithFormat(
-    GLDisplay* display, const gfx::Size& size, GLSurfaceFormat format) { return nullptr; }
-std::vector<GLImplementationParts> GetAllowedGLImplementations() { return {}; }
-bool GetGLWindowSystemBindingInfo(const GLVersionInfo& gl_info,
-                                  GLWindowSystemBindingInfo* info) { return false; }
-bool InitializeExtensionSettingsOneOffPlatform(GLDisplay* display) { return true; }
-GLDisplay* InitializeGLOneOffPlatform(gl::GpuPreference pref) { return nullptr; }
-bool InitializeStaticGLBindings(GLImplementationParts impl) { return false; }
-void SetDisabledExtensionsPlatform(const std::string& disabled) {}
-void ShutdownGLPlatform(GLDisplay* display) {}
-}  // namespace gl::init
+// NOTE: The gl::init free functions (GetAllowedGLImplementations,
+// CreateGLContext, CreateOffscreenGLSurfaceWithFormat, InitializeGLOneOffPlatform,
+// InitializeStaticGLBindings, ShutdownGLPlatform, ...) are intentionally NOT
+// stubbed here anymore. The real Ozone implementations in libgl_init.a
+// (gl_factory_ozone.cc + gl_initializer_ozone.cc) provide them and route to the
+// qnx_screen GLOzone (native EGL/GLES2 on the Adreno). Stubbing them shadowed the
+// archive members and forced GL = none (empty allowed-impl list), which broke
+// GPU compositing.
 
+// On-screen GPU output surface. The upstream Ozone implementation lives in
+// gpu/ipc/service/image_transport_surface_linux.cc, but that file is only built
+// for is_linux || is_chromeos (not QNX), so we provide the same behavior here.
+// Returning nullptr (the old stub) forced every GPU command buffer / Viz output
+// surface to fall back to offscreen + software blit to the QNX window, which is
+// why nothing ever reached our QnxScreenGLOzoneEGL::CreateViewGLSurface and the
+// browser stayed on software compositing. Route to the real Ozone view surface.
 #include "gpu/ipc/service/image_transport_surface.h"
+#include "gpu/ipc/service/pass_through_image_transport_surface.h"
+#include "ui/gl/init/gl_factory.h"
 namespace gpu {
 scoped_refptr<gl::GLSurface> ImageTransportSurface::CreateNativeGLSurface(
-    gl::GLDisplay*, base::WeakPtr<ImageTransportSurfaceDelegate>,
-    gpu::SurfaceHandle, gl::GLSurfaceFormat) { return nullptr; }
+    gl::GLDisplay* display,
+    base::WeakPtr<ImageTransportSurfaceDelegate> delegate,
+    gpu::SurfaceHandle surface_handle,
+    gl::GLSurfaceFormat format) {
+  scoped_refptr<gl::GLSurface> surface =
+      gl::init::CreateViewGLSurface(display, surface_handle);
+  if (!surface)
+    return surface;
+  return base::MakeRefCounted<PassThroughImageTransportSurface>(
+      delegate, surface.get(), /*override_vsync_for_multi_window_swap=*/false);
+}
+// QNX has no surfaceless/overlay presenter; returning null makes Viz fall back
+// to the on-screen GLSurface path above (SkiaOutputDeviceGL).
 scoped_refptr<gl::Presenter> ImageTransportSurface::CreatePresenter(
     gl::GLDisplay*, base::WeakPtr<ImageTransportSurfaceDelegate>,
     SurfaceHandle, gl::GLSurfaceFormat) { return nullptr; }
@@ -450,8 +524,12 @@ const AtomicString& FontCache::SystemFontFamily() {
   return family;
 }
 scoped_refptr<SimpleFontData> FontCache::PlatformFallbackFontForCharacter(
-    const FontDescription&, UChar32, const SimpleFontData*,
-    FontFallbackPriority) { return nullptr; }
+    const FontDescription& description,
+    UChar32,
+    const SimpleFontData*,
+    FontFallbackPriority) {
+  return FontCache::Get().GetLastResortFallbackFont(description);
+}
 }  // namespace blink
 
 #include "third_party/blink/renderer/core/layout/layout_theme_default.h"
@@ -471,18 +549,56 @@ LayoutTheme& LayoutTheme::NativeTheme() {
 }
 }  // namespace blink
 
-// Skia font manager
-#include "third_party/skia/include/core/SkFontMgr.h"
-namespace skia {
-sk_sp<SkFontMgr> CreateDefaultSkFontMgr() { return nullptr; }
-}  // namespace skia
+// Skia font manager — QNX has no fontconfig. BB10 devices ship TrueType fonts
+// under /usr/fonts/font_repository (DejaVu, Monotype: Verdana/Times/Arial/...),
+// so build a directory-backed font manager from them. The path is overridable
+// via QNX_FONT_DIR. If no fonts are found we fall back to the empty font mgr so
+// FontCache never hits CrashWithFontInfo when fallback runs.
+#include <cstdlib>
 
-// SkFontConfigInterface
-class SkFontConfigInterface : public SkRefCnt {
+#include "third_party/skia/include/core/SkFontMgr.h"
+#include "third_party/skia/include/core/SkTypeface.h"
+#include "third_party/skia/include/ports/SkFontConfigInterface.h"
+#include "third_party/skia/include/ports/SkFontMgr_directory.h"
+#include "third_party/skia/include/ports/SkFontMgr_empty.h"
+
+namespace {
+
+class QnxFontConfigInterface : public SkFontConfigInterface {
  public:
-  static sk_sp<SkFontConfigInterface> RefGlobal();
+  bool matchFamilyName(const char*,
+                       SkFontStyle,
+                       FontIdentity*,
+                       SkString*,
+                       SkFontStyle*) override {
+    return false;
+  }
+
+  SkStreamAsset* openStream(const FontIdentity&) override { return nullptr; }
+
+  sk_sp<SkTypeface> makeTypeface(const FontIdentity&) override {
+    return nullptr;
+  }
 };
-sk_sp<SkFontConfigInterface> SkFontConfigInterface::RefGlobal() { return nullptr; }
+
+}  // namespace
+
+sk_sp<SkFontConfigInterface> SkFontConfigInterface::RefGlobal() {
+  static sk_sp<SkFontConfigInterface> g = sk_make_sp<QnxFontConfigInterface>();
+  return g;
+}
+
+namespace skia {
+sk_sp<SkFontMgr> CreateDefaultSkFontMgr() {
+  const char* font_dir = getenv("QNX_FONT_DIR");
+  if (!font_dir || !font_dir[0])
+    font_dir = "/usr/fonts/font_repository";
+  sk_sp<SkFontMgr> mgr = SkFontMgr_New_Custom_Directory(font_dir);
+  if (mgr && mgr->countFamilies() > 0)
+    return mgr;
+  return SkFontMgr_New_Custom_Empty();
+}
+}  // namespace skia
 
 // =====================================================================
 // printing

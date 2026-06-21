@@ -1,0 +1,2590 @@
+From 54b8d7734d5fc632af7038b6ddffdd2dc26d21b8 Mon Sep 17 00:00:00 2001
+From: BerryBrowser <berrybrowser@bb10.dev>
+Date: Sun, 21 Jun 2026 14:26:31 +0000
+Subject: [PATCH] QNX/BB10: Multi-process GPU bring-up and NavigationClient
+ commit path.
+
+Add experimental MP mode behind berry-mp.enable with posix_spawn child launch,
+NavigationClient bind sequencing, idle-wakeup mitigations on QNX message pumps,
+EGL/qnx_screen GL integration, and MP test/deploy helpers while keeping
+single-process as the default stable path.
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ base/message_loop/message_pump_default.cc     |  13 +-
+ base/message_loop/message_pump_libevent.cc    |  24 +-
+ base/process/launch_posix.cc                  |  40 +++-
+ base/qnx_trace.h                              |  18 ++
+ base/threading/platform_thread_posix.cc       |  35 ++-
+ .../child_process_launcher_helper_qnx.cc      | 172 ++++++++++++++-
+ .../renderer_host/navigation_request.cc       |  12 +-
+ .../renderer_host/render_frame_host_impl.cc   |  61 +++++-
+ .../renderer_host/render_frame_host_impl.h    |   5 +
+ content/renderer/navigation_client.cc         |  10 +-
+ content/renderer/render_frame_impl.cc         |   9 +-
+ content/shell/app/qnx_platform_stubs.cc       |  65 ++++--
+ content/shell/app/shell_main.cc               |  67 +++++-
+ .../browser/shell_content_browser_client.cc   |  29 +++
+ deploy/berry-shell-bar/bar-descriptor.xml     |   9 +-
+ deploy/berry-shell-bar/home.html              |  73 ++++++
+ deploy/berry-shell-bar/launcher.c             | 143 ++++++++++--
+ deploy/browse.sh                              |  30 +++
+ deploy/mp-kill-all.sh                         |  21 ++
+ deploy/mp-test-safe.sh                        |  39 ++++
+ gpu/ipc/service/gpu_init.cc                   |   3 +-
+ gpu/qnx/gpu_qnx.cc                            | 166 +++++++++++++-
+ gpu/qnx/gpu_qnx.h                             |   9 +
+ mojo/core/channel_posix.cc                    |   4 +
+ ui/gl/init/gl_factory_ozone.cc                |  12 +-
+ ui/ozone/platform/qnx_screen/BUILD.gn         |   4 +
+ .../qnx_screen/ozone_platform_qnx_screen.cc   |  42 +++-
+ .../qnx_screen/ozone_platform_qnx_screen.h    |   4 +
+ .../qnx_screen/qnx_screen_event_source.cc     | 207 ++++++++++++++++--
+ .../qnx_screen/qnx_screen_event_source.h      |   4 +-
+ .../qnx_screen/qnx_screen_gl_ozone_egl.cc     | 180 +++++++++++++++
+ .../qnx_screen/qnx_screen_gl_ozone_egl.h      |  49 +++++
+ .../qnx_screen/qnx_screen_surface_factory.cc  |  20 +-
+ .../qnx_screen/qnx_screen_surface_factory.h   |   5 +
+ .../platform/qnx_screen/qnx_screen_window.cc  | 107 +++++++--
+ .../platform/qnx_screen/qnx_screen_window.h   |   4 +
+ 36 files changed, 1569 insertions(+), 126 deletions(-)
+ create mode 100644 deploy/berry-shell-bar/home.html
+ create mode 100644 deploy/browse.sh
+ create mode 100755 deploy/mp-kill-all.sh
+ create mode 100755 deploy/mp-test-safe.sh
+ create mode 100644 ui/ozone/platform/qnx_screen/qnx_screen_gl_ozone_egl.cc
+ create mode 100644 ui/ozone/platform/qnx_screen/qnx_screen_gl_ozone_egl.h
+
+diff --git a/base/message_loop/message_pump_default.cc b/base/message_loop/message_pump_default.cc
+index 90cbbdd816..27a6d37377 100644
+--- a/base/message_loop/message_pump_default.cc
++++ b/base/message_loop/message_pump_default.cc
+@@ -7,6 +7,7 @@
+ #include "base/auto_reset.h"
+ #include "base/logging.h"
+ #include "base/synchronization/waitable_event.h"
++#include "base/time/time.h"
+ #include "build/build_config.h"
+ 
+ #if BUILDFLAG(IS_QNX)
+@@ -67,11 +68,17 @@ void MessagePumpDefault::Run(Delegate* delegate) {
+ #if BUILDFLAG(IS_QNX)
+       QNX_TRACE_FMT("QNX:MPD:Wait tid=%x p=%p inf=1\n",
+                     (unsigned)pthread_self(), (void*)this);
+-#endif
+-      event_.Wait();
+-#if BUILDFLAG(IS_QNX)
++      // QNX: never park infinitely. Cross-thread WaitableEvent::Signal() can be
++      // lost on QNX (see deploy/HARDENING.md idle-wakeup stall), which wedges
++      // the renderer main thread so a browser->renderer associated Mojo message
++      // (e.g. NavigationClient::CommitNavigation) posted to this thread's queue
++      // is never serviced. Poll on a bounded TimedWait so DoWork() re-runs and
++      // drains any queued task even if its wakeup Signal was dropped.
++      event_.TimedWait(Milliseconds(50));
+       QNX_TRACE_FMT("QNX:MPD:Wake tid=%x p=%p inf=1\n",
+                     (unsigned)pthread_self(), (void*)this);
++#else
++      event_.Wait();
+ #endif
+     } else {
+ #if BUILDFLAG(IS_QNX)
+diff --git a/base/message_loop/message_pump_libevent.cc b/base/message_loop/message_pump_libevent.cc
+index 34f2439fea..044d786d47 100644
+--- a/base/message_loop/message_pump_libevent.cc
++++ b/base/message_loop/message_pump_libevent.cc
+@@ -342,8 +342,30 @@ void MessagePumpLibevent::Run(Delegate* delegate) {
+ 
+     // If there is delayed work.
+     DCHECK(!next_work_info.delayed_run_time.is_null());
++    TimeDelta timer_delay;
++    bool have_timer_delay = false;
+     if (!next_work_info.delayed_run_time.is_max()) {
+-      const TimeDelta delay = next_work_info.remaining_delay();
++      timer_delay = next_work_info.remaining_delay();
++      have_timer_delay = true;
++    }
++#if defined(__QNX__) || defined(__QNXNTO__)
++    // QNX: never block the IO thread indefinitely in event_base_loop(). A
++    // cross-thread/channel readability wakeup can be lost on QNX (see
++    // deploy/HARDENING.md), which strands an inbound browser->renderer Mojo
++    // message (e.g. NavigationClient::CommitNavigation) unread in the channel
++    // socket and wedges navigation. select() is level-triggered, so forcing a
++    // periodic wake re-scans all watched FDs and reads any pending data even if
++    // its original wakeup was dropped. Cap the wait at 50ms.
++    {
++      const TimeDelta kQnxMaxWait = Milliseconds(50);
++      if (!have_timer_delay || timer_delay > kQnxMaxWait) {
++        timer_delay = kQnxMaxWait;
++        have_timer_delay = true;
++      }
++    }
++#endif
++    if (have_timer_delay) {
++      const TimeDelta delay = timer_delay;
+ 
+       // Setup a timer to break out of the event loop at the right time.
+       struct timeval poll_tv;
+diff --git a/base/process/launch_posix.cc b/base/process/launch_posix.cc
+index badc43830d..ecf9ee2a43 100644
+--- a/base/process/launch_posix.cc
++++ b/base/process/launch_posix.cc
+@@ -7,6 +7,7 @@
+ #include <dirent.h>
+ #include <errno.h>
+ #include <fcntl.h>
++#include <fcntl.h>
+ #include <sched.h>
+ #include <setjmp.h>
+ #include <signal.h>
+@@ -70,6 +71,21 @@ namespace base {
+ 
+ namespace {
+ 
++#if defined(__QNX__)
++void QnxLogChildLaunchFail(const char* step) {
++  int fd = open("/accounts/1000/shared/misc/berry-kbd.log",
++                O_WRONLY | O_CREAT | O_APPEND, 0644);
++  if (fd < 0)
++    return;
++  const char* prefix = "QNX:LaunchFail:";
++  write(fd, prefix, 15);
++  for (const char* p = step; *p; ++p)
++    write(fd, p, 1);
++  write(fd, "\n", 1);
++  close(fd);
++}
++#endif  // defined(__QNX__)
++
+ // Get the process's "environment" (i.e. the thing that setenv/getenv
+ // work with).
+ char** GetEnvironment() {
+@@ -377,12 +393,18 @@ Process LaunchProcess(const std::vector<std::string>& argv,
+       base::ScopedFD null_fd(HANDLE_EINTR(open("/dev/null", O_RDONLY)));
+       if (!null_fd.is_valid()) {
+         RAW_LOG(ERROR, "Failed to open /dev/null");
++#if defined(__QNX__)
++        QnxLogChildLaunchFail("open_devnull");
++#endif
+         _exit(127);
+       }
+ 
+       int new_fd = HANDLE_EINTR(dup2(null_fd.get(), STDIN_FILENO));
+       if (new_fd != STDIN_FILENO) {
+         RAW_LOG(ERROR, "Failed to dup /dev/null for stdin");
++#if defined(__QNX__)
++        QnxLogChildLaunchFail("dup2_stdin");
++#endif
+         _exit(127);
+       }
+     }
+@@ -392,6 +414,9 @@ Process LaunchProcess(const std::vector<std::string>& argv,
+       // starts off a new process group with pgid equal to its process ID.
+       if (setpgid(0, 0) < 0) {
+         RAW_LOG(ERROR, "setpgid failed");
++#if defined(__QNX__)
++        QnxLogChildLaunchFail("setpgid");
++#endif
+         _exit(127);
+       }
+     }
+@@ -450,8 +475,12 @@ Process LaunchProcess(const std::vector<std::string>& argv,
+       SetEnvironment(new_environ.get());
+ 
+     // fd_shuffle1 is mutated by this call because it cannot malloc.
+-    if (!ShuffleFileDescriptors(&fd_shuffle1))
++    if (!ShuffleFileDescriptors(&fd_shuffle1)) {
++#if defined(__QNX__)
++      QnxLogChildLaunchFail("shuffle_fds");
++#endif
+       _exit(127);
++    }
+ 
+     CloseSuperfluousFds(fd_shuffle2);
+ 
+@@ -491,6 +520,9 @@ Process LaunchProcess(const std::vector<std::string>& argv,
+ 
+     RAW_LOG(ERROR, "LaunchProcess: failed to execvp:");
+     RAW_LOG(ERROR, argv_cstr[0]);
++#if defined(__QNX__)
++    QnxLogChildLaunchFail("execvp");
++#endif
+     _exit(127);
+   } else {
+     // Parent process
+@@ -591,8 +623,12 @@ static bool GetAppOutputInternal(
+       for (size_t i = 0; i < fd_shuffle1.size(); ++i)
+         fd_shuffle2.push_back(fd_shuffle1[i]);
+ 
+-      if (!ShuffleFileDescriptors(&fd_shuffle1))
++      if (!ShuffleFileDescriptors(&fd_shuffle1)) {
++#if defined(__QNX__)
++        QnxLogChildLaunchFail("shuffle_fds_forkdelegate");
++#endif
+         _exit(127);
++      }
+ 
+       CloseSuperfluousFds(fd_shuffle2);
+ 
+diff --git a/base/qnx_trace.h b/base/qnx_trace.h
+index a1b04b1a16..096d045ef7 100644
+--- a/base/qnx_trace.h
++++ b/base/qnx_trace.h
+@@ -51,11 +51,29 @@ inline const char* QnxSafeStr(const char* s) {
+ #define QNX_TRACE_THEN(msg, result) \
+   ([&]() -> decltype(auto) { QNX_TRACE_MSG(msg); return (result); }())
+ 
++// Low-volume navigation milestones for multi-process bring-up. Always on so
++// berry-kbd.log stays readable without QNX_TRACE=1.
++#define QNX_NAV_LOG(msg)                       \
++  do {                                         \
++    const char _qn[] = msg;                    \
++    ::write(2, _qn, sizeof(_qn) - 1);         \
++  } while (0)
++
++#define QNX_NAV_LOG_FMT(fmt, ...)              \
++  do {                                         \
++    char _qn[256];                             \
++    int _ql = snprintf(_qn, sizeof(_qn), fmt, __VA_ARGS__); \
++    if (_ql > 0)                               \
++      ::write(2, _qn, _ql);                    \
++  } while (0)
++
+ #else
+ 
+ #define QNX_TRACE_MSG(msg) ((void)0)
+ #define QNX_TRACE_FMT(fmt, ...) ((void)0)
+ #define QNX_TRACE_THEN(msg, result) (result)
++#define QNX_NAV_LOG(msg) ((void)0)
++#define QNX_NAV_LOG_FMT(fmt, ...) ((void)0)
+ 
+ #endif
+ 
+diff --git a/base/threading/platform_thread_posix.cc b/base/threading/platform_thread_posix.cc
+index 040fc500ce..3c7ce4b829 100644
+--- a/base/threading/platform_thread_posix.cc
++++ b/base/threading/platform_thread_posix.cc
+@@ -127,6 +127,38 @@ void* ThreadFunc(void* params) {
+   return nullptr;
+ }
+ 
++#if BUILDFLAG(IS_QNX) && defined(__arm__)
++// QNX's thread-creation trampoline only guarantees 8-byte (AAPCS double-word)
++// stack alignment when it enters a thread's start routine. Chromium/Skia,
++// however, are compiled (like the upstream Android/Linux ARM configs) assuming a
++// 16-byte aligned stack: clang emits 16-byte-aligned NEON loads/stores
++// (e.g. `vld1.64 {d16-d17}, [rN :128]`) for q-register spills and
++// skvx::Vec<4,float> locals *without* a stack-realigning prologue. Running that
++// code on an only-8-byte-aligned stack faults with SIGBUS/BUS_ADRALN -- observed
++// crashing in GrQuadUtils::TessellationHelper::inset on the compositor thread a
++// few seconds into rendering. Fix it once, at thread entry: realign sp down to a
++// 16-byte boundary before any Chromium code runs. clang then keeps the stack
++// 16-byte aligned for the entire call tree below.
++extern "C" {
++void* QnxThreadFuncAligned(void* params) {
++  return ThreadFunc(params);
++}
++__attribute__((naked)) void* QnxThreadFuncTrampoline(void* /*params*/) {
++  // Tail-call: r0 (params) and lr are left untouched; only sp is realigned.
++  // Thumb-2 disallows SP as an operand of BIC/AND, so round down via the
++  // call-clobbered scratch register ip (r12).
++  __asm__ volatile(
++      "mov ip, sp\n\t"
++      "bic ip, ip, #15\n\t"
++      "mov sp, ip\n\t"
++      "b QnxThreadFuncAligned\n\t");
++}
++}  // extern "C"
++#define CHROMIUM_THREAD_START_ROUTINE QnxThreadFuncTrampoline
++#else
++#define CHROMIUM_THREAD_START_ROUTINE ThreadFunc
++#endif
++
+ bool CreateThread(size_t stack_size,
+                   bool joinable,
+                   PlatformThread::Delegate* delegate,
+@@ -158,7 +190,8 @@ bool CreateThread(size_t stack_size,
+   params->message_pump_type = message_pump_type;
+ 
+   pthread_t handle;
+-  int err = pthread_create(&handle, &attributes, ThreadFunc, params.get());
++  int err = pthread_create(&handle, &attributes, CHROMIUM_THREAD_START_ROUTINE,
++                           params.get());
+   bool success = !err;
+   if (success) {
+     // ThreadParams should be deleted on the created thread after used.
+diff --git a/content/browser/child_process_launcher_helper_qnx.cc b/content/browser/child_process_launcher_helper_qnx.cc
+index c76889f89e..22b8c907dd 100644
+--- a/content/browser/child_process_launcher_helper_qnx.cc
++++ b/content/browser/child_process_launcher_helper_qnx.cc
+@@ -16,6 +16,70 @@
+ #include "content/public/common/content_switches.h"
+ #include "content/public/common/result_codes.h"
+ #include "content/public/common/sandboxed_process_launcher_delegate.h"
++#include "base/environment.h"
++#include "base/files/dir_reader_posix.h"
++#include <cerrno>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <fcntl.h>
++#include <spawn.h>
++#include <string>
++#include <unistd.h>
++#include <vector>
++
++extern char** environ;
++
++namespace {
++
++constexpr char kFDDir[] = "/proc/self/fd";
++
++// Mirror base/process/launch_posix.cc CloseSuperfluousFds for posix_spawn.
++// fork+exec closed every inherited fd except stdio and the remapped bootstrap
++// fds (Mojo + field trials at kBaseDescriptor+N). posix_spawn inherits the full
++// browser fd table unless we explicitly close the extras; duplicate open
++// handles to the same channel/pipes can break Mojo IPC and leave the renderer
++// idle after startup (white screen, "renderer unresponsive").
++void AddCloseSuperfluousFds(posix_spawn_file_actions_t* actions,
++                            const base::FileHandleMappingVector& remaps) {
++  base::DirReaderPosix fd_dir(kFDDir);
++  if (!fd_dir.IsValid())
++    return;
++
++  const int dir_fd = fd_dir.fd();
++  for (; fd_dir.Next(); ) {
++    if (fd_dir.name()[0] == '.')
++      continue;
++
++    char* endptr = nullptr;
++    errno = 0;
++    const long fd_l = strtol(fd_dir.name(), &endptr, 10);
++    if (fd_dir.name()[0] == 0 || *endptr || fd_l < 0 || errno)
++      continue;
++
++    const int fd = static_cast<int>(fd_l);
++    if (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO)
++      continue;
++    if (fd == dir_fd)
++      continue;
++
++    bool keep = false;
++    for (const auto& remap : remaps) {
++      if (fd == remap.second) {
++        keep = true;
++        break;
++      }
++    }
++    if (keep)
++      continue;
++
++    // Ignore errors: if a fd isn't inherited, addclose is a no-op on some
++    // platforms; on others we skip silently via spawn failure logging below.
++    posix_spawn_file_actions_addclose(actions, fd);
++  }
++}
++
++}  // namespace
+ 
+ namespace content {
+ namespace internal {
+@@ -49,7 +113,31 @@ bool ChildProcessLauncherHelper::BeforeLaunchOnLauncherThread(
+     return false;
+   options->fds_to_remap = files_to_register.GetMappingWithIDAdjustment(
+       base::GlobalDescriptors::kBaseDescriptor);
+-  options->environment = delegate_->GetEnvironment();
++
++  base::EnvironmentMap env = delegate_->GetEnvironment();
++  static const char* const kForwardEnv[] = {
++      "LD_LIBRARY_PATH",
++      "QNX_CA_BUNDLE",
++      "TMPDIR",
++      "HOME",
++      "CHROME_EXE_PATH",
++      "QNX_SCREEN_ROTATION",
++      "QNX_TRACE",
++  };
++  for (const char* key : kForwardEnv) {
++    const char* val = getenv(key);
++    if (val && val[0])
++      env[key] = val;
++  }
++  options->environment = env;
++
++  fprintf(stderr, "QNX:BeforeLaunch type=%s child_id=%d fd_remap_count=%zu\n",
++          GetProcessType().c_str(), child_process_id(),
++          options->fds_to_remap.size());
++  for (size_t i = 0; i < options->fds_to_remap.size() && i < 16; ++i) {
++    fprintf(stderr, "QNX:FdRemap[%zu] src=%d dest=%d\n", i,
++            options->fds_to_remap[i].first, options->fds_to_remap[i].second);
++  }
+   return true;
+ }
+ 
+@@ -61,9 +149,85 @@ ChildProcessLauncherHelper::LaunchProcessOnLauncherThread(
+     int* launch_result) {
+   *is_synchronous_launch = true;
+   Process process;
+-  process.process = base::LaunchProcess(*command_line(), *options);
+-  *launch_result = process.process.IsValid() ? LAUNCH_RESULT_SUCCESS
+-                                             : LAUNCH_RESULT_FAILURE;
++  const std::string proc_type = GetProcessType();
++  const auto& argv = command_line()->argv();
++  fprintf(stderr, "QNX:LaunchChild type=%s pid_target=%d argc=%zu\n",
++          proc_type.c_str(), child_process_id(),
++          static_cast<size_t>(argv.size()));
++  for (size_t i = 0; i < argv.size() && i < 24; ++i)
++    fprintf(stderr, "QNX:LaunchChild argv[%zu]=%s\n", i, argv[i].c_str());
++
++  // QNX: launch children with posix_spawn() instead of base::LaunchProcess(),
++  // which uses fork()+execvp(). On QNX, fork() in a multithreaded process only
++  // clones the calling thread; any allocator/runtime spinlock held by another
++  // thread at fork time is never released in the child, so the child spins
++  // forever (observed: child stuck single-threaded in STATE=RUNNING, still
++  // showing the parent's argv) and never reaches execvp(). posix_spawn() builds
++  // the new process natively from the executable image without cloning the
++  // parent's locked address space, sidestepping the inherited-lock deadlock.
++  std::vector<char*> argv_cstr;
++  argv_cstr.reserve(argv.size() + 1);
++  for (const auto& a : argv)
++    argv_cstr.push_back(const_cast<char*>(a.c_str()));
++  argv_cstr.push_back(nullptr);
++
++  // Build the child environment: inherit the browser's environment, then apply
++  // the overrides accumulated in BeforeLaunchOnLauncherThread (LD_LIBRARY_PATH,
++  // TMPDIR, HOME, ...). An empty override value removes the key.
++  std::vector<std::string> env_storage;
++  const base::EnvironmentMap& overrides = options->environment;
++  for (char** e = environ; e && *e; ++e) {
++    const char* eq = strchr(*e, '=');
++    if (!eq)
++      continue;
++    std::string key(*e, static_cast<size_t>(eq - *e));
++    if (overrides.find(key) != overrides.end())
++      continue;  // replaced (or removed) below
++    env_storage.emplace_back(*e);
++  }
++  for (const auto& kv : overrides) {
++    if (kv.second.empty())
++      continue;  // removal
++    env_storage.emplace_back(kv.first + "=" + kv.second);
++  }
++  std::vector<char*> envp;
++  envp.reserve(env_storage.size() + 1);
++  for (auto& s : env_storage)
++    envp.push_back(const_cast<char*>(s.c_str()));
++  envp.push_back(nullptr);
++
++  // File actions: give the child /dev/null on stdin (matching base behavior),
++  // then apply the fd remaps (Mojo bootstrap fd + preloaded files). dup2 clears
++  // O_CLOEXEC on the destination so it survives exec; all other inherited fds
++  // are O_CLOEXEC and close automatically. exec also resets caught signal
++  // handlers to default, so no POSIX_SPAWN_SETSIGDEF is needed.
++  posix_spawn_file_actions_t file_actions;
++  posix_spawn_file_actions_init(&file_actions);
++  posix_spawn_file_actions_addopen(&file_actions, STDIN_FILENO, "/dev/null",
++                                   O_RDONLY, 0);
++  for (const auto& remap : options->fds_to_remap) {
++    posix_spawn_file_actions_adddup2(&file_actions, remap.first, remap.second);
++  }
++  AddCloseSuperfluousFds(&file_actions, options->fds_to_remap);
++
++  pid_t child_pid = 0;
++  const char* exe_path = argv_cstr[0];
++  int spawn_rc = posix_spawn(&child_pid, exe_path, &file_actions,
++                             /*attrp=*/nullptr, argv_cstr.data(), envp.data());
++  posix_spawn_file_actions_destroy(&file_actions);
++
++  if (spawn_rc == 0 && child_pid > 0) {
++    process.process = base::Process(child_pid);
++    *launch_result = LAUNCH_RESULT_SUCCESS;
++    fprintf(stderr, "QNX:LaunchChild type=%s spawned pid=%d (posix_spawn)\n",
++            proc_type.c_str(), static_cast<int>(child_pid));
++  } else {
++    process.process = base::Process();
++    *launch_result = LAUNCH_RESULT_FAILURE;
++    fprintf(stderr,
++            "QNX:LaunchChild type=%s posix_spawn FAILED rc=%d errno=%d\n",
++            proc_type.c_str(), spawn_rc, errno);
++  }
+   return process;
+ }
+ 
+diff --git a/content/browser/renderer_host/navigation_request.cc b/content/browser/renderer_host/navigation_request.cc
+index 1ef3ee5b15..2c8ecd1a78 100644
+--- a/content/browser/renderer_host/navigation_request.cc
++++ b/content/browser/renderer_host/navigation_request.cc
+@@ -33,6 +33,7 @@
+ #include "base/strings/stringprintf.h"
+ #include "base/system/sys_info.h"
+ #include "base/task/sequenced_task_runner.h"
++#include "base/run_loop.h"
+ #include "base/threading/platform_thread.h"
+ #include "base/time/time.h"
+ #include "base/timer/elapsed_timer.h"
+@@ -5890,15 +5891,20 @@ void NavigationRequest::CommitNavigation() {
+   }
+ 
+ #if BUILDFLAG(IS_QNX)
+-  // Single-process: yield to let renderer bind NavigationClient before we send
+-  // CommitNavigation Mojo. Without this, the Mojo may be delivered before the
+-  // renderer has processed the GetInterface for NavigationClient.
++  // Yield so the renderer can bind NavigationClient before CommitNavigation.
++  // Multi-process needs a longer browser pump: is_connected() is unreliable
++  // on QNX and the renderer may still be processing frame-setup IPC.
+   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+           switches::kSingleProcess)) {
+     for (int i = 0; i < 5; i++) {
+       base::PlatformThread::YieldCurrentThread();
+       base::PlatformThread::Sleep(base::Milliseconds(10));
+     }
++  } else {
++    for (int i = 0; i < 30; i++) {
++      base::RunLoop().RunUntilIdle();
++      base::PlatformThread::Sleep(base::Milliseconds(10));
++    }
+   }
+ #endif
+ 
+diff --git a/content/browser/renderer_host/render_frame_host_impl.cc b/content/browser/renderer_host/render_frame_host_impl.cc
+index b0b249734e..59e6881a72 100644
+--- a/content/browser/renderer_host/render_frame_host_impl.cc
++++ b/content/browser/renderer_host/render_frame_host_impl.cc
+@@ -51,6 +51,8 @@
+ #include "base/types/optional_util.h"
+ #include "build/build_config.h"
+ #include "base/qnx_trace.h"
++#include "base/run_loop.h"
++#include "base/threading/platform_thread.h"
+ #include "components/download/public/common/download_url_parameters.h"
+ #include "components/viz/common/features.h"
+ #include "content/browser/about_url_loader_factory.h"
+@@ -326,6 +328,47 @@ BASE_FEATURE(kEvictOnAXEvents,
+ 
+ namespace content {
+ 
++#if BUILDFLAG(IS_QNX)
++namespace {
++
++void WaitForRendererProcessReady(RenderFrameHostImpl* frame_host) {
++  const base::TimeTicks deadline =
++      base::TimeTicks::Now() + base::Seconds(15);
++  int iterations = 0;
++  while (base::TimeTicks::Now() < deadline) {
++    base::RunLoop().RunUntilIdle();
++    base::PlatformThread::Sleep(base::Milliseconds(10));
++    ++iterations;
++    if (frame_host->GetProcess()->IsReady()) {
++      QNX_NAV_LOG_FMT("QNX:RFHI:NavClient process ready rph=%d iter=%d\n",
++                      frame_host->GetProcess()->GetID(), iterations);
++      return;
++    }
++  }
++  QNX_NAV_LOG_FMT("QNX:RFHI:NavClient process ready timeout rph=%d\n",
++                  frame_host->GetProcess()->GetID());
++}
++
++void PumpAfterNavigationClientGetInterface(RenderFrameHostImpl* frame_host) {
++  // Renderer ContentMain + BindNavigationClient typically land ~4s after the
++  // process channel connects; a shorter pump sends CommitNavigation before bind.
++  const base::TimeTicks deadline =
++      base::TimeTicks::Now() + base::Seconds(6);
++  int iterations = 0;
++  while (base::TimeTicks::Now() < deadline) {
++    base::RunLoop().RunUntilIdle();
++    base::PlatformThread::Sleep(base::Milliseconds(10));
++    ++iterations;
++  }
++  QNX_NAV_LOG_FMT(
++      "QNX:RFHI:NavClient post-GetInterface pump rph=%d iter=%d live=%d\n",
++      frame_host->GetProcess()->GetID(), iterations,
++      static_cast<int>(frame_host->IsRenderFrameLive()));
++}
++
++}  // namespace
++#endif
++
+ #if defined(AX_FAIL_FAST_BUILD)
+ // Enable fast fails on clusterfuzz and other builds used to debug Chrome,
+ // which should help narrow down illegal ax trees more quickly.
+@@ -10583,8 +10626,6 @@ void RenderFrameHostImpl::CommitNavigation(
+     }
+ 
+     QNX_TRACE_MSG("QNX:RFHI:4 preNavClient\n");
+-    mojom::NavigationClient* navigation_client =
+-        navigation_request->GetCommitNavigationClient();
+ 
+     // Record the metrics about the state of the old main frame at the moment
+     // when we navigate away from it as it matters for whether the page
+@@ -10634,6 +10675,8 @@ void RenderFrameHostImpl::CommitNavigation(
+     }
+ 
+     QNX_TRACE_MSG("QNX:RFHI:5 preSendCommit\n");
++    mojom::NavigationClient* navigation_client =
++        navigation_request->GetCommitNavigationClient();
+     SendCommitNavigation(
+         navigation_client, navigation_request, std::move(common_params),
+         std::move(commit_params), std::move(head), std::move(response_body),
+@@ -11324,6 +11367,18 @@ bool RenderFrameHostImpl::WindowManagementAllowsFullscreen() {
+ mojo::AssociatedRemote<mojom::NavigationClient>
+ RenderFrameHostImpl::GetNavigationClientFromInterfaceProvider() {
+   mojo::AssociatedRemote<mojom::NavigationClient> navigation_client_remote;
++#if BUILDFLAG(IS_QNX)
++  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
++          switches::kSingleProcess)) {
++    // Request NavigationClient only after the renderer IPC channel is up.
++    WaitForRendererProcessReady(this);
++    QNX_NAV_LOG_FMT("QNX:RFHI:NavClient GetInterface rph=%d\n",
++                    GetProcess()->GetID());
++    GetRemoteAssociatedInterfaces()->GetInterface(&navigation_client_remote);
++    PumpAfterNavigationClientGetInterface(this);
++    return navigation_client_remote;
++  }
++#endif
+   GetRemoteAssociatedInterfaces()->GetInterface(&navigation_client_remote);
+   return navigation_client_remote;
+ }
+@@ -13821,7 +13876,7 @@ void RenderFrameHostImpl::SendCommitNavigation(
+   }
+ 
+   commit_params->commit_sent = base::TimeTicks::Now();
+-  QNX_TRACE_MSG("QNX:Browser:SendCommit\n");
++  QNX_NAV_LOG_FMT("QNX:Browser:SendCommit rph=%d\n", GetProcess()->GetID());
+   navigation_client->CommitNavigation(
+       std::move(common_params), std::move(commit_params),
+       std::move(response_head), std::move(response_body),
+diff --git a/content/browser/renderer_host/render_frame_host_impl.h b/content/browser/renderer_host/render_frame_host_impl.h
+index 63b1e93e5d..14836b7357 100644
+--- a/content/browser/renderer_host/render_frame_host_impl.h
++++ b/content/browser/renderer_host/render_frame_host_impl.h
+@@ -4579,6 +4579,11 @@ class CONTENT_EXPORT RenderFrameHostImpl
+       back_forward_cache_controller_host_associated_receiver_{this};
+   mojo::AssociatedRemote<mojom::Frame> frame_;
+   mojo::AssociatedRemote<mojom::FrameBindingsControl> frame_bindings_control_;
++
++#if BUILDFLAG(IS_QNX)
++  // NavigationClient bound during RenderFrameCreated while associated IPC is
++  // still actively dispatched. Reused for the first commit on this frame.
++#endif
+   mojo::AssociatedReceiver<blink::mojom::LocalFrameHost>
+       local_frame_host_receiver_{this};
+   mojo::Receiver<blink::mojom::NonAssociatedLocalFrameHost>
+diff --git a/content/renderer/navigation_client.cc b/content/renderer/navigation_client.cc
+index 1b97577b21..b0373381d2 100644
+--- a/content/renderer/navigation_client.cc
++++ b/content/renderer/navigation_client.cc
+@@ -55,7 +55,7 @@ void NavigationClient::CommitNavigation(
+     mojom::CookieManagerInfoPtr cookie_manager_info,
+     mojom::StorageInfoPtr storage_info,
+     CommitNavigationCallback callback) {
+-  QNX_TRACE_MSG("QNX:NavClient:Commit\n");
++  QNX_NAV_LOG_FMT("QNX:NavClient:Commit pid=%d\n", static_cast<int>(getpid()));
+   DCHECK(blink::IsRequestDestinationFrame(common_params->request_destination));
+ 
+   // TODO(https://crbug.com/1467502): The reset should be done when the
+@@ -103,9 +103,17 @@ void NavigationClient::CommitFailedNavigation(
+ 
+ void NavigationClient::Bind(
+     mojo::PendingAssociatedReceiver<mojom::NavigationClient> receiver) {
++#if BUILDFLAG(IS_QNX)
++  // Bind synchronously on the current main-thread sequence. Posting to the
++  // navigation-associated task runner can defer bind/commit past the browser
++  // commit timeout when the renderer goes idle (MP white screen).
++  QNX_NAV_LOG_FMT("QNX:Nav:Bind pid=%d\n", static_cast<int>(getpid()));
++  navigation_client_receiver_.Bind(std::move(receiver));
++#else
+   navigation_client_receiver_.Bind(
+       std::move(receiver), render_frame_->GetTaskRunner(
+                                blink::TaskType::kInternalNavigationAssociated));
++#endif
+   SetDisconnectionHandler();
+ }
+ 
+diff --git a/content/renderer/render_frame_impl.cc b/content/renderer/render_frame_impl.cc
+index 501d397d80..a42765d898 100644
+--- a/content/renderer/render_frame_impl.cc
++++ b/content/renderer/render_frame_impl.cc
+@@ -2163,7 +2163,8 @@ void RenderFrameImpl::BindFrameBindingsControl(
+ 
+ void RenderFrameImpl::BindNavigationClient(
+     mojo::PendingAssociatedReceiver<mojom::NavigationClient> receiver) {
+-  QNX_TRACE_MSG("QNX:RFI:BindNavClient\n");
++  QNX_NAV_LOG_FMT("QNX:RFI:BindNavClient pid=%d\n",
++                  static_cast<int>(getpid()));
+   navigation_client_impl_ = std::make_unique<NavigationClient>(this);
+   navigation_client_impl_->Bind(std::move(receiver));
+ }
+@@ -2667,7 +2668,7 @@ void RenderFrameImpl::CommitNavigation(
+     mojom::CookieManagerInfoPtr cookie_manager_info,
+     mojom::StorageInfoPtr storage_info,
+     mojom::NavigationClient::CommitNavigationCallback commit_callback) {
+-  QNX_TRACE_MSG("QNX:RFI:CommitNav enter\n");
++  QNX_NAV_LOG("QNX:RFI:CommitNav enter\n");
+   DCHECK(navigation_client_impl_);
+   DCHECK(!blink::IsRendererDebugURL(common_params->url));
+   DCHECK(!NavigationTypeUtils::IsSameDocument(common_params->navigation_type));
+@@ -3810,7 +3811,7 @@ void RenderFrameImpl::DidCommitNavigation(
+     bool should_reset_browser_interface_broker,
+     const blink::ParsedPermissionsPolicy& permissions_policy_header,
+     const blink::DocumentPolicyFeatureState& document_policy_header) {
+-  QNX_TRACE_MSG("QNX:RFI:DidCommitNav\n");
++  QNX_NAV_LOG("QNX:RFI:DidCommitNav\n");
+   CHECK_EQ(NavigationCommitState::kWillCommit, navigation_commit_state_);
+   navigation_commit_state_ = NavigationCommitState::kDidCommit;
+ 
+@@ -4088,7 +4089,7 @@ void RenderFrameImpl::DidHandleOnloadEvents() {
+ }
+ 
+ void RenderFrameImpl::DidFinishLoad() {
+-  QNX_TRACE_MSG("QNX:RFI:DidFinishLoad\n");
++  QNX_NAV_LOG("QNX:RFI:DidFinishLoad\n");
+   TRACE_EVENT1("navigation,benchmark,rail", "RenderFrameImpl::didFinishLoad",
+                "id", routing_id_);
+   if (!frame_->Parent()) {
+diff --git a/content/shell/app/qnx_platform_stubs.cc b/content/shell/app/qnx_platform_stubs.cc
+index 4f4843ea45..fcc216d08e 100644
+--- a/content/shell/app/qnx_platform_stubs.cc
++++ b/content/shell/app/qnx_platform_stubs.cc
+@@ -29,6 +29,7 @@
+ #include "base/files/file_path_watcher.h"
+ #include "base/files/scoped_file.h"
+ #include "base/functional/callback.h"
++#include "base/memory/scoped_refptr.h"
+ #include "base/no_destructor.h"
+ #include "base/process/memory.h"
+ #include "base/process/process.h"
+@@ -214,7 +215,16 @@ void TerminateOnThread() {}
+ 
+ void PlatformThreadBase::SetName(const std::string& name) {}
+ 
+-size_t GetDefaultThreadStackSize(const pthread_attr_t& attributes) { return 0; }
++size_t GetDefaultThreadStackSize(const pthread_attr_t& attributes) {
++  // Returning 0 means "use the platform default stack". On Linux that is ~8MB,
++  // but QNX's default pthread stack is only a few hundred KB - far too small for
++  // Chromium's deep compositor/Skia raster and V8 call chains, which overflow it
++  // and crash with SIGSEGV/SIGBUS at an address next to the stack pointer a few
++  // seconds after a page starts rendering. Give every Chromium-created thread an
++  // 8MB stack to match Linux. The reservation is virtual (committed on demand),
++  // so this is cheap on the 32-bit address space.
++  return 8 * 1024 * 1024;
++}
+ 
+ ProcessId GetParentProcessId(ProcessHandle process) { return 1; }
+ 
+@@ -445,31 +455,40 @@ gfx::Image& ResourceBundle::GetNativeImageNamed(int resource_id) {
+ // =====================================================================
+ // GL/GPU stubs
+ // =====================================================================
+-#include "ui/gl/gl_context.h"
+-#include "ui/gl/gl_surface.h"
+-#include "ui/gl/gl_display.h"
+-#include "ui/gl/gl_implementation.h"
+-namespace gl::init {
+-scoped_refptr<GLContext> CreateGLContext(GLShareGroup* share_group,
+-                                         GLSurface* compatible_surface,
+-                                         const GLContextAttribs& attribs) { return nullptr; }
+-scoped_refptr<GLSurface> CreateOffscreenGLSurfaceWithFormat(
+-    GLDisplay* display, const gfx::Size& size, GLSurfaceFormat format) { return nullptr; }
+-std::vector<GLImplementationParts> GetAllowedGLImplementations() { return {}; }
+-bool GetGLWindowSystemBindingInfo(const GLVersionInfo& gl_info,
+-                                  GLWindowSystemBindingInfo* info) { return false; }
+-bool InitializeExtensionSettingsOneOffPlatform(GLDisplay* display) { return true; }
+-GLDisplay* InitializeGLOneOffPlatform(gl::GpuPreference pref) { return nullptr; }
+-bool InitializeStaticGLBindings(GLImplementationParts impl) { return false; }
+-void SetDisabledExtensionsPlatform(const std::string& disabled) {}
+-void ShutdownGLPlatform(GLDisplay* display) {}
+-}  // namespace gl::init
+-
++// NOTE: The gl::init free functions (GetAllowedGLImplementations,
++// CreateGLContext, CreateOffscreenGLSurfaceWithFormat, InitializeGLOneOffPlatform,
++// InitializeStaticGLBindings, ShutdownGLPlatform, ...) are intentionally NOT
++// stubbed here anymore. The real Ozone implementations in libgl_init.a
++// (gl_factory_ozone.cc + gl_initializer_ozone.cc) provide them and route to the
++// qnx_screen GLOzone (native EGL/GLES2 on the Adreno). Stubbing them shadowed the
++// archive members and forced GL = none (empty allowed-impl list), which broke
++// GPU compositing.
++
++// On-screen GPU output surface. The upstream Ozone implementation lives in
++// gpu/ipc/service/image_transport_surface_linux.cc, but that file is only built
++// for is_linux || is_chromeos (not QNX), so we provide the same behavior here.
++// Returning nullptr (the old stub) forced every GPU command buffer / Viz output
++// surface to fall back to offscreen + software blit to the QNX window, which is
++// why nothing ever reached our QnxScreenGLOzoneEGL::CreateViewGLSurface and the
++// browser stayed on software compositing. Route to the real Ozone view surface.
+ #include "gpu/ipc/service/image_transport_surface.h"
++#include "gpu/ipc/service/pass_through_image_transport_surface.h"
++#include "ui/gl/init/gl_factory.h"
+ namespace gpu {
+ scoped_refptr<gl::GLSurface> ImageTransportSurface::CreateNativeGLSurface(
+-    gl::GLDisplay*, base::WeakPtr<ImageTransportSurfaceDelegate>,
+-    gpu::SurfaceHandle, gl::GLSurfaceFormat) { return nullptr; }
++    gl::GLDisplay* display,
++    base::WeakPtr<ImageTransportSurfaceDelegate> delegate,
++    gpu::SurfaceHandle surface_handle,
++    gl::GLSurfaceFormat format) {
++  scoped_refptr<gl::GLSurface> surface =
++      gl::init::CreateViewGLSurface(display, surface_handle);
++  if (!surface)
++    return surface;
++  return base::MakeRefCounted<PassThroughImageTransportSurface>(
++      delegate, surface.get(), /*override_vsync_for_multi_window_swap=*/false);
++}
++// QNX has no surfaceless/overlay presenter; returning null makes Viz fall back
++// to the on-screen GLSurface path above (SkiaOutputDeviceGL).
+ scoped_refptr<gl::Presenter> ImageTransportSurface::CreatePresenter(
+     gl::GLDisplay*, base::WeakPtr<ImageTransportSurfaceDelegate>,
+     SurfaceHandle, gl::GLSurfaceFormat) { return nullptr; }
+diff --git a/content/shell/app/shell_main.cc b/content/shell/app/shell_main.cc
+index 95b638523d..661600924b 100644
+--- a/content/shell/app/shell_main.cc
++++ b/content/shell/app/shell_main.cc
+@@ -79,6 +79,7 @@ int main(int argc, const char** argv) {
+ #else
+ 
+ #if BUILDFLAG(IS_QNX)
++#include <fcntl.h>
+ #include <sys/stat.h>
+ #include <unistd.h>
+ #include <cstring>
+@@ -156,6 +157,14 @@ static void qnx_segv_handler(int sig, siginfo_t* info, void* ctx) {
+ 
+ int main(int argc, const char** argv) {
+ #if BUILDFLAG(IS_QNX)
++  // When stdout/stderr are redirected to the shared log file (not a tty) they
++  // are block-buffered, so output from a process that later hangs or is killed
++  // (e.g. an unresponsive renderer) is lost before it ever reaches disk. Make
++  // them unbuffered so every diagnostic line is flushed immediately. This is
++  // essential for debugging the multi-process child startup path, where the
++  // children produced no visible output despite running.
++  setvbuf(stdout, nullptr, _IONBF, 0);
++  setvbuf(stderr, nullptr, _IONBF, 0);
+   for (int i = 1; i < argc; ++i) {
+     if (strcmp(argv[i], "--qnx-trace") == 0)
+       g_qnx_trace_enabled = true;
+@@ -171,6 +180,35 @@ int main(int argc, const char** argv) {
+       base::QnxBerryDaemonForceEnable();
+   }
+   QNX_TRACE_MSG("QNX: main() entered\n");
++  /* Child processes are exec'd by the browser, not the launcher, so they miss
++   * launcher's log setup. Append their stdout/stderr to the shared log. */
++  {
++    bool is_child = false;
++    const char* proc_type = "";
++    for (int i = 1; i < argc; ++i) {
++      if (strncmp(argv[i], "--type=", 7) == 0 && argv[i][7]) {
++        is_child = true;
++        proc_type = argv[i] + 7;
++        break;
++      }
++    }
++    if (is_child) {
++      int lfd = open("/accounts/1000/shared/misc/berry-kbd.log",
++                     O_WRONLY | O_CREAT | O_APPEND, 0644);
++      if (lfd >= 0) {
++        dup2(lfd, 1);
++        dup2(lfd, 2);
++        if (lfd > 2)
++          close(lfd);
++      }
++      fprintf(stderr, "QNX: child process type=%s pid=%d argc=%d\n", proc_type,
++              (int)getpid(), argc);
++      for (int i = 0; i < argc && i < 20; ++i)
++        fprintf(stderr, "QNX: child argv[%d]=%s\n", i,
++                argv[i] ? argv[i] : "(null)");
++      fflush(stderr);
++    }
++  }
+   {
+     struct sigaction sa;
+     memset(&sa, 0, sizeof(sa));
+@@ -255,9 +293,16 @@ int main(int argc, const char** argv) {
+   if (!getenv("LOGNAME")) setenv("LOGNAME", "user", 1);
+   if (!getenv("SHELL")) setenv("SHELL", "/bin/sh", 1);
+   if (!getenv("LANG")) setenv("LANG", "C", 1);
+-  if (getenv("QNX_GPU_PROBE")) {
+-    if (gpu::qnx::InitializeGpuLibraries())
+-      gpu::qnx::PrintGpuInfo();
++  // Only run the standalone GPU probe when explicitly enabled (value != "0").
++  // The probe leaves an EGL display initialized and a context current on this
++  // thread, which can confuse the real GLOzone GL init, so it must stay off in
++  // normal GPU runs.
++  {
++    const char* gpu_probe = getenv("QNX_GPU_PROBE");
++    if (gpu_probe && gpu_probe[0] != '0') {
++      if (gpu::qnx::InitializeGpuLibraries())
++        gpu::qnx::ProbeGpuContext();
++    }
+   }
+   QNX_TRACE_MSG("QNX: env vars set, creating delegate\n");
+ #endif
+@@ -267,6 +312,22 @@ int main(int argc, const char** argv) {
+   params.argv = argv;
+ #if BUILDFLAG(IS_QNX)
+   QNX_TRACE_MSG("QNX: calling ContentMain\n");
++  {
++    bool is_child = false;
++    const char* proc_type = "";
++    for (int i = 1; i < argc; ++i) {
++      if (strncmp(argv[i], "--type=", 7) == 0 && argv[i][7]) {
++        is_child = true;
++        proc_type = argv[i] + 7;
++        break;
++      }
++    }
++    if (is_child) {
++      fprintf(stderr, "QNX: child calling ContentMain type=%s pid=%d\n",
++              proc_type, (int)getpid());
++      fflush(stderr);
++    }
++  }
+ #endif
+   return content::ContentMain(std::move(params));
+ }
+diff --git a/content/shell/browser/shell_content_browser_client.cc b/content/shell/browser/shell_content_browser_client.cc
+index d005de9bca..dc415c9427 100644
+--- a/content/shell/browser/shell_content_browser_client.cc
++++ b/content/shell/browser/shell_content_browser_client.cc
+@@ -63,6 +63,12 @@
+ #include "content/public/common/content_features.h"
+ #include "content/public/common/content_switch_dependent_feature_overrides.h"
+ #include "content/public/common/content_switches.h"
++#if BUILDFLAG(IS_QNX)
++#include "gpu/config/gpu_switches.h"
++#include "ui/display/display_switches.h"
++#include "ui/gl/gl_switches.h"
++#include "ui/ozone/public/ozone_switches.h"
++#endif
+ #include "content/public/common/url_constants.h"
+ #include "content/public/common/user_agent.h"
+ #include "content/shell/browser/shell.h"
+@@ -426,6 +432,29 @@ void ShellContentBrowserClient::AppendExtraCommandLineSwitches(
+   command_line->CopySwitchesFrom(*base::CommandLine::ForCurrentProcess(),
+                                  kForwardSwitches);
+ 
++#if BUILDFLAG(IS_QNX)
++  // QNX: only forward display/GPU flags to the gpu-process. Renderers must not
++  // init qnx_screen/EGL (that spins or crashes); the browser owns the window.
++  static const char* const kQnxCommonForwardSwitches[] = {
++      switches::kDisableFeatures,
++      switches::kForceDeviceScaleFactor,
++  };
++  command_line->CopySwitchesFrom(*base::CommandLine::ForCurrentProcess(),
++                                 kQnxCommonForwardSwitches);
++
++  if (command_line->GetSwitchValueASCII(switches::kProcessType) ==
++      switches::kGpuProcess) {
++    static const char* const kQnxGpuForwardSwitches[] = {
++        switches::kUseGL,
++        switches::kOzonePlatform,
++        switches::kIgnoreGpuBlocklist,
++        switches::kEnableGpuRasterization,
++    };
++    command_line->CopySwitchesFrom(*base::CommandLine::ForCurrentProcess(),
++                                   kQnxGpuForwardSwitches);
++  }
++#endif
++
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+           switches::kEnableCrashReporter)) {
+diff --git a/deploy/berry-shell-bar/bar-descriptor.xml b/deploy/berry-shell-bar/bar-descriptor.xml
+index 011f50f60e..f97fd1faca 100644
+--- a/deploy/berry-shell-bar/bar-descriptor.xml
++++ b/deploy/berry-shell-bar/bar-descriptor.xml
+@@ -2,9 +2,9 @@
+ <qnx xmlns="http://www.qnx.com/schemas/application/1.0">
+     <id>com.sw7ft.BerryShell</id>
+ 
+-    <name>Berry Browser</name>
+-    <versionNumber>1.0.0</versionNumber>
+-    <buildId>1</buildId>
++    <name>BerryBrowser V2</name>
++    <versionNumber>2.0.1</versionNumber>
++    <buildId>3</buildId>
+     <description>Chromium content_shell browser for BlackBerry 10 (QNX, on-screen via qnx_screen).</description>
+     <author>sw7ft</author>
+ 
+@@ -26,6 +26,9 @@
+     <asset path="payload/snapshot_blob.bin">snapshot_blob.bin</asset>
+     <asset path="payload/root_store.certs">root_store.certs</asset>
+ 
++    <!-- Local start page (omnibox + bookmarks) loaded by default. -->
++    <asset path="home.html">home.html</asset>
++
+     <icon>
+       <image>icon.png</image>
+     </icon>
+diff --git a/deploy/berry-shell-bar/home.html b/deploy/berry-shell-bar/home.html
+new file mode 100644
+index 0000000000..091dd0044d
+--- /dev/null
++++ b/deploy/berry-shell-bar/home.html
+@@ -0,0 +1,73 @@
++<!DOCTYPE html>
++<html>
++<head>
++<meta charset="utf-8">
++<meta name="viewport" content="width=device-width, initial-scale=1.0">
++<title>Berry Browser</title>
++<style>
++  * { box-sizing: border-box; -webkit-tap-highlight-color: rgba(0,0,0,0); }
++  html, body { margin: 0; padding: 0; height: 100%;
++    font-family: -apple-system, "Slate Pro", Arial, sans-serif;
++    background: #11161c; color: #e8eef5; }
++  .wrap { max-width: 680px; margin: 0 auto; padding: 28px 20px; }
++  .logo { text-align: center; font-size: 40px; font-weight: 700;
++    letter-spacing: .5px; margin: 18px 0 6px; }
++  .logo span { color: #4aa3ff; }
++  .tag { text-align: center; color: #7e8a99; font-size: 16px; margin-bottom: 26px; }
++  form { display: flex; gap: 10px; margin-bottom: 10px; }
++  #omni { flex: 1; font-size: 26px; padding: 16px 18px; border-radius: 12px;
++    border: 2px solid #2b3744; background: #0b0f14; color: #fff; outline: none; }
++  #omni:focus { border-color: #4aa3ff; }
++  #go { font-size: 24px; padding: 0 24px; border: none; border-radius: 12px;
++    background: #4aa3ff; color: #06243f; font-weight: 700; }
++  .hint { text-align: center; color: #5a6776; font-size: 14px; margin-bottom: 26px; }
++  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
++  .tile { display: block; text-decoration: none; text-align: center;
++    padding: 22px 8px; border-radius: 14px; background: #1b2530; color: #dce6f1;
++    font-size: 20px; border: 1px solid #26333f; }
++  .tile b { display: block; font-size: 30px; margin-bottom: 6px; }
++  .tile:active { background: #24323f; }
++</style>
++</head>
++<body>
++  <div class="wrap">
++    <div class="logo">Berry<span>Browser</span></div>
++    <div class="tag">Chromium 120 on BlackBerry 10</div>
++
++    <form id="f">
++      <input id="omni" type="text" inputmode="url" autocomplete="off"
++             autocapitalize="off" spellcheck="false"
++             placeholder="Search or type a URL">
++      <button id="go" type="submit">Go</button>
++    </form>
++    <div class="hint">Type an address (example.com) or a search, then press Enter</div>
++
++    <div class="grid">
++      <a class="tile" href="https://www.google.com/"><b>G</b>Google</a>
++      <a class="tile" href="https://en.wikipedia.org/"><b>W</b>Wikipedia</a>
++      <a class="tile" href="https://www.youtube.com/"><b>▶</b>YouTube</a>
++      <a class="tile" href="https://www.bbc.com/news"><b>📰</b>BBC News</a>
++      <a class="tile" href="https://news.ycombinator.com/"><b>Y</b>Hacker News</a>
++      <a class="tile" href="https://duckduckgo.com/"><b>🦆</b>DuckDuckGo</a>
++    </div>
++  </div>
++
++<script>
++  var f = document.getElementById('f');
++  var omni = document.getElementById('omni');
++  f.addEventListener('submit', function(e){
++    e.preventDefault();
++    var v = (omni.value || '').trim();
++    if (!v) return;
++    var isUrl = /^[a-z]+:\/\//i.test(v) ||
++      (/^[^\s]+\.[^\s]{2,}/.test(v) && !/\s/.test(v));
++    var dest;
++    if (/^[a-z]+:\/\//i.test(v)) dest = v;
++    else if (isUrl) dest = 'https://' + v;
++    else dest = 'https://www.google.com/search?q=' + encodeURIComponent(v);
++    window.location.href = dest;
++  });
++  omni.focus();
++</script>
++</body>
++</html>
+diff --git a/deploy/berry-shell-bar/launcher.c b/deploy/berry-shell-bar/launcher.c
+index 0ac560381b..2761cd0a58 100644
+--- a/deploy/berry-shell-bar/launcher.c
++++ b/deploy/berry-shell-bar/launcher.c
+@@ -78,8 +78,79 @@ static void resolve_dir(char* dir, size_t n, const char* argv0) {
+ int main(int argc, char** argv) {
+   char dir[2048];
+   resolve_dir(dir, sizeof(dir), argv[0]);
+-  chdir(dir);
++
++  /* content_shell derives its writable base (TMPDIR, shared memory, caches)
++   * from getcwd() (see shell_main.cc). The Navigator launches the .bar with cwd
++   * inside the READ-ONLY install image (/apps/<sandbox>/native), so if we leave
++   * cwd there, Chromium cannot create its tmp dir / shared memory and
++   * CHECK-crashes (SIGTRAP) ~15s in. Switch cwd to a WRITABLE sandbox dir:
++   * prefer HOME (the BB10 sandbox's writable data dir), else compute
++   * <sandbox>/data from the asset dir, else fall back to the asset dir. All
++   * assets (libs, paks, home.html) are referenced by absolute path below, so
++   * moving cwd off the asset dir is safe. */
++  char work[2048];
++  work[0] = '\0';
++  {
++    const char* home = getenv("HOME");
++    if (home && home[0] && access(home, W_OK) == 0) {
++      strncpy(work, home, sizeof(work) - 1);
++      work[sizeof(work) - 1] = '\0';
++    } else {
++      strncpy(work, dir, sizeof(work) - 1);
++      work[sizeof(work) - 1] = '\0';
++      char* p = strstr(work, "/app/native");
++      if (p) {
++        *p = '\0';
++        strncat(work, "/data", sizeof(work) - strlen(work) - 1);
++      }
++      if (access(work, W_OK) != 0) {
++        strncpy(work, dir, sizeof(work) - 1);
++        work[sizeof(work) - 1] = '\0';
++      }
++    }
++  }
++  if (work[0])
++    chdir(work);
++
++  /* Default to single-process (stable GPU + on-screen rendering). Multi-process
++   * is experimental on QNX. Enable it either via QNX_MULTI_PROCESS=1 (SSH runs)
++   * or by creating the marker file below — the Navigator UI launch can't set
++   * env vars, and a UI launch is the ONLY context where BB10 hands the app a
++   * working EGL display, so the marker lets us test MP from a real app launch
++   * without reinstalling the .bar. Remove the marker to go back to SP. */
++  const char* mp_env = getenv("QNX_MULTI_PROCESS");
++  int use_multi_process = (mp_env && mp_env[0] == '1');
++  if (!use_multi_process &&
++      access("/accounts/1000/shared/misc/berry-mp.enable", F_OK) == 0)
++    use_multi_process = 1;
++  const int use_single_process = !use_multi_process;
++
++  /* DIAGNOSTIC: the .bar runs sandboxed under a per-app uid, so its own data
++   * dir and slog2 buffer are not readable over SSH as devuser. Redirect
++   * content_shell's stdout+stderr to the SHARED folder (group-readable by
++   * devuser) so we can capture startup/crash output and the QNX_KBD_DEBUG probe
++   * from the actual app. Requires <access_shared> (declared in the descriptor).
++   * Harmless if the open fails (e.g. permission) - the app still runs. */
++  {
++    int lfd = open("/accounts/1000/shared/misc/berry-kbd.log",
++                   O_WRONLY | O_CREAT | O_TRUNC, 0644);
++    if (lfd >= 0) {
++      dup2(lfd, 1);
++      dup2(lfd, 2);
++      if (lfd > 2)
++        close(lfd);
++    }
++    setenv("QNX_KBD_DEBUG", "1", 1);
++    /* Probe already confirmed Adreno 330 / EGL 1.4 / GLES2 works in-app; the
++     * real GLOzone path now drives GL, so leave the standalone probe off to
++     * avoid leaving a stray EGL context current before content GL init. */
++    setenv("QNX_GPU_PROBE", "0", 1);
++  }
++
+   fprintf(stderr, "BerryShell: app dir = %s\n", dir);
++  fprintf(stderr, "BerryShell: work dir (cwd) = %s\n", work);
++  fprintf(stderr, "BerryShell: %s\n",
++          use_single_process ? "single-process mode" : "multi-process mode");
+ 
+   /* Bundled shared libs sit next to content_shell. */
+   {
+@@ -102,25 +173,57 @@ int main(int argc, char** argv) {
+   setenv("QNX_SCREEN_ROTATION", kRotation, 0);
+ 
+   char shell[2100];
+-  snprintf(shell, sizeof(shell), "%s/content_shell", dir);
+-
+-  const char* url = (argc > 1 && argv[1] && argv[1][0]) ? argv[1] : kDefaultUrl;
+-
+-  char* const new_argv[] = {
+-      shell,
+-      (char*)"--no-sandbox",
+-      (char*)"--no-zygote",
+-      (char*)"--single-process",
+-      (char*)"--disable-gpu",
+-      (char*)"--disable-gpu-compositing",
+-      (char*)"--ozone-platform=qnx_screen",
+-      (char*)kScaleFactor,
+-      (char*)kDisableFeatures,
+-      (char*)url,
+-      NULL,
+-  };
+-
+-  execv(shell, new_argv);
++  snprintf(shell, sizeof(shell), "%s/content_shell.bin", dir);
++
++  /* Default to the bundled start page (omnibox + bookmarks) so the user can
++   * navigate anywhere. Built from our own dir for a valid in-sandbox file://
++   * path. A URL arg overrides. */
++  char home[2300];
++  snprintf(home, sizeof(home), "file://%s/home.html", dir);
++  const char* url = (argc > 1 && argv[1] && argv[1][0]) ? argv[1] : home;
++  (void)kDefaultUrl;
++
++  char subprocess_path[2300];
++  snprintf(subprocess_path, sizeof(subprocess_path),
++           "--browser-subprocess-path=%s/content_shell.exe", dir);
++
++  /* Multi-process is the main performance win once GPU is stable: the browser
++   * UI thread stays responsive while the renderer parses/layouts in a separate
++   * process and the GPU process handles GL. QNX has no zygote (keep --no-zygote)
++   * and no sandbox (--no-sandbox). Set QNX_MULTI_PROCESS=1 to try multi-process;
++   * single-process is the default until MP GPU init is stable.
++   *
++   * Separate gpu-process on QNX currently spins/crashes (no shared Screen
++   * context with the browser window). Keep GL in the browser via --in-process-gpu
++   * while renderer/utility stay out-of-process.
++   *
++   * Children are launched by base::LaunchProcess (content/browser/
++   * child_process_launcher_helper_qnx.cc), which already forwards LD_LIBRARY_PATH
++   * and the rest of the env. Point them straight at content_shell.exe (the real
++   * binary) rather than the content_shell.bin log-and-exec wrapper: the wrapper
++   * does no env setup and only adds an extra execv hop that silently failed for
++   * children (they spawned but never reached main()). */
++  char* argv_buf[19];
++  int n = 0;
++  argv_buf[n++] = shell;
++  argv_buf[n++] = (char*)"--no-sandbox";
++  argv_buf[n++] = (char*)"--no-zygote";
++  if (use_single_process)
++    argv_buf[n++] = (char*)"--single-process";
++  if (!use_single_process) {
++    argv_buf[n++] = subprocess_path;
++    argv_buf[n++] = (char*)"--in-process-gpu";
++  }
++  argv_buf[n++] = (char*)"--use-gl=egl";
++  argv_buf[n++] = (char*)"--ozone-platform=qnx_screen";
++  argv_buf[n++] = (char*)"--ignore-gpu-blocklist";
++  argv_buf[n++] = (char*)"--enable-gpu-rasterization";
++  argv_buf[n++] = (char*)kScaleFactor;
++  argv_buf[n++] = (char*)kDisableFeatures;
++  argv_buf[n++] = (char*)url;
++  argv_buf[n++] = NULL;
++
++  execv(shell, argv_buf);
+ 
+   /* Only reached if exec fails. */
+   perror("BerryShell: execv content_shell failed");
+diff --git a/deploy/browse.sh b/deploy/browse.sh
+new file mode 100644
+index 0000000000..2325dd2e74
+--- /dev/null
++++ b/deploy/browse.sh
+@@ -0,0 +1,30 @@
++#!/bin/sh
++# Simple on-device browser launcher for BlackBerry 10 (QNX ARM).
++# Renders to the physical screen via qnx_screen, real fonts, real HTTPS certs.
++# Touch the screen to interact (tap links, scroll). Relaunch to change URL.
++#
++# Usage:
++#   ./browse.sh                         # opens google.com
++#   ./browse.sh https://en.wikipedia.org
++#   ./browse.sh https://example.com
++#
++# Stop: ./kill-content-shell.sh   (or  slay -9 content_shell)
++
++DIR="$(cd "$(dirname "$0")" && pwd)"
++export LD_LIBRARY_PATH="$DIR:$LD_LIBRARY_PATH"
++
++URL="${1:-https://www.google.com/}"
++
++# Clear any stale instance first.
++killall content_shell 2>/dev/null
++slay -9 content_shell 2>/dev/null
++sleep 1
++
++exec "$DIR/content_shell" \
++  --no-sandbox \
++  --no-zygote \
++  --single-process \
++  --disable-gpu \
++  --disable-gpu-compositing \
++  --ozone-platform=qnx_screen \
++  "$URL"
+diff --git a/deploy/mp-kill-all.sh b/deploy/mp-kill-all.sh
+new file mode 100755
+index 0000000000..b4c10e22bb
+--- /dev/null
++++ b/deploy/mp-kill-all.sh
+@@ -0,0 +1,21 @@
++#!/bin/sh
++# Stop all BerryShell / content_shell processes on Passport.
++# Multi-process failures often leave utility+renderer spinning after the browser dies.
++# Run this (or mp-test-safe's trap) until hogs is clean.
++
++killall content_shell 2>/dev/null
++killall content_shell.exe 2>/dev/null
++slay -9 content_shell 2>/dev/null
++slay -9 content_shell.exe 2>/dev/null
++slay -9 launcher 2>/dev/null
++sleep 2
++killall content_shell 2>/dev/null
++killall content_shell.exe 2>/dev/null
++slay -9 content_shell 2>/dev/null
++slay -9 content_shell.exe 2>/dev/null
++slay -9 launcher 2>/dev/null
++sleep 2
++killall content_shell 2>/dev/null
++killall content_shell.exe 2>/dev/null
++slay -9 content_shell 2>/dev/null
++slay -9 content_shell.exe 2>/dev/null
+diff --git a/deploy/mp-test-safe.sh b/deploy/mp-test-safe.sh
+new file mode 100755
+index 0000000000..85f789d625
+--- /dev/null
++++ b/deploy/mp-test-safe.sh
+@@ -0,0 +1,39 @@
++#!/bin/bash
++# One-shot multi-process debug test. Always slays on exit. No pidin, no loops.
++set -euo pipefail
++
++APP='/apps/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/native'
++DATA='/accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/data'
++MPLOG='/accounts/1000/shared/misc/berry-mp-debug.log'
++KBDLOG='/accounts/1000/shared/misc/berry-kbd.log'
++SSH_HOST="${PASSPORT_SSH:-passport}"
++WAIT_SEC="${MP_TEST_WAIT:-20}"
++
++MP_KILL='killall content_shell 2>/dev/null; killall content_shell.exe 2>/dev/null; slay -9 content_shell 2>/dev/null; slay -9 content_shell.exe 2>/dev/null; slay -9 launcher 2>/dev/null; sleep 2; killall content_shell 2>/dev/null; killall content_shell.exe 2>/dev/null; slay -9 content_shell 2>/dev/null; slay -9 content_shell.exe 2>/dev/null; slay -9 launcher 2>/dev/null; sleep 2; killall content_shell 2>/dev/null; killall content_shell.exe 2>/dev/null; slay -9 content_shell 2>/dev/null; slay -9 content_shell.exe 2>/dev/null'
++
++cleanup() {
++  ssh -o ConnectTimeout=8 "$SSH_HOST" "$MP_KILL" || true
++}
++trap cleanup EXIT
++
++echo "=== pre-kill, launch once, read logs, kill loop (single SSH) ==="
++ssh -o ConnectTimeout=10 "$SSH_HOST" "
++  $MP_KILL
++  : > '$MPLOG'
++  cd '$DATA'
++  export HOME='$DATA' LD_LIBRARY_PATH='$APP'
++  '$APP/launcher' >/dev/null 2>&1 &
++  LPID=\$!
++  sleep $WAIT_SEC
++  echo '--- mp-debug ---'
++  cat '$MPLOG'
++  echo '--- kbd tail ---'
++  tail -8 '$KBDLOG'
++  # Kill launcher first so it cannot respawn children, then sweep all content_shell.
++  slay -9 launcher 2>/dev/null
++  kill -9 \$LPID 2>/dev/null
++  $MP_KILL
++  echo done
++"
++
++echo "=== done (cleanup runs via trap) ==="
+diff --git a/gpu/ipc/service/gpu_init.cc b/gpu/ipc/service/gpu_init.cc
+index d6a0a2152b..08b5229fd6 100644
+--- a/gpu/ipc/service/gpu_init.cc
++++ b/gpu/ipc/service/gpu_init.cc
+@@ -930,7 +930,8 @@ void GpuInit::InitializeInProcess(base::CommandLine* command_line,
+       /*init_bindings=*/true,
+       /*gpu_preference=*/gl::GpuPreference::kDefault);
+   if (!gl_display) {
+-    VLOG(1) << "gl::init::InitializeGLNoExtensionsOneOff failed";
++    LOG(ERROR) << "gl::init::InitializeGLNoExtensionsOneOff failed";
++    init_successful_ = false;
+     return;
+   }
+   bool gl_disabled = gl::GetGLImplementation() == gl::kGLImplementationDisabled;
+diff --git a/gpu/qnx/gpu_qnx.cc b/gpu/qnx/gpu_qnx.cc
+index 3b8d287563..b92b4887d1 100644
+--- a/gpu/qnx/gpu_qnx.cc
++++ b/gpu/qnx/gpu_qnx.cc
+@@ -41,6 +41,13 @@ typedef int EGLint;
+ #define EGL_DEPTH_SIZE        0x3025
+ #define EGL_STENCIL_SIZE      0x3026
+ #define EGL_NONE              0x3038
++#define EGL_PBUFFER_BIT       0x0001
++#define EGL_WIDTH             0x3057
++#define EGL_HEIGHT            0x3056
++#define EGL_CONTEXT_CLIENT_VERSION 0x3098
++#define EGL_OPENGL_ES_API     0x30A0
++#define EGL_NO_CONTEXT        ((EGLContext)0)
++#define EGL_NO_SURFACE        ((EGLSurface)0)
+ 
+ // === GL types and constants ===
+ typedef unsigned int GLenum;
+@@ -59,6 +66,14 @@ typedef EGLBoolean (*PFN_eglChooseConfig)(EGLDisplay dpy, const EGLint* attribs,
+                                           EGLConfig* configs, EGLint config_size,
+                                           EGLint* num_config);
+ typedef EGLBoolean (*PFN_eglTerminate)(EGLDisplay dpy);
++typedef EGLBoolean (*PFN_eglBindAPI)(unsigned int api);
++typedef EGLSurface (*PFN_eglCreatePbufferSurface)(EGLDisplay dpy, EGLConfig config,
++                                                  const EGLint* attribs);
++typedef EGLContext (*PFN_eglCreateContext)(EGLDisplay dpy, EGLConfig config,
++                                           EGLContext share, const EGLint* attribs);
++typedef EGLBoolean (*PFN_eglMakeCurrent)(EGLDisplay dpy, EGLSurface draw,
++                                         EGLSurface read, EGLContext ctx);
++typedef EGLint (*PFN_eglGetError)(void);
+ 
+ // === GL function pointer types ===
+ typedef const GLubyte* (*PFN_glGetString)(GLenum name);
+@@ -69,16 +84,29 @@ namespace qnx {
+ 
+ // Forward declarations
+ void ShutdownGpu();
++void PrintGpuInfo();
+ 
+ // Dynamic library handles
+ static void* g_egl_lib = NULL;
+ static void* g_gles2_lib = NULL;
++static void* g_screen_lib = NULL;
++
++// QNX Screen: EGL on BB10 needs a live connection to the Screen composition
++// service (a screen_context_t) before eglGetDisplay() will succeed.
++typedef void* ScreenContext;
++typedef int (*PFN_screen_create_context)(ScreenContext* pctx, int flags);
++static ScreenContext g_screen_ctx = NULL;
+ 
+ // EGL function pointers
+ static PFN_eglGetDisplay     pfn_eglGetDisplay = NULL;
+ static PFN_eglInitialize     pfn_eglInitialize = NULL;
+ static PFN_eglChooseConfig   pfn_eglChooseConfig = NULL;
+ static PFN_eglTerminate      pfn_eglTerminate = NULL;
++static PFN_eglBindAPI        pfn_eglBindAPI = NULL;
++static PFN_eglCreatePbufferSurface pfn_eglCreatePbufferSurface = NULL;
++static PFN_eglCreateContext  pfn_eglCreateContext = NULL;
++static PFN_eglMakeCurrent    pfn_eglMakeCurrent = NULL;
++static PFN_eglGetError       pfn_eglGetError = NULL;
+ 
+ // GL function pointers
+ static PFN_glGetString       pfn_glGetString = NULL;
+@@ -92,14 +120,41 @@ static void* LoadSym(void* lib, const char* name) {
+     return sym;
+ }
+ 
++static bool EnsureScreenContext() {
++    if (g_screen_ctx)
++        return true;
++    g_screen_lib = dlopen("libscreen.so", RTLD_NOW | RTLD_GLOBAL);
++    if (!g_screen_lib) {
++        fprintf(stderr, "GPU: failed to load libscreen.so: %s\n", dlerror());
++        return false;
++    }
++    PFN_screen_create_context create_ctx =
++        (PFN_screen_create_context)dlsym(g_screen_lib, "screen_create_context");
++    if (!create_ctx) {
++        fprintf(stderr, "GPU: screen_create_context symbol missing\n");
++        return false;
++    }
++    // 0 == SCREEN_APPLICATION_CONTEXT
++    if (create_ctx(&g_screen_ctx, 0) != 0) {
++        fprintf(stderr, "GPU: screen_create_context failed\n");
++        return false;
++    }
++    fprintf(stderr, "GPU: screen context created\n");
++    return true;
++}
++
+ bool InitializeGpuLibraries() {
+-    g_egl_lib = dlopen("libEGL.so", RTLD_LAZY);
++    // On BB10/QNX, libGLESv2 is tightly coupled to internal symbols that live
++    // in libEGL (_egl_tls, _egl_default_context, _glesGetProcAddressProc, ...).
++    // libEGL MUST be loaded with RTLD_GLOBAL so those symbols enter the global
++    // scope; otherwise libGLESv2 fails to load with "unknown symbol" errors.
++    g_egl_lib = dlopen("libEGL.so", RTLD_NOW | RTLD_GLOBAL);
+     if (!g_egl_lib) {
+         fprintf(stderr, "GPU: Failed to load libEGL.so: %s\n", dlerror());
+         return false;
+     }
+ 
+-    g_gles2_lib = dlopen("libGLESv2.so", RTLD_LAZY);
++    g_gles2_lib = dlopen("libGLESv2.so", RTLD_NOW | RTLD_GLOBAL);
+     if (!g_gles2_lib) {
+         fprintf(stderr, "GPU: Failed to load libGLESv2.so: %s\n", dlerror());
+         dlclose(g_egl_lib);
+@@ -112,6 +167,13 @@ bool InitializeGpuLibraries() {
+     pfn_eglInitialize   = (PFN_eglInitialize)LoadSym(g_egl_lib, "eglInitialize");
+     pfn_eglChooseConfig = (PFN_eglChooseConfig)LoadSym(g_egl_lib, "eglChooseConfig");
+     pfn_eglTerminate    = (PFN_eglTerminate)LoadSym(g_egl_lib, "eglTerminate");
++    pfn_eglBindAPI      = (PFN_eglBindAPI)LoadSym(g_egl_lib, "eglBindAPI");
++    pfn_eglCreatePbufferSurface =
++        (PFN_eglCreatePbufferSurface)LoadSym(g_egl_lib, "eglCreatePbufferSurface");
++    pfn_eglCreateContext =
++        (PFN_eglCreateContext)LoadSym(g_egl_lib, "eglCreateContext");
++    pfn_eglMakeCurrent  = (PFN_eglMakeCurrent)LoadSym(g_egl_lib, "eglMakeCurrent");
++    pfn_eglGetError     = (PFN_eglGetError)LoadSym(g_egl_lib, "eglGetError");
+ 
+     // Resolve GL entry points
+     pfn_glGetString     = (PFN_glGetString)LoadSym(g_gles2_lib, "glGetString");
+@@ -129,19 +191,23 @@ bool InitializeGpuLibraries() {
+ 
+ bool InitializeEglDisplay(void** out_display, void** out_config) {
+     if (!pfn_eglGetDisplay || !pfn_eglInitialize || !pfn_eglChooseConfig) {
+-        fprintf(stderr, "GPU: EGL not loaded\n");
+-        return false;
++        if (!InitializeGpuLibraries())
++            return false;
+     }
++    if (!EnsureScreenContext())
++        return false;
+ 
+     EGLDisplay display = pfn_eglGetDisplay(EGL_DEFAULT_DISPLAY);
+     if (display == EGL_NO_DISPLAY) {
+-        fprintf(stderr, "GPU: eglGetDisplay failed\n");
++        fprintf(stderr, "GPU: eglGetDisplay failed (err=0x%x)\n",
++                pfn_eglGetError ? pfn_eglGetError() : 0);
+         return false;
+     }
+ 
+     EGLint major, minor;
+     if (!pfn_eglInitialize(display, &major, &minor)) {
+-        fprintf(stderr, "GPU: eglInitialize failed\n");
++        fprintf(stderr, "GPU: eglInitialize failed (err=0x%x)\n",
++                pfn_eglGetError ? pfn_eglGetError() : 0);
+         return false;
+     }
+ 
+@@ -175,6 +241,94 @@ bool InitializeEglDisplay(void** out_display, void** out_config) {
+     return true;
+ }
+ 
++bool WarmUpEglEarly() {
++    void* display = NULL;
++    void* config = NULL;
++    if (!InitializeEglDisplay(&display, &config))
++        return false;
++    fprintf(stderr, "GPU: early EGL warm-up ok display=%p config=%p\n",
++            display, config);
++    return true;
++}
++
++// Full probe: bring up an EGL display, create a tiny pbuffer + GLES2 context,
++// make it current, and print the real GL strings. This proves the Adreno
++// driver is actually usable (glGetString returns null without a current
++// context). Returns true if a context was made current.
++bool ProbeGpuContext() {
++    if (!pfn_eglGetDisplay || !pfn_eglInitialize || !pfn_eglChooseConfig ||
++        !pfn_eglCreatePbufferSurface || !pfn_eglCreateContext ||
++        !pfn_eglMakeCurrent) {
++        fprintf(stderr, "GPU: probe missing EGL entry points\n");
++        return false;
++    }
++
++    // BB10 EGL requires a Screen connection in this process first.
++    if (!EnsureScreenContext())
++        return false;
++
++    EGLDisplay display = pfn_eglGetDisplay(EGL_DEFAULT_DISPLAY);
++    if (display == EGL_NO_DISPLAY) {
++        fprintf(stderr, "GPU: eglGetDisplay failed (err=0x%x)\n",
++                pfn_eglGetError ? pfn_eglGetError() : 0);
++        return false;
++    }
++    EGLint major = 0, minor = 0;
++    if (!pfn_eglInitialize(display, &major, &minor)) {
++        fprintf(stderr, "GPU: eglInitialize failed\n");
++        return false;
++    }
++    fprintf(stderr, "GPU: EGL %d.%d initialized\n", major, minor);
++
++    if (pfn_eglBindAPI)
++        pfn_eglBindAPI(EGL_OPENGL_ES_API);
++
++    EGLint config_attribs[] = {
++        EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
++        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
++        EGL_RED_SIZE, 8,
++        EGL_GREEN_SIZE, 8,
++        EGL_BLUE_SIZE, 8,
++        EGL_ALPHA_SIZE, 8,
++        EGL_NONE
++    };
++    EGLConfig config = NULL;
++    EGLint num_configs = 0;
++    if (!pfn_eglChooseConfig(display, config_attribs, &config, 1, &num_configs) ||
++        num_configs == 0) {
++        fprintf(stderr, "GPU: eglChooseConfig(pbuffer) failed\n");
++        return false;
++    }
++
++    EGLint pbuffer_attribs[] = {EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE};
++    EGLSurface surface =
++        pfn_eglCreatePbufferSurface(display, config, pbuffer_attribs);
++    if (surface == EGL_NO_SURFACE) {
++        fprintf(stderr, "GPU: eglCreatePbufferSurface failed (err=0x%x)\n",
++                pfn_eglGetError ? pfn_eglGetError() : 0);
++        return false;
++    }
++
++    EGLint ctx_attribs[] = {EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE};
++    EGLContext context =
++        pfn_eglCreateContext(display, config, EGL_NO_CONTEXT, ctx_attribs);
++    if (context == EGL_NO_CONTEXT) {
++        fprintf(stderr, "GPU: eglCreateContext failed (err=0x%x)\n",
++                pfn_eglGetError ? pfn_eglGetError() : 0);
++        return false;
++    }
++
++    if (!pfn_eglMakeCurrent(display, surface, surface, context)) {
++        fprintf(stderr, "GPU: eglMakeCurrent failed (err=0x%x)\n",
++                pfn_eglGetError ? pfn_eglGetError() : 0);
++        return false;
++    }
++
++    fprintf(stderr, "GPU: GLES2 context current (pbuffer 1x1)\n");
++    PrintGpuInfo();
++    return true;
++}
++
+ void PrintGpuInfo() {
+     if (!pfn_glGetString) {
+         fprintf(stderr, "GPU Info: GL not loaded (software mode)\n");
+diff --git a/gpu/qnx/gpu_qnx.h b/gpu/qnx/gpu_qnx.h
+index 98ea24ab80..f954a1c2fc 100644
+--- a/gpu/qnx/gpu_qnx.h
++++ b/gpu/qnx/gpu_qnx.h
+@@ -87,6 +87,15 @@ bool InitializeEglDisplay(void** out_display, void** out_config);
+ // Print GPU vendor/renderer/version info
+ void PrintGpuInfo();
+ 
++// Create Screen connection + initialize EGL display before ContentMain.
++// BB10 rejects eglGetDisplay if Screen is set up too late in browser startup.
++// Does not create a GL context (unlike ProbeGpuContext).
++bool WarmUpEglEarly();
++
++// Full probe: init EGL, create a 1x1 pbuffer GLES2 context, make it current,
++// and print real GL strings. Proves the Adreno driver is usable.
++bool ProbeGpuContext();
++
+ // Release GPU resources
+ void ShutdownGpu();
+ 
+diff --git a/mojo/core/channel_posix.cc b/mojo/core/channel_posix.cc
+index 7f5458b434..1803123684 100644
+--- a/mojo/core/channel_posix.cc
++++ b/mojo/core/channel_posix.cc
+@@ -278,6 +278,10 @@ void ChannelPosix::WillDestroyCurrentMessageLoop() {
+ void ChannelPosix::OnFileCanReadWithoutBlocking(int fd) {
+   QNX_TRACE_FMT("QNX:Mojo:Read fd=%d\n", fd);
+   CHECK_EQ(fd, socket_.get());
++#if defined(__QNX__)
++  QNX_NAV_LOG_FMT("QNX:Mojo:ChanRead pid=%d fd=%d\n",
++                  static_cast<int>(getpid()), fd);
++#endif
+ 
+   bool validation_error = false;
+   bool read_error = false;
+diff --git a/ui/gl/init/gl_factory_ozone.cc b/ui/gl/init/gl_factory_ozone.cc
+index 0c01aea56e..194f76f561 100644
+--- a/ui/gl/init/gl_factory_ozone.cc
++++ b/ui/gl/init/gl_factory_ozone.cc
+@@ -17,12 +17,20 @@
+ #include "ui/gl/init/ozone_util.h"
+ #include "ui/gl/presenter.h"
+ 
++#include <cstdio>
++
+ namespace gl {
+ namespace init {
+ 
+ std::vector<GLImplementationParts> GetAllowedGLImplementations() {
+-  DCHECK(GetSurfaceFactoryOzone());
+-  return GetSurfaceFactoryOzone()->GetAllowedGLImplementations();
++  ui::SurfaceFactoryOzone* f = GetSurfaceFactoryOzone();
++  fprintf(stderr, "QNX GL TRACE: ozone GetAllowedGLImplementations factory=%p\n",
++          static_cast<void*>(f));
++  if (!f)
++    return {};
++  std::vector<GLImplementationParts> v = f->GetAllowedGLImplementations();
++  fprintf(stderr, "QNX GL TRACE: ozone allowed size=%zu\n", v.size());
++  return v;
+ }
+ 
+ bool GetGLWindowSystemBindingInfo(const GLVersionInfo& gl_info,
+diff --git a/ui/ozone/platform/qnx_screen/BUILD.gn b/ui/ozone/platform/qnx_screen/BUILD.gn
+index 38d2482aac..602a773274 100644
+--- a/ui/ozone/platform/qnx_screen/BUILD.gn
++++ b/ui/ozone/platform/qnx_screen/BUILD.gn
+@@ -15,6 +15,8 @@ source_set("qnx_screen") {
+     "ozone_platform_qnx_screen.h",
+     "qnx_screen_event_source.cc",
+     "qnx_screen_event_source.h",
++    "qnx_screen_gl_ozone_egl.cc",
++    "qnx_screen_gl_ozone_egl.h",
+     "qnx_screen_surface_factory.cc",
+     "qnx_screen_surface_factory.h",
+     "qnx_screen_window.cc",
+@@ -33,6 +35,7 @@ source_set("qnx_screen") {
+     "//ui/events",
+     "//ui/events/ozone/layout:layout",
+     "//ui/gfx",
++    "//ui/gl",
+     "//ui/ozone:ozone_base",
+     "//ui/ozone/common",
+     "//ui/platform_window",
+@@ -40,5 +43,6 @@ source_set("qnx_screen") {
+ 
+   libs = [
+     "screen",
++    "bps",
+   ]
+ }
+diff --git a/ui/ozone/platform/qnx_screen/ozone_platform_qnx_screen.cc b/ui/ozone/platform/qnx_screen/ozone_platform_qnx_screen.cc
+index 40ddc75340..5e02371786 100644
+--- a/ui/ozone/platform/qnx_screen/ozone_platform_qnx_screen.cc
++++ b/ui/ozone/platform/qnx_screen/ozone_platform_qnx_screen.cc
+@@ -4,6 +4,7 @@
+ #include "ui/ozone/platform/qnx_screen/ozone_platform_qnx_screen.h"
+ 
+ #include <screen/screen.h>
++#include <cstdio>
+ #include <memory>
+ 
+ #include "base/no_destructor.h"
+@@ -102,6 +103,12 @@ class OzonePlatformQnxScreen : public OzonePlatform {
+   }
+ 
+   SurfaceFactoryOzone* GetSurfaceFactoryOzone() override {
++    // In single-process mode the in-process GPU thread may query this (for GL
++    // init / GetAllowedGLImplementations) before InitializeUI() has run on the
++    // main thread. Create the factory lazily so the allowed-GL list is never
++    // empty due to init ordering (which otherwise forces GL = none and breaks
++    // GPU compositing).
++    EnsureSurfaceFactory();
+     return surface_factory_.get();
+   }
+ 
+@@ -149,16 +156,29 @@ class OzonePlatformQnxScreen : public OzonePlatform {
+     return std::make_unique<InputMethodMinimal>(dispatcher);
+   }
+ 
++  // Creates window_manager_ + surface_factory_ exactly once, regardless of
++  // which thread/init phase reaches it first.
++  void EnsureSurfaceFactory() {
++    if (surface_factory_)
++      return;
++    fprintf(stderr, "QNX GL TRACE: EnsureSurfaceFactory creating factory\n");
++    if (!window_manager_)
++      window_manager_ = std::make_unique<QnxScreenWindowManager>();
++    surface_factory_ =
++        std::make_unique<QnxScreenSurfaceFactory>(window_manager_.get());
++  }
++
++  void* GetScreenContextForGL() const { return screen_ctx_; }
++
+   bool InitializeUI(const InitParams& params) override {
++    fprintf(stderr, "QNX GL TRACE: OzonePlatform::InitializeUI\n");
+     int rc = screen_create_context(&screen_ctx_, SCREEN_APPLICATION_CONTEXT);
+     if (rc != 0) {
+       QNX_TRACE_MSG("QNX:Ozone: screen_create_context failed\n");
+       return false;
+     }
+ 
+-    window_manager_ = std::make_unique<QnxScreenWindowManager>();
+-    surface_factory_ =
+-        std::make_unique<QnxScreenSurfaceFactory>(window_manager_.get());
++    EnsureSurfaceFactory();
+ 
+     event_source_ = std::make_unique<QnxScreenEventSource>(
+         screen_ctx_, window_manager_.get());
+@@ -176,12 +196,8 @@ class OzonePlatformQnxScreen : public OzonePlatform {
+   }
+ 
+   void InitializeGPU(const InitParams& params) override {
+-    if (!surface_factory_) {
+-      if (!window_manager_)
+-        window_manager_ = std::make_unique<QnxScreenWindowManager>();
+-      surface_factory_ =
+-          std::make_unique<QnxScreenSurfaceFactory>(window_manager_.get());
+-    }
++    fprintf(stderr, "QNX GL TRACE: OzonePlatform::InitializeGPU\n");
++    EnsureSurfaceFactory();
+   }
+ 
+  private:
+@@ -202,4 +218,12 @@ OzonePlatform* CreateOzonePlatformQnx_screen() {
+   return new OzonePlatformQnxScreen();
+ }
+ 
++void* GetQnxScreenApplicationContext() {
++  if (!OzonePlatform::IsInitialized())
++    return nullptr;
++  auto* platform =
++      static_cast<OzonePlatformQnxScreen*>(OzonePlatform::GetInstance());
++  return platform ? platform->GetScreenContextForGL() : nullptr;
++}
++
+ }  // namespace ui
+diff --git a/ui/ozone/platform/qnx_screen/ozone_platform_qnx_screen.h b/ui/ozone/platform/qnx_screen/ozone_platform_qnx_screen.h
+index beffad96bd..bfc352c1dc 100644
+--- a/ui/ozone/platform/qnx_screen/ozone_platform_qnx_screen.h
++++ b/ui/ozone/platform/qnx_screen/ozone_platform_qnx_screen.h
+@@ -9,6 +9,10 @@ namespace ui {
+ class OzonePlatform;
+ OzonePlatform* CreateOzonePlatformQnx_screen();
+ 
++// Returns the Screen application context created in InitializeUI, or null before
++// UI init. GL init on the in-process GPU thread must reuse this on BB10.
++void* GetQnxScreenApplicationContext();
++
+ }  // namespace ui
+ 
+ #endif  // UI_OZONE_PLATFORM_QNX_SCREEN_OZONE_PLATFORM_QNX_SCREEN_H_
+diff --git a/ui/ozone/platform/qnx_screen/qnx_screen_event_source.cc b/ui/ozone/platform/qnx_screen/qnx_screen_event_source.cc
+index 2763ab6c4a..9d0a4cee8f 100644
+--- a/ui/ozone/platform/qnx_screen/qnx_screen_event_source.cc
++++ b/ui/ozone/platform/qnx_screen/qnx_screen_event_source.cc
+@@ -1,10 +1,20 @@
+ #include "ui/ozone/platform/qnx_screen/qnx_screen_event_source.h"
++#include <bps/bps.h>
++#include <bps/event.h>
++#include <bps/navigator.h>
++#include <bps/screen.h>
+ #include <screen/screen.h>
++#include <sys/keycodes.h>
+ #include <unistd.h>
++#include <cstdarg>
++#include <cstdio>
++#include <cstdlib>
+ #include "base/qnx_trace.h"
+ #include "base/time/time.h"
+ #include "ui/events/event.h"
+ #include "ui/events/types/event_type.h"
++#include "ui/events/keycodes/dom/dom_code.h"
++#include "ui/events/keycodes/dom/dom_key.h"
+ #include "ui/events/keycodes/keyboard_codes.h"
+ #include "ui/ozone/platform/qnx_screen/qnx_screen_input_callback.h"
+ #include "ui/ozone/platform/qnx_screen/qnx_screen_overlay_callback.h"
+@@ -16,10 +26,43 @@
+ 
+ namespace ui {
+ 
++// Lightweight, crash-safe input diagnostic, independent of the heavy --qnx-trace
++// firehose (which crashes under load via libc %s formatting). Enable with
++// QNX_KBD_DEBUG=1; logs integers only via a single write(2).
++static bool QnxKbdDbg() {
++  static const bool v = getenv("QNX_KBD_DEBUG") != nullptr;
++  return v;
++}
++static void QnxKbdLogf(const char* fmt, ...) {
++  if (!QnxKbdDbg())
++    return;
++  char b[128];
++  va_list ap;
++  va_start(ap, fmt);
++  int n = vsnprintf(b, sizeof(b), fmt, ap);
++  va_end(ap);
++  if (n > 0)
++    ::write(2, b, n);
++}
++
+ QnxScreenEventSource::QnxScreenEventSource(screen_context_t ctx,
+                                            QnxScreenWindowManager* wm)
+     : ctx_(ctx), window_manager_(wm) {
+-  screen_create_event(&event_);
++  // On BB10 the hardware keyboard is delivered only through BPS/Navigator, not
++  // via raw screen_get_event(). Register a BPS channel on this (UI) thread and
++  // route both libscreen and navigator events through it. The header explicitly
++  // forbids mixing screen_get_event() with BPS, so PollEvents drains via
++  // bps_get_event() below. navigator_request_events() is what makes the
++  // Navigator treat us as the focused app and route keystrokes here.
++  if (bps_initialize() != BPS_SUCCESS)
++    QnxKbdLogf("KBD:bps_initialize FAILED\n");
++  bps_initialized_ = true;
++  if (screen_request_events(ctx_) != BPS_SUCCESS)
++    QnxKbdLogf("KBD:screen_request_events FAILED\n");
++  if (navigator_request_events(0) != BPS_SUCCESS)
++    QnxKbdLogf("KBD:navigator_request_events FAILED\n");
++  QnxKbdLogf("KBD:bps registered ok\n");
++
+   poll_timer_.Start(FROM_HERE, base::Milliseconds(8),
+                     base::BindRepeating(&QnxScreenEventSource::PollEvents,
+                                         base::Unretained(this)));
+@@ -27,7 +70,11 @@ QnxScreenEventSource::QnxScreenEventSource(screen_context_t ctx,
+ 
+ QnxScreenEventSource::~QnxScreenEventSource() {
+   poll_timer_.Stop();
+-  if (event_) screen_destroy_event(event_);
++  if (bps_initialized_) {
++    screen_stop_events(ctx_);
++    bps_shutdown();
++    bps_initialized_ = false;
++  }
+ }
+ 
+ void QnxScreenEventSource::PollEvents() {
+@@ -36,13 +83,42 @@ void QnxScreenEventSource::PollEvents() {
+   if ((s_poll_count++ % 1250) == 0)
+     QNX_TRACE_FMT("QNX:Evt: poll alive #%lu\n", s_poll_count);
+ 
++  // Drain all currently-queued BPS events (non-blocking, timeout 0). libscreen
++  // input (touch + hardware keyboard) and navigator lifecycle both arrive here.
+   while (true) {
+-    if (screen_get_event(ctx_, event_, 0) != 0) break;
+-    int type = SCREEN_EVENT_NONE;
+-    screen_get_event_property_iv(event_, SCREEN_PROPERTY_TYPE, &type);
+-    if (type == SCREEN_EVENT_NONE) break;
+-    QNX_TRACE_FMT("QNX:Evt: got screen event type=%d\n", type);
+-    ProcessEvent(event_);
++    bps_event_t* event = nullptr;
++    if (bps_get_event(&event, 0) != BPS_SUCCESS || !event)
++      break;
++
++    int domain = bps_event_get_domain(event);
++    if (domain == screen_get_domain()) {
++      screen_event_t se = screen_event_get_event(event);
++      int type = SCREEN_EVENT_NONE;
++      screen_get_event_property_iv(se, SCREEN_PROPERTY_TYPE, &type);
++      QNX_TRACE_FMT("QNX:Evt: got screen event type=%d\n", type);
++      QnxKbdLogf("KBD:evt type=%d\n", type);
++      ProcessEvent(se);
++    } else if (domain == navigator_get_domain()) {
++      // We registered with navigator_request_events() so the hardware keyboard
++      // is routed to us. That registration also makes us responsible for the
++      // orientation handshake: the Navigator sends NAVIGATOR_ORIENTATION_CHECK
++      // at launch (and on rotation) and BLOCKS the app window (white screen,
++      // then force-kill after a timeout) until we reply. We render a fixed
++      // full-display window and manage rotation ourselves via
++      // QNX_SCREEN_ROTATION, so we decline rotation and immediately ack.
++      int code = bps_event_get_code(event);
++      QnxKbdLogf("KBD:nav code=%d\n", code);
++      switch (code) {
++        case NAVIGATOR_ORIENTATION_CHECK:
++          navigator_orientation_check_response(event, false /*will_rotate*/);
++          break;
++        case NAVIGATOR_ORIENTATION:
++          navigator_done_orientation(event);
++          break;
++        default:
++          break;
++      }
++    }
+   }
+ 
+   if (ConsumeQnxScreenRepaintRequest())
+@@ -91,20 +167,121 @@ void QnxScreenEventSource::ProcessTouchEvent(screen_event_t ev, int type) {
+   DispatchEvent(&touch);
+ }
+ 
++namespace {
++
++struct QnxKeyMap {
++  KeyboardCode key_code = VKEY_UNKNOWN;
++  DomCode dom_code = DomCode::NONE;
++  DomKey dom_key = DomKey::NONE;
++  bool valid = false;
++};
++
++// Translate a QNX Screen key symbol (sys/keycodes.h) into the Chromium key
++// triple. Printable symbols are Unicode code points; special keys live in the
++// Unicode private-use area (KEYCODE_PC_KEYS based).
++QnxKeyMap MapQnxKey(int sym) {
++  QnxKeyMap m;
++  switch (sym) {
++    case KEYCODE_RETURN:
++    case KEYCODE_KP_ENTER:
++      m = {VKEY_RETURN, DomCode::ENTER, DomKey::ENTER, true};
++      return m;
++    case KEYCODE_BACKSPACE:
++      m = {VKEY_BACK, DomCode::BACKSPACE, DomKey::BACKSPACE, true};
++      return m;
++    case KEYCODE_TAB:
++      m = {VKEY_TAB, DomCode::TAB, DomKey::TAB, true};
++      return m;
++    case KEYCODE_ESCAPE:
++      m = {VKEY_ESCAPE, DomCode::ESCAPE, DomKey::ESCAPE, true};
++      return m;
++    case KEYCODE_LEFT:
++      m = {VKEY_LEFT, DomCode::ARROW_LEFT, DomKey::ARROW_LEFT, true};
++      return m;
++    case KEYCODE_RIGHT:
++      m = {VKEY_RIGHT, DomCode::ARROW_RIGHT, DomKey::ARROW_RIGHT, true};
++      return m;
++    case KEYCODE_UP:
++      m = {VKEY_UP, DomCode::ARROW_UP, DomKey::ARROW_UP, true};
++      return m;
++    case KEYCODE_DOWN:
++      m = {VKEY_DOWN, DomCode::ARROW_DOWN, DomKey::ARROW_DOWN, true};
++      return m;
++    case KEYCODE_HOME:
++      m = {VKEY_HOME, DomCode::HOME, DomKey::HOME, true};
++      return m;
++    case KEYCODE_END:
++      m = {VKEY_END, DomCode::END, DomKey::END, true};
++      return m;
++    case KEYCODE_PG_UP:
++      m = {VKEY_PRIOR, DomCode::PAGE_UP, DomKey::PAGE_UP, true};
++      return m;
++    case KEYCODE_PG_DOWN:
++      m = {VKEY_NEXT, DomCode::PAGE_DOWN, DomKey::PAGE_DOWN, true};
++      return m;
++    case KEYCODE_DELETE:
++      m = {VKEY_DELETE, DomCode::DEL, DomKey::DEL, true};
++      return m;
++    case KEYCODE_INSERT:
++      m = {VKEY_INSERT, DomCode::INSERT, DomKey::INSERT, true};
++      return m;
++    default:
++      break;
++  }
++
++  // Printable BMP character (everything below the private-use area). The symbol
++  // already reflects Shift (e.g. 'A' vs 'a'), so carry it as the DomKey so the
++  // InputMethod inserts the right text. VKEY is best-effort for shortcuts.
++  if (sym >= 0x20 && sym < 0xE000) {
++    m.dom_key = DomKey::FromCharacter(sym);
++    m.valid = true;
++    if (sym >= 'a' && sym <= 'z')
++      m.key_code = static_cast<KeyboardCode>(VKEY_A + (sym - 'a'));
++    else if (sym >= 'A' && sym <= 'Z')
++      m.key_code = static_cast<KeyboardCode>(VKEY_A + (sym - 'A'));
++    else if (sym >= '0' && sym <= '9')
++      m.key_code = static_cast<KeyboardCode>(VKEY_0 + (sym - '0'));
++    else if (sym == ' ')
++      m = {VKEY_SPACE, DomCode::SPACE, DomKey::FromCharacter(' '), true};
++  }
++  return m;
++}
++
++}  // namespace
++
+ void QnxScreenEventSource::ProcessKeyboardEvent(screen_event_t ev) {
+-  int flags = 0;
+-  screen_get_event_property_iv(ev, SCREEN_PROPERTY_FLAGS, &flags);
++  int kflags = 0;
++  screen_get_event_property_iv(ev, SCREEN_PROPERTY_KEY_FLAGS, &kflags);
+   int sym = 0;
+   screen_get_event_property_iv(ev, SCREEN_PROPERTY_KEY_SYM, &sym);
+-  bool press = (flags & 1);
++  int mods = 0;
++  screen_get_event_property_iv(ev, SCREEN_PROPERTY_KEY_MODIFIERS, &mods);
++
++  bool down = (kflags & SCREEN_FLAG_KEY_DOWN) != 0;
+ 
+   auto key_cb = GetQnxScreenKeyCallback();
+-  if (key_cb && key_cb(sym, press))
++  if (key_cb && key_cb(sym, down))
++    return;
++
++  QnxKeyMap m = MapQnxKey(sym);
++  QNX_TRACE_FMT("QNX:Key: sym=0x%x down=%d vk=%d mods=0x%x valid=%d\n", sym,
++                down ? 1 : 0, m.key_code, mods, m.valid ? 1 : 0);
++  QnxKbdLogf("KBD:key sym=0x%x down=%d vk=%d mods=0x%x valid=%d\n", sym,
++             down ? 1 : 0, m.key_code, mods, m.valid ? 1 : 0);
++  if (!m.valid)
+     return;
+ 
+-  EventType et = press ? ET_KEY_PRESSED : ET_KEY_RELEASED;
+-  KeyboardCode vk = static_cast<KeyboardCode>(sym & 0xFF);
+-  KeyEvent key(et, vk, 0);
++  int flags = 0;
++  if (mods & KEYMOD_SHIFT)
++    flags |= EF_SHIFT_DOWN;
++  if (mods & KEYMOD_CTRL)
++    flags |= EF_CONTROL_DOWN;
++  if (mods & KEYMOD_ALT)
++    flags |= EF_ALT_DOWN;
++
++  EventType et = down ? ET_KEY_PRESSED : ET_KEY_RELEASED;
++  KeyEvent key(et, m.key_code, m.dom_code, flags, m.dom_key,
++               base::TimeTicks::Now());
+   DispatchEvent(&key);
+ }
+ 
+diff --git a/ui/ozone/platform/qnx_screen/qnx_screen_event_source.h b/ui/ozone/platform/qnx_screen/qnx_screen_event_source.h
+index ba494e2f50..06487b312b 100644
+--- a/ui/ozone/platform/qnx_screen/qnx_screen_event_source.h
++++ b/ui/ozone/platform/qnx_screen/qnx_screen_event_source.h
+@@ -1,5 +1,5 @@
+ // Copyright 2025 SW7FT. All rights reserved.
+-// Event source for QNX Screen (touch, keyboard) via screen_get_event
++// Event source for QNX Screen (touch, keyboard) via BPS/Navigator
+ 
+ #ifndef UI_OZONE_PLATFORM_QNX_SCREEN_QNX_SCREEN_EVENT_SOURCE_H_
+ #define UI_OZONE_PLATFORM_QNX_SCREEN_QNX_SCREEN_EVENT_SOURCE_H_
+@@ -28,7 +28,7 @@ class QnxScreenEventSource : public PlatformEventSource {
+   void RepaintToolbar();
+ 
+   screen_context_t ctx_;
+-  screen_event_t event_ = nullptr;
++  bool bps_initialized_ = false;
+   raw_ptr<QnxScreenWindowManager> window_manager_;
+   base::RepeatingTimer poll_timer_;
+ };
+diff --git a/ui/ozone/platform/qnx_screen/qnx_screen_gl_ozone_egl.cc b/ui/ozone/platform/qnx_screen/qnx_screen_gl_ozone_egl.cc
+new file mode 100644
+index 0000000000..61762176ee
+--- /dev/null
++++ b/ui/ozone/platform/qnx_screen/qnx_screen_gl_ozone_egl.cc
+@@ -0,0 +1,180 @@
++// Copyright 2025 SW7FT. All rights reserved.
++
++#include "ui/ozone/platform/qnx_screen/qnx_screen_gl_ozone_egl.h"
++
++#include <dlfcn.h>
++
++#include "base/logging.h"
++#include "base/memory/scoped_refptr.h"
++#include "base/native_library.h"
++#include "ui/gl/gl_context.h"
++#include "ui/gl/gl_context_egl.h"
++#include "ui/gl/gl_display.h"
++#include "ui/gl/gl_implementation.h"
++#include "ui/gl/gl_surface.h"
++#include "ui/gl/gl_surface_egl.h"
++#include "ui/ozone/platform/qnx_screen/qnx_screen_window.h"
++#include "ui/ozone/platform/qnx_screen/qnx_screen_window_manager.h"
++
++namespace ui {
++namespace {
++
++// BB10 EGL requires a live connection to the Screen composition service (a
++// screen_context_t) in this process before eglGetDisplay() will succeed. We
++// dlopen libscreen and create one lazily; loaded with RTLD_GLOBAL so libGLESv2
++// can also resolve any Screen-side symbols it needs.
++typedef void* ScreenContext;
++typedef int (*PFN_screen_create_context)(ScreenContext* pctx, int flags);
++void* g_screen_lib = nullptr;
++ScreenContext g_screen_ctx = nullptr;
++
++// BB10's EGL advertises EGL_NV_post_sub_buffer, so Chromium's display
++// compositor (SkiaOutputDeviceGL) presents only the damaged sub-rect via
++// eglPostSubBufferNV after the first full frame. On this driver that partial
++// present corrupts the window: the page renders correctly once, then tiles /
++// shears across the panel on subsequent frames. Forcing SupportsPostSubBuffer()
++// to false makes the compositor always swap full frames (the upstream
++// disable_post_sub_buffers_for_onscreen_surfaces workaround does the same, but
++// that path needs GPU-info-based bug-list matching which we don't have here).
++class QnxNativeViewGLSurfaceEGL : public gl::NativeViewGLSurfaceEGL {
++ public:
++  QnxNativeViewGLSurfaceEGL(gl::GLDisplayEGL* display,
++                            EGLNativeWindowType window)
++      : gl::NativeViewGLSurfaceEGL(display, window, nullptr) {}
++
++  bool SupportsPostSubBuffer() override { return false; }
++
++ protected:
++  ~QnxNativeViewGLSurfaceEGL() override = default;
++};
++
++void EnsureScreenContext() {
++  if (g_screen_ctx)
++    return;
++  if (!g_screen_lib)
++    g_screen_lib = dlopen("libscreen.so", RTLD_NOW | RTLD_GLOBAL);
++  if (!g_screen_lib) {
++    LOG(ERROR) << "QNX GL: dlopen libscreen.so failed: " << dlerror();
++    return;
++  }
++  auto create_ctx = reinterpret_cast<PFN_screen_create_context>(
++      dlsym(g_screen_lib, "screen_create_context"));
++  if (!create_ctx) {
++    LOG(ERROR) << "QNX GL: screen_create_context symbol missing";
++    return;
++  }
++  if (create_ctx(&g_screen_ctx, 0) != 0)  // 0 == SCREEN_APPLICATION_CONTEXT
++    LOG(ERROR) << "QNX GL: screen_create_context failed";
++  else
++    fprintf(stderr, "QNX GL: screen context created on GL thread\n");
++}
++
++}  // namespace
++
++QnxScreenGLOzoneEGL::QnxScreenGLOzoneEGL(QnxScreenWindowManager* window_manager)
++    : window_manager_(window_manager) {}
++
++QnxScreenGLOzoneEGL::~QnxScreenGLOzoneEGL() = default;
++
++scoped_refptr<gl::GLContext> QnxScreenGLOzoneEGL::CreateGLContext(
++    gl::GLShareGroup* share_group,
++    gl::GLSurface* compatible_surface,
++    const gl::GLContextAttribs& attribs) {
++  // The BB10 Adreno 330 driver advertises OpenGL ES 2.0 yet still exports ES3
++  // entry points that dispatch through null (e.g. glGetInternalformativ -> pc=0).
++  // Chromium defaults to requesting an ES3 context (client_major_es_version = 3)
++  // and then probes ES3 features, which crashes. Force every context to ES2 so
++  // the ES3 code paths are never taken.
++  gl::GLContextAttribs es2 = attribs;
++  es2.client_major_es_version = 2;
++  es2.client_minor_es_version = 0;
++  fprintf(stderr, "QNX GL TRACE: CreateGLContext (forced ES2)\n");
++  scoped_refptr<gl::GLContext> ctx = gl::InitializeGLContext(
++      base::MakeRefCounted<gl::GLContextEGL>(share_group), compatible_surface,
++      es2);
++  fprintf(stderr, "QNX GL TRACE: CreateGLContext -> %s\n",
++          ctx ? "ok" : "NULL");
++  return ctx;
++}
++
++scoped_refptr<gl::GLSurface> QnxScreenGLOzoneEGL::CreateViewGLSurface(
++    gl::GLDisplay* display,
++    gfx::AcceleratedWidget widget) {
++  QnxScreenWindow* window = window_manager_->GetWindow(widget);
++  if (!window || !window->screen_window()) {
++    LOG(ERROR) << "QNX GL: no screen_window for widget " << widget;
++    return nullptr;
++  }
++  // On QNX, EGLNativeWindowType is khronos_uintptr_t; the BB10 driver expects
++  // the screen_window_t handle passed straight to eglCreateWindowSurface.
++  EGLNativeWindowType native =
++      reinterpret_cast<EGLNativeWindowType>(window->screen_window());
++  fprintf(stderr, "QNX GL TRACE: CreateViewGLSurface widget=%u win=%p\n",
++          widget, window->screen_window());
++  scoped_refptr<gl::GLSurface> surface = gl::InitializeGLSurface(
++      base::MakeRefCounted<QnxNativeViewGLSurfaceEGL>(
++          display->GetAs<gl::GLDisplayEGL>(), native));
++  if (surface) {
++    gfx::Size sz = surface->GetSize();
++    fprintf(stderr,
++            "QNX GL TRACE: CreateViewGLSurface -> ok, EGL surface size=%dx%d\n",
++            sz.width(), sz.height());
++  } else {
++    fprintf(stderr,
++            "QNX GL TRACE: CreateViewGLSurface -> NULL (eglCreateWindowSurface "
++            "failed)\n");
++  }
++  return surface;
++}
++
++scoped_refptr<gl::GLSurface> QnxScreenGLOzoneEGL::CreateOffscreenGLSurface(
++    gl::GLDisplay* display,
++    const gfx::Size& size) {
++  fprintf(stderr, "QNX GL TRACE: CreateOffscreenGLSurface %dx%d\n",
++          size.width(), size.height());
++  return gl::InitializeGLSurface(base::MakeRefCounted<gl::PbufferGLSurfaceEGL>(
++      display->GetAs<gl::GLDisplayEGL>(), size));
++}
++
++gl::EGLDisplayPlatform QnxScreenGLOzoneEGL::GetNativeDisplay() {
++  EnsureScreenContext();
++  fprintf(stderr, "QNX GL: GetNativeDisplay using EGL_DEFAULT_DISPLAY "
++                    "(screen_context=%p)\n",
++          g_screen_ctx);
++  return gl::EGLDisplayPlatform(EGL_DEFAULT_DISPLAY);
++}
++
++bool QnxScreenGLOzoneEGL::LoadGLES2Bindings(
++    const gl::GLImplementationParts& implementation) {
++  EnsureScreenContext();
++
++  // Load libEGL FIRST and with RTLD_GLOBAL: on BB10 libGLESv2 resolves internal
++  // symbols (_egl_tls, _egl_default_context, _glesGetProcAddressProc, ...) from
++  // libEGL's global scope. The stock loader (egl_util.cc) loads GLES first,
++  // without RTLD_GLOBAL, and uses libGLESv2.so.2 (device has .so.1) - all wrong
++  // for QNX, hence this custom path.
++  void* egl = dlopen("libEGL.so", RTLD_NOW | RTLD_GLOBAL);
++  if (!egl) {
++    LOG(ERROR) << "QNX GL: dlopen libEGL.so failed: " << dlerror();
++    return false;
++  }
++  void* gles = dlopen("libGLESv2.so", RTLD_NOW | RTLD_GLOBAL);
++  if (!gles) {
++    LOG(ERROR) << "QNX GL: dlopen libGLESv2.so failed: " << dlerror();
++    return false;
++  }
++
++  auto get_proc = reinterpret_cast<gl::GLGetProcAddressProc>(
++      dlsym(egl, "eglGetProcAddress"));
++  if (!get_proc) {
++    LOG(ERROR) << "QNX GL: eglGetProcAddress not found in libEGL";
++    return false;
++  }
++  gl::SetGLGetProcAddressProc(get_proc);
++  gl::AddGLNativeLibrary(static_cast<base::NativeLibrary>(egl));
++  gl::AddGLNativeLibrary(static_cast<base::NativeLibrary>(gles));
++  LOG(WARNING) << "QNX GL: native EGL/GLES2 bindings loaded";
++  return true;
++}
++
++}  // namespace ui
+diff --git a/ui/ozone/platform/qnx_screen/qnx_screen_gl_ozone_egl.h b/ui/ozone/platform/qnx_screen/qnx_screen_gl_ozone_egl.h
+new file mode 100644
+index 0000000000..d0f220d270
+--- /dev/null
++++ b/ui/ozone/platform/qnx_screen/qnx_screen_gl_ozone_egl.h
+@@ -0,0 +1,49 @@
++// Copyright 2025 SW7FT. All rights reserved.
++// EGL/GLES2 GLOzone backend for the QNX Screen Ozone platform (Adreno 330).
++
++#ifndef UI_OZONE_PLATFORM_QNX_SCREEN_QNX_SCREEN_GL_OZONE_EGL_H_
++#define UI_OZONE_PLATFORM_QNX_SCREEN_QNX_SCREEN_GL_OZONE_EGL_H_
++
++#include "base/memory/raw_ptr.h"
++#include "ui/ozone/common/gl_ozone_egl.h"
++
++namespace ui {
++
++class QnxScreenWindowManager;
++
++// Bridges Chromium's GL stack to BB10's native EGL/GLES2 (libEGL/libGLESv2)
++// over a QNX Screen window. View surfaces present via eglSwapBuffers directly to
++// the on-screen screen_window_t; offscreen surfaces use pbuffers.
++class QnxScreenGLOzoneEGL : public GLOzoneEGL {
++ public:
++  explicit QnxScreenGLOzoneEGL(QnxScreenWindowManager* window_manager);
++  ~QnxScreenGLOzoneEGL() override;
++
++  QnxScreenGLOzoneEGL(const QnxScreenGLOzoneEGL&) = delete;
++  QnxScreenGLOzoneEGL& operator=(const QnxScreenGLOzoneEGL&) = delete;
++
++  // GLOzone:
++  scoped_refptr<gl::GLContext> CreateGLContext(
++      gl::GLShareGroup* share_group,
++      gl::GLSurface* compatible_surface,
++      const gl::GLContextAttribs& attribs) override;
++  scoped_refptr<gl::GLSurface> CreateViewGLSurface(
++      gl::GLDisplay* display,
++      gfx::AcceleratedWidget window) override;
++  scoped_refptr<gl::GLSurface> CreateOffscreenGLSurface(
++      gl::GLDisplay* display,
++      const gfx::Size& size) override;
++
++ protected:
++  // GLOzoneEGL:
++  gl::EGLDisplayPlatform GetNativeDisplay() override;
++  bool LoadGLES2Bindings(
++      const gl::GLImplementationParts& implementation) override;
++
++ private:
++  raw_ptr<QnxScreenWindowManager> window_manager_;
++};
++
++}  // namespace ui
++
++#endif  // UI_OZONE_PLATFORM_QNX_SCREEN_QNX_SCREEN_GL_OZONE_EGL_H_
+diff --git a/ui/ozone/platform/qnx_screen/qnx_screen_surface_factory.cc b/ui/ozone/platform/qnx_screen/qnx_screen_surface_factory.cc
+index e2cea0570a..e4831ebcfc 100644
+--- a/ui/ozone/platform/qnx_screen/qnx_screen_surface_factory.cc
++++ b/ui/ozone/platform/qnx_screen/qnx_screen_surface_factory.cc
+@@ -15,6 +15,8 @@
+ #include "third_party/skia/include/core/SkSurface.h"
+ #include "ui/gfx/skia_util.h"
+ #include "ui/gfx/vsync_provider.h"
++#include "ui/gl/gl_implementation.h"
++#include "ui/ozone/platform/qnx_screen/qnx_screen_gl_ozone_egl.h"
+ #include "ui/ozone/platform/qnx_screen/qnx_screen_window.h"
+ #include "ui/ozone/platform/qnx_screen/qnx_screen_window_manager.h"
+ #include "ui/ozone/platform/qnx_screen/qnx_screen_overlay_callback.h"
+@@ -131,13 +133,27 @@ class QnxScreenCanvas : public SurfaceOzoneCanvas {
+ 
+ QnxScreenSurfaceFactory::QnxScreenSurfaceFactory(
+     QnxScreenWindowManager* window_manager)
+-    : window_manager_(window_manager) {}
++    : window_manager_(window_manager),
++      egl_ozone_(std::make_unique<QnxScreenGLOzoneEGL>(window_manager)) {}
+ 
+ QnxScreenSurfaceFactory::~QnxScreenSurfaceFactory() = default;
+ 
+ std::vector<gl::GLImplementationParts>
+ QnxScreenSurfaceFactory::GetAllowedGLImplementations() {
+-  return {};
++  // Native EGL/GLES2 (Adreno 330). Software is still used when --disable-gpu is
++  // set; Chromium only routes to the GLOzone when GPU is enabled.
++  fprintf(stderr, "QNX GL: GetAllowedGLImplementations -> EGLGLES2\n");
++  return {gl::GLImplementationParts(gl::kGLImplementationEGLGLES2)};
++}
++
++GLOzone* QnxScreenSurfaceFactory::GetGLOzone(
++    const gl::GLImplementationParts& implementation) {
++  switch (implementation.gl) {
++    case gl::kGLImplementationEGLGLES2:
++      return egl_ozone_.get();
++    default:
++      return nullptr;
++  }
+ }
+ 
+ std::unique_ptr<SurfaceOzoneCanvas>
+diff --git a/ui/ozone/platform/qnx_screen/qnx_screen_surface_factory.h b/ui/ozone/platform/qnx_screen/qnx_screen_surface_factory.h
+index c1863236e9..ded53de05b 100644
+--- a/ui/ozone/platform/qnx_screen/qnx_screen_surface_factory.h
++++ b/ui/ozone/platform/qnx_screen/qnx_screen_surface_factory.h
+@@ -4,11 +4,14 @@
+ #ifndef UI_OZONE_PLATFORM_QNX_SCREEN_QNX_SCREEN_SURFACE_FACTORY_H_
+ #define UI_OZONE_PLATFORM_QNX_SCREEN_QNX_SCREEN_SURFACE_FACTORY_H_
+ 
++#include <memory>
++
+ #include "ui/ozone/public/surface_factory_ozone.h"
+ 
+ namespace ui {
+ 
+ class QnxScreenWindowManager;
++class QnxScreenGLOzoneEGL;
+ 
+ class QnxScreenSurfaceFactory : public SurfaceFactoryOzone {
+  public:
+@@ -17,11 +20,13 @@ class QnxScreenSurfaceFactory : public SurfaceFactoryOzone {
+ 
+   // SurfaceFactoryOzone:
+   std::vector<gl::GLImplementationParts> GetAllowedGLImplementations() override;
++  GLOzone* GetGLOzone(const gl::GLImplementationParts& implementation) override;
+   std::unique_ptr<SurfaceOzoneCanvas> CreateCanvasForWidget(
+       gfx::AcceleratedWidget widget) override;
+ 
+  private:
+   QnxScreenWindowManager* window_manager_;
++  std::unique_ptr<QnxScreenGLOzoneEGL> egl_ozone_;
+ };
+ 
+ }  // namespace ui
+diff --git a/ui/ozone/platform/qnx_screen/qnx_screen_window.cc b/ui/ozone/platform/qnx_screen/qnx_screen_window.cc
+index e17289848a..15e3a2a895 100644
+--- a/ui/ozone/platform/qnx_screen/qnx_screen_window.cc
++++ b/ui/ozone/platform/qnx_screen/qnx_screen_window.cc
+@@ -8,7 +8,9 @@
+ 
+ #include <cstdio>
+ #include <cstdlib>
++#include <cstring>
+ 
++#include "base/command_line.h"
+ #include "base/qnx_trace.h"
+ #include "ui/base/cursor/platform_cursor.h"
+ #include "ui/events/event.h"
+@@ -65,6 +67,14 @@ QnxScreenWindow::QnxScreenWindow(PlatformWindowDelegate* delegate,
+   if (screen_create_window_group(window_, group_name_) != 0)
+     QNX_TRACE_MSG("QNX:OzWin: screen_create_window_group failed\n");
+ 
++  // Touch delivery is gated by SENSITIVITY (set below), but keyboard delivery
++  // is gated separately by SCREEN_PROPERTY_FOCUS: QNX only sends
++  // SCREEN_EVENT_KEYBOARD to the window that holds keyboard focus. That property
++  // is read-only on a window and must be set on the group object (we own the
++  // group we just created), pointing it at this window. Without this, taps reach
++  // the page but physical keystrokes are never delivered.
++  ClaimKeyboardFocus();
++
+   // Make sure the window participates in input hit-testing.
+   int sensitivity = SCREEN_SENSITIVITY_ALWAYS;
+   screen_set_window_property_iv(window_, SCREEN_PROPERTY_SENSITIVITY,
+@@ -73,7 +83,14 @@ QnxScreenWindow::QnxScreenWindow(PlatformWindowDelegate* delegate,
+   int format = SCREEN_FORMAT_RGBX8888;
+   screen_set_window_property_iv(window_, SCREEN_PROPERTY_FORMAT, &format);
+ 
+-  int usage = SCREEN_USAGE_WRITE | SCREEN_USAGE_NATIVE;
++  // GPU vs software: when GPU is enabled (no --disable-gpu), the window backs an
++  // EGL window surface and must advertise OPENGL_ES2 usage; the EGL driver
++  // renders into the pre-created screen buffers and presents via eglSwapBuffers.
++  // In software mode we keep WRITE|NATIVE for the Skia memcpy/screen_post path.
++  const bool gl_mode =
++      !base::CommandLine::ForCurrentProcess()->HasSwitch("disable-gpu");
++  int usage = gl_mode ? (SCREEN_USAGE_OPENGL_ES2 | SCREEN_USAGE_ROTATION)
++                      : (SCREEN_USAGE_WRITE | SCREEN_USAGE_NATIVE);
+   screen_set_window_property_iv(window_, SCREEN_PROPERTY_USAGE, &usage);
+ 
+   int size[2] = {bounds_.width(), bounds_.height()};
+@@ -101,30 +118,53 @@ QnxScreenWindow::QnxScreenWindow(PlatformWindowDelegate* delegate,
+   // so CanDispatchEvent() lets input through even if Aura never calls Show().
+   visible_ = true;
+ 
++  // BB10's eglCreateWindowSurface() binds to the window's *pre-created* Screen
++  // buffers (it does not allocate its own); without them it fails with
++  // EGL_BAD_ALLOC. So create them in both GL and software modes.
+   rc = screen_create_window_buffers(window_, 2);
+   if (rc != 0) {
+     QNX_TRACE_MSG("QNX:OzWin: screen_create_window_buffers failed\n");
+   } else {
+-    // Fill initial buffer with a visible color to confirm window is showing
+-    screen_buffer_t buf[2];
++    // Diagnostic: dump the actual buffer geometry so we can compare the Screen
++    // buffer stride/size/format against the size EGL/GL renders at (a mismatch
++    // shows up as the frame tiled/sheared across the panel).
++    screen_buffer_t buf[2] = {nullptr, nullptr};
+     screen_get_window_property_pv(window_, SCREEN_PROPERTY_RENDER_BUFFERS,
+                                   (void**)buf);
+-    void* ptr = nullptr;
+-    screen_get_buffer_property_pv(buf[0], SCREEN_PROPERTY_POINTER, &ptr);
+-    if (ptr) {
+-      int stride = 0;
+-      screen_get_buffer_property_iv(buf[0], SCREEN_PROPERTY_STRIDE, &stride);
+-      // Fill with dark blue (RGBX8888: 0xFF1a1a40)
+-      uint32_t* pixels = static_cast<uint32_t*>(ptr);
+-      for (int y = 0; y < size[1]; y++) {
+-        uint32_t* row = reinterpret_cast<uint32_t*>(
+-            static_cast<uint8_t*>(ptr) + y * stride);
+-        for (int x = 0; x < size[0]; x++)
+-          row[x] = 0xFF401a1a;  // BGRA dark blue
++    int bstride = 0, bsize[2] = {0, 0}, bfmt = 0;
++    if (buf[0]) {
++      screen_get_buffer_property_iv(buf[0], SCREEN_PROPERTY_STRIDE, &bstride);
++      screen_get_buffer_property_iv(buf[0], SCREEN_PROPERTY_BUFFER_SIZE, bsize);
++      screen_get_buffer_property_iv(buf[0], SCREEN_PROPERTY_FORMAT, &bfmt);
++    }
++    int wsize[2] = {0, 0}, wbufsize[2] = {0, 0}, wsrc[2] = {0, 0}, wfmt = 0;
++    screen_get_window_property_iv(window_, SCREEN_PROPERTY_SIZE, wsize);
++    screen_get_window_property_iv(window_, SCREEN_PROPERTY_BUFFER_SIZE, wbufsize);
++    screen_get_window_property_iv(window_, SCREEN_PROPERTY_SOURCE_SIZE, wsrc);
++    screen_get_window_property_iv(window_, SCREEN_PROPERTY_FORMAT, &wfmt);
++    char dbg[256];
++    snprintf(dbg, sizeof(dbg),
++             "QNX:OzWin: buf stride=%d size=%dx%d fmt=%d | win size=%dx%d "
++             "bufsize=%dx%d src=%dx%d fmt=%d\n",
++             bstride, bsize[0], bsize[1], bfmt, wsize[0], wsize[1],
++             wbufsize[0], wbufsize[1], wsrc[0], wsrc[1], wfmt);
++    ::write(2, dbg, strlen(dbg));
++
++    if (!gl_mode && buf[0]) {
++      // Software mode: fill initial buffer with a visible color.
++      void* ptr = nullptr;
++      screen_get_buffer_property_pv(buf[0], SCREEN_PROPERTY_POINTER, &ptr);
++      if (ptr) {
++        for (int y = 0; y < size[1]; y++) {
++          uint32_t* row = reinterpret_cast<uint32_t*>(
++              static_cast<uint8_t*>(ptr) + y * bstride);
++          for (int x = 0; x < size[0]; x++)
++            row[x] = 0xFF401a1a;  // BGRA dark blue
++        }
++        int dirty[4] = {0, 0, size[0], size[1]};
++        screen_post_window(window_, buf[0], 1, dirty, 0);
++        QNX_TRACE_MSG("QNX:OzWin: Initial buffer posted (dark blue)\n");
+       }
+-      int dirty[4] = {0, 0, size[0], size[1]};
+-      screen_post_window(window_, buf[0], 1, dirty, 0);
+-      QNX_TRACE_MSG("QNX:OzWin: Initial buffer posted (dark blue)\n");
+     }
+   }
+ 
+@@ -139,6 +179,34 @@ QnxScreenWindow::QnxScreenWindow(PlatformWindowDelegate* delegate,
+   delegate_->OnAcceleratedWidgetAvailable(widget_);
+ }
+ 
++static void QnxKbdDbgLog(const char* s) {
++  static const bool on = getenv("QNX_KBD_DEBUG") != nullptr;
++  if (on)
++    ::write(2, s, strlen(s));
++}
++
++void QnxScreenWindow::ClaimKeyboardFocus() {
++  if (!window_)
++    return;
++  screen_group_t group = nullptr;
++  int grc = screen_get_window_property_pv(window_, SCREEN_PROPERTY_GROUP,
++                                          reinterpret_cast<void**>(&group));
++  if (grc != 0 || !group) {
++    QNX_TRACE_MSG("QNX:OzWin: get window GROUP failed\n");
++    QnxKbdDbgLog("KBD:focus get-group FAILED\n");
++    return;
++  }
++  int src = screen_set_group_property_pv(group, SCREEN_PROPERTY_FOCUS,
++                                         reinterpret_cast<void**>(&window_));
++  if (src != 0) {
++    QNX_TRACE_MSG("QNX:OzWin: set group keyboard FOCUS failed\n");
++    QnxKbdDbgLog("KBD:focus set-FOCUS FAILED\n");
++  } else {
++    QNX_TRACE_MSG("QNX:OzWin: claimed group keyboard FOCUS\n");
++    QnxKbdDbgLog("KBD:focus claimed OK\n");
++  }
++}
++
+ QnxScreenWindow::~QnxScreenWindow() {
+   if (PlatformEventSource::GetInstance())
+     PlatformEventSource::GetInstance()->RemovePlatformEventDispatcher(this);
+@@ -181,6 +249,9 @@ void QnxScreenWindow::Show(bool inactive) {
+   if (window_) {
+     int visible = 1;
+     screen_set_window_property_iv(window_, SCREEN_PROPERTY_VISIBLE, &visible);
++    // Re-assert keyboard focus in case becoming visible/active reset it.
++    if (!inactive)
++      ClaimKeyboardFocus();
+     int dirty[4] = {0, 0, bounds_.width(), bounds_.height()};
+     screen_post_window(window_, nullptr, 0, dirty, 0);
+   }
+diff --git a/ui/ozone/platform/qnx_screen/qnx_screen_window.h b/ui/ozone/platform/qnx_screen/qnx_screen_window.h
+index 9af5bab533..356e0fe91e 100644
+--- a/ui/ozone/platform/qnx_screen/qnx_screen_window.h
++++ b/ui/ozone/platform/qnx_screen/qnx_screen_window.h
+@@ -69,6 +69,10 @@ class QnxScreenWindow : public PlatformWindow, public PlatformEventDispatcher {
+   void PostBuffer();
+ 
+  private:
++  // Point this window's group keyboard focus at the window so QNX delivers
++  // SCREEN_EVENT_KEYBOARD events to it. Safe to call repeatedly.
++  void ClaimKeyboardFocus();
++
+   PlatformWindowDelegate* delegate_;
+   QnxScreenWindowManager* manager_;
+   screen_context_t ctx_;
+-- 
+2.34.1
+

@@ -30,7 +30,8 @@ for url in $URLS; do
     continue
   fi
 
-  bytes=$(wc -c <"$out" | tr -d ' ')
+  bytes=$(wc -c <"$out")
+  bytes=${bytes##* }
   if [ "$bytes" -gt 100 ] 2>/dev/null; then
     echo "PASS $url ($bytes bytes)"
     PASS=$((PASS + 1))

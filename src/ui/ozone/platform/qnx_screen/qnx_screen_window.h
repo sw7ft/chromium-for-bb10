@@ -6,6 +6,7 @@
 
 #include <screen/screen.h>
 
+#include "ui/events/platform/platform_event_dispatcher.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/platform_window/platform_window.h"
@@ -15,7 +16,7 @@ namespace ui {
 
 class QnxScreenWindowManager;
 
-class QnxScreenWindow : public PlatformWindow {
+class QnxScreenWindow : public PlatformWindow, public PlatformEventDispatcher {
  public:
   QnxScreenWindow(PlatformWindowDelegate* delegate,
                   QnxScreenWindowManager* manager,
@@ -61,9 +62,17 @@ class QnxScreenWindow : public PlatformWindow {
   void SizeConstraintsChanged() override;
   void PrepareForShutdown() override;
 
+  // PlatformEventDispatcher:
+  bool CanDispatchEvent(const PlatformEvent& event) override;
+  uint32_t DispatchEvent(const PlatformEvent& event) override;
+
   void PostBuffer();
 
  private:
+  // Point this window's group keyboard focus at the window so QNX delivers
+  // SCREEN_EVENT_KEYBOARD events to it. Safe to call repeatedly.
+  void ClaimKeyboardFocus();
+
   PlatformWindowDelegate* delegate_;
   QnxScreenWindowManager* manager_;
   screen_context_t ctx_;
@@ -71,6 +80,7 @@ class QnxScreenWindow : public PlatformWindow {
   gfx::Rect bounds_;
   bool visible_ = false;
   gfx::AcceleratedWidget widget_;
+  char group_name_[64] = {0};
 };
 
 }  // namespace ui

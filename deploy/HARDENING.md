@@ -83,6 +83,27 @@ cross-process Mojo, `ChildProcessSecurityPolicy`, origin locks at factory creati
 | `--no-sandbox` | Unless a QNX-specific sandbox is implemented |
 | `--no-zygote` | Until fork-based zygote is viable on QNX |
 
+## Regression results (Passport, bundle v1)
+
+| Tier | example.com | google.com | wikipedia/QNX | Notes |
+|------|-------------|------------|---------------|-------|
+| 0 | PASS | PASS | PASS | Baseline; `./test-regression.sh 0` |
+| 1 | PASS | PASS | FAIL (flaky) | HTTP/2 enabled; wiki may exit non-zero intermittently |
+| 2 | PASS | FAIL (flaky) | FAIL (flaky) | +MojoIpcz; re-run recommended |
+| 3 | FAIL | FAIL | FAIL | Multi-process: HardWatchdog; real `posix_spawn` launcher wired |
+| 4 | FAIL | FAIL | FAIL | qnx_screen headful: HardWatchdog on all URLs |
+| 5 | (not run) | | | Full GPU; use `QNX_GPU_PROBE=1 ./run.sh about:blank` to probe EGL |
+
+Tier 1+ keeps `--ignore-certificate-errors`. Tier 1+ drops `--disable-http2` when `cacert.pem` is present.
+
+## Berry daemon (experimental)
+
+TCP command channel on `127.0.0.1:8767` (`LOAD <url>` / `QUIT`). Framed stdout: `@BERRY DOM <len>\\n<html>\\n@BERRY END`.
+
+- `./test-daemon.sh` waits for the TCP port (stderr buffering makes log-grep unreliable).
+- Berry Proxy: one-shot default (`BERRY_USE_DAEMON=0`); set `BERRY_USE_DAEMON=1` to try daemon mode.
+- Cold start to listening port can take 30–90s on Passport.
+
 ## Usage
 
 ```bash

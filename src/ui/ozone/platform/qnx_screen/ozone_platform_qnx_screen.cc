@@ -4,10 +4,11 @@
 #include "ui/ozone/platform/qnx_screen/ozone_platform_qnx_screen.h"
 
 #include <screen/screen.h>
+#include <cstdio>
 #include <memory>
-#include <unistd.h>
 
 #include "base/no_destructor.h"
+#include "base/qnx_trace.h"
 #include "ui/base/cursor/cursor_factory.h"
 #include "ui/base/ime/input_method_minimal.h"
 #include "ui/display/display.h"
@@ -102,6 +103,12 @@ class OzonePlatformQnxScreen : public OzonePlatform {
   }
 
   SurfaceFactoryOzone* GetSurfaceFactoryOzone() override {
+    // In single-process mode the in-process GPU thread may query this (for GL
+    // init / GetAllowedGLImplementations) before InitializeUI() has run on the
+    // main thread. Create the factory lazily so the allowed-GL list is never
+    // empty due to init ordering (which otherwise forces GL = none and breaks
+    // GPU compositing).
+    EnsureSurfaceFactory();
     return surface_factory_.get();
   }
 
@@ -149,17 +156,29 @@ class OzonePlatformQnxScreen : public OzonePlatform {
     return std::make_unique<InputMethodMinimal>(dispatcher);
   }
 
+  // Creates window_manager_ + surface_factory_ exactly once, regardless of
+  // which thread/init phase reaches it first.
+  void EnsureSurfaceFactory() {
+    if (surface_factory_)
+      return;
+    fprintf(stderr, "QNX GL TRACE: EnsureSurfaceFactory creating factory\n");
+    if (!window_manager_)
+      window_manager_ = std::make_unique<QnxScreenWindowManager>();
+    surface_factory_ =
+        std::make_unique<QnxScreenSurfaceFactory>(window_manager_.get());
+  }
+
+  void* GetScreenContextForGL() const { return screen_ctx_; }
+
   bool InitializeUI(const InitParams& params) override {
+    fprintf(stderr, "QNX GL TRACE: OzonePlatform::InitializeUI\n");
     int rc = screen_create_context(&screen_ctx_, SCREEN_APPLICATION_CONTEXT);
     if (rc != 0) {
-      const char msg[] = "QNX:Ozone: screen_create_context failed\n";
-      ::write(2, msg, sizeof(msg) - 1);
+      QNX_TRACE_MSG("QNX:Ozone: screen_create_context failed\n");
       return false;
     }
 
-    window_manager_ = std::make_unique<QnxScreenWindowManager>();
-    surface_factory_ =
-        std::make_unique<QnxScreenSurfaceFactory>(window_manager_.get());
+    EnsureSurfaceFactory();
 
     event_source_ = std::make_unique<QnxScreenEventSource>(
         screen_ctx_, window_manager_.get());
@@ -177,12 +196,8 @@ class OzonePlatformQnxScreen : public OzonePlatform {
   }
 
   void InitializeGPU(const InitParams& params) override {
-    if (!surface_factory_) {
-      if (!window_manager_)
-        window_manager_ = std::make_unique<QnxScreenWindowManager>();
-      surface_factory_ =
-          std::make_unique<QnxScreenSurfaceFactory>(window_manager_.get());
-    }
+    fprintf(stderr, "QNX GL TRACE: OzonePlatform::InitializeGPU\n");
+    EnsureSurfaceFactory();
   }
 
  private:
@@ -201,6 +216,14 @@ class OzonePlatformQnxScreen : public OzonePlatform {
 
 OzonePlatform* CreateOzonePlatformQnx_screen() {
   return new OzonePlatformQnxScreen();
+}
+
+void* GetQnxScreenApplicationContext() {
+  if (!OzonePlatform::IsInitialized())
+    return nullptr;
+  auto* platform =
+      static_cast<OzonePlatformQnxScreen*>(OzonePlatform::GetInstance());
+  return platform ? platform->GetScreenContextForGL() : nullptr;
 }
 
 }  // namespace ui

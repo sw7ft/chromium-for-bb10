@@ -33,16 +33,15 @@ case "$TIER" in
   *) echo "Unknown QNX_HARDENING_TIER=$TIER (see HARDENING.md)" >&2; exit 1 ;;
 esac
 
-CERT_FLAGS=""
-if [ -z "$SSL_CERT_FILE" ]; then
-  CERT_FLAGS="--ignore-certificate-errors"
-fi
+CERT_FLAGS="--ignore-certificate-errors"
+# SSL_CERT_FILE is exported when cacert.pem is present for future use; QNX
+# still requires --ignore-certificate-errors until the platform trust store
+# is wired up.
 
 # Tier 1+: allow HTTP/2 when CA bundle is present
 HTTP2_FLAGS="--disable-http2"
 if [ "$TIER" -ge 1 ] && [ -n "$SSL_CERT_FILE" ]; then
   HTTP2_FLAGS=""
-  CERT_FLAGS=""
 fi
 
 # Tier 4+: on-screen qnx_screen instead of headless

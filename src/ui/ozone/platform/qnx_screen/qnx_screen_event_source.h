@@ -1,5 +1,5 @@
 // Copyright 2025 SW7FT. All rights reserved.
-// Event source for QNX Screen (touch, keyboard) via screen_get_event
+// Event source for QNX Screen (touch, keyboard) via BPS/Navigator
 
 #ifndef UI_OZONE_PLATFORM_QNX_SCREEN_QNX_SCREEN_EVENT_SOURCE_H_
 #define UI_OZONE_PLATFORM_QNX_SCREEN_QNX_SCREEN_EVENT_SOURCE_H_
@@ -28,7 +28,7 @@ class QnxScreenEventSource : public PlatformEventSource {
   void RepaintToolbar();
 
   screen_context_t ctx_;
-  screen_event_t event_ = nullptr;
+  bool bps_initialized_ = false;
   raw_ptr<QnxScreenWindowManager> window_manager_;
   base::RepeatingTimer poll_timer_;
 };

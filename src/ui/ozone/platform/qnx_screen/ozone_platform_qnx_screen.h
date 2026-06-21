@@ -9,6 +9,10 @@ namespace ui {
 class OzonePlatform;
 OzonePlatform* CreateOzonePlatformQnx_screen();
 
+// Returns the Screen application context created in InitializeUI, or null before
+// UI init. GL init on the in-process GPU thread must reuse this on BB10.
+void* GetQnxScreenApplicationContext();
+
 }  // namespace ui
 
 #endif  // UI_OZONE_PLATFORM_QNX_SCREEN_OZONE_PLATFORM_QNX_SCREEN_H_

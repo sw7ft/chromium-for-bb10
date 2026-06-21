@@ -15,6 +15,8 @@ source_set("qnx_screen") {
     "ozone_platform_qnx_screen.h",
     "qnx_screen_event_source.cc",
     "qnx_screen_event_source.h",
+    "qnx_screen_gl_ozone_egl.cc",
+    "qnx_screen_gl_ozone_egl.h",
     "qnx_screen_surface_factory.cc",
     "qnx_screen_surface_factory.h",
     "qnx_screen_window.cc",
@@ -33,6 +35,7 @@ source_set("qnx_screen") {
     "//ui/events",
     "//ui/events/ozone/layout:layout",
     "//ui/gfx",
+    "//ui/gl",
     "//ui/ozone:ozone_base",
     "//ui/ozone/common",
     "//ui/platform_window",
@@ -40,5 +43,6 @@ source_set("qnx_screen") {
 
   libs = [
     "screen",
+    "bps",
   ]
 }

@@ -6,11 +6,17 @@
 #include <screen/screen.h>
 #include <unistd.h>
 
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+
 #include "base/memory/ptr_util.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkSurface.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/gfx/vsync_provider.h"
+#include "ui/gl/gl_implementation.h"
+#include "ui/ozone/platform/qnx_screen/qnx_screen_gl_ozone_egl.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_window.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_window_manager.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_overlay_callback.h"
@@ -78,6 +84,29 @@ class QnxScreenCanvas : public SurfaceOzoneCanvas {
         src += pixmap.rowBytes();
         dst += stride;
       }
+
+      // Debug-only: dump the composited software framebuffer so first-pixels
+      // can be verified off-device. Gated on env so it has no production cost.
+      // Format: "QFB1" magic, int32 width, height, rowbytes (LE), then raw
+      // N32 (BGRA premul) pixels. Convert to PNG on the host.
+      static const char* dump_path = getenv("QNX_FB_DUMP");
+      static int dump_seq = 0;
+      if (dump_path && dump_path[0]) {
+        char namebuf[512];
+        snprintf(namebuf, sizeof(namebuf), "%s.%03d", dump_path, dump_seq++);
+        FILE* f = fopen(namebuf, "wb");
+        if (f) {
+          int32_t w = pixmap.width();
+          int32_t hh = pixmap.height();
+          int32_t rb = static_cast<int32_t>(pixmap.rowBytes());
+          fwrite("QFB1", 1, 4, f);
+          fwrite(&w, sizeof(w), 1, f);
+          fwrite(&hh, sizeof(hh), 1, f);
+          fwrite(&rb, sizeof(rb), 1, f);
+          fwrite(pixmap.addr(), 1, static_cast<size_t>(rb) * hh, f);
+          fclose(f);
+        }
+      }
     }
 
     int dirty[4] = {damage.x(), damage.y(),
@@ -104,13 +133,27 @@ class QnxScreenCanvas : public SurfaceOzoneCanvas {
 
 QnxScreenSurfaceFactory::QnxScreenSurfaceFactory(
     QnxScreenWindowManager* window_manager)
-    : window_manager_(window_manager) {}
+    : window_manager_(window_manager),
+      egl_ozone_(std::make_unique<QnxScreenGLOzoneEGL>(window_manager)) {}
 
 QnxScreenSurfaceFactory::~QnxScreenSurfaceFactory() = default;
 
 std::vector<gl::GLImplementationParts>
 QnxScreenSurfaceFactory::GetAllowedGLImplementations() {
-  return {};
+  // Native EGL/GLES2 (Adreno 330). Software is still used when --disable-gpu is
+  // set; Chromium only routes to the GLOzone when GPU is enabled.
+  fprintf(stderr, "QNX GL: GetAllowedGLImplementations -> EGLGLES2\n");
+  return {gl::GLImplementationParts(gl::kGLImplementationEGLGLES2)};
+}
+
+GLOzone* QnxScreenSurfaceFactory::GetGLOzone(
+    const gl::GLImplementationParts& implementation) {
+  switch (implementation.gl) {
+    case gl::kGLImplementationEGLGLES2:
+      return egl_ozone_.get();
+    default:
+      return nullptr;
+  }
 }
 
 std::unique_ptr<SurfaceOzoneCanvas>
