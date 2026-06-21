@@ -69,6 +69,10 @@ class QnxScreenWindow : public PlatformWindow, public PlatformEventDispatcher {
   void PostBuffer();
 
  private:
+  // Point this window's group keyboard focus at the window so QNX delivers
+  // SCREEN_EVENT_KEYBOARD events to it. Safe to call repeatedly.
+  void ClaimKeyboardFocus();
+
   PlatformWindowDelegate* delegate_;
   QnxScreenWindowManager* manager_;
   screen_context_t ctx_;

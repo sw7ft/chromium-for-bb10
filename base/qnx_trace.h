@@ -51,11 +51,29 @@ inline const char* QnxSafeStr(const char* s) {
 #define QNX_TRACE_THEN(msg, result) \
   ([&]() -> decltype(auto) { QNX_TRACE_MSG(msg); return (result); }())
 
+// Low-volume navigation milestones for multi-process bring-up. Always on so
+// berry-kbd.log stays readable without QNX_TRACE=1.
+#define QNX_NAV_LOG(msg)                       \
+  do {                                         \
+    const char _qn[] = msg;                    \
+    ::write(2, _qn, sizeof(_qn) - 1);         \
+  } while (0)
+
+#define QNX_NAV_LOG_FMT(fmt, ...)              \
+  do {                                         \
+    char _qn[256];                             \
+    int _ql = snprintf(_qn, sizeof(_qn), fmt, __VA_ARGS__); \
+    if (_ql > 0)                               \
+      ::write(2, _qn, _ql);                    \
+  } while (0)
+
 #else
 
 #define QNX_TRACE_MSG(msg) ((void)0)
 #define QNX_TRACE_FMT(fmt, ...) ((void)0)
 #define QNX_TRACE_THEN(msg, result) (result)
+#define QNX_NAV_LOG(msg) ((void)0)
+#define QNX_NAV_LOG_FMT(fmt, ...) ((void)0)
 
 #endif
 

@@ -4579,6 +4579,11 @@ class CONTENT_EXPORT RenderFrameHostImpl
       back_forward_cache_controller_host_associated_receiver_{this};
   mojo::AssociatedRemote<mojom::Frame> frame_;
   mojo::AssociatedRemote<mojom::FrameBindingsControl> frame_bindings_control_;
+
+#if BUILDFLAG(IS_QNX)
+  // NavigationClient bound during RenderFrameCreated while associated IPC is
+  // still actively dispatched. Reused for the first commit on this frame.
+#endif
   mojo::AssociatedReceiver<blink::mojom::LocalFrameHost>
       local_frame_host_receiver_{this};
   mojo::Receiver<blink::mojom::NonAssociatedLocalFrameHost>

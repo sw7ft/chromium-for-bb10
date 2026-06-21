@@ -8,7 +8,9 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
+#include "base/command_line.h"
 #include "base/qnx_trace.h"
 #include "ui/base/cursor/platform_cursor.h"
 #include "ui/events/event.h"
@@ -65,6 +67,14 @@ QnxScreenWindow::QnxScreenWindow(PlatformWindowDelegate* delegate,
   if (screen_create_window_group(window_, group_name_) != 0)
     QNX_TRACE_MSG("QNX:OzWin: screen_create_window_group failed\n");
 
+  // Touch delivery is gated by SENSITIVITY (set below), but keyboard delivery
+  // is gated separately by SCREEN_PROPERTY_FOCUS: QNX only sends
+  // SCREEN_EVENT_KEYBOARD to the window that holds keyboard focus. That property
+  // is read-only on a window and must be set on the group object (we own the
+  // group we just created), pointing it at this window. Without this, taps reach
+  // the page but physical keystrokes are never delivered.
+  ClaimKeyboardFocus();
+
   // Make sure the window participates in input hit-testing.
   int sensitivity = SCREEN_SENSITIVITY_ALWAYS;
   screen_set_window_property_iv(window_, SCREEN_PROPERTY_SENSITIVITY,
@@ -73,7 +83,14 @@ QnxScreenWindow::QnxScreenWindow(PlatformWindowDelegate* delegate,
   int format = SCREEN_FORMAT_RGBX8888;
   screen_set_window_property_iv(window_, SCREEN_PROPERTY_FORMAT, &format);
 
-  int usage = SCREEN_USAGE_WRITE | SCREEN_USAGE_NATIVE;
+  // GPU vs software: when GPU is enabled (no --disable-gpu), the window backs an
+  // EGL window surface and must advertise OPENGL_ES2 usage; the EGL driver
+  // renders into the pre-created screen buffers and presents via eglSwapBuffers.
+  // In software mode we keep WRITE|NATIVE for the Skia memcpy/screen_post path.
+  const bool gl_mode =
+      !base::CommandLine::ForCurrentProcess()->HasSwitch("disable-gpu");
+  int usage = gl_mode ? (SCREEN_USAGE_OPENGL_ES2 | SCREEN_USAGE_ROTATION)
+                      : (SCREEN_USAGE_WRITE | SCREEN_USAGE_NATIVE);
   screen_set_window_property_iv(window_, SCREEN_PROPERTY_USAGE, &usage);
 
   int size[2] = {bounds_.width(), bounds_.height()};
@@ -101,30 +118,53 @@ QnxScreenWindow::QnxScreenWindow(PlatformWindowDelegate* delegate,
   // so CanDispatchEvent() lets input through even if Aura never calls Show().
   visible_ = true;
 
+  // BB10's eglCreateWindowSurface() binds to the window's *pre-created* Screen
+  // buffers (it does not allocate its own); without them it fails with
+  // EGL_BAD_ALLOC. So create them in both GL and software modes.
   rc = screen_create_window_buffers(window_, 2);
   if (rc != 0) {
     QNX_TRACE_MSG("QNX:OzWin: screen_create_window_buffers failed\n");
   } else {
-    // Fill initial buffer with a visible color to confirm window is showing
-    screen_buffer_t buf[2];
+    // Diagnostic: dump the actual buffer geometry so we can compare the Screen
+    // buffer stride/size/format against the size EGL/GL renders at (a mismatch
+    // shows up as the frame tiled/sheared across the panel).
+    screen_buffer_t buf[2] = {nullptr, nullptr};
     screen_get_window_property_pv(window_, SCREEN_PROPERTY_RENDER_BUFFERS,
                                   (void**)buf);
-    void* ptr = nullptr;
-    screen_get_buffer_property_pv(buf[0], SCREEN_PROPERTY_POINTER, &ptr);
-    if (ptr) {
-      int stride = 0;
-      screen_get_buffer_property_iv(buf[0], SCREEN_PROPERTY_STRIDE, &stride);
-      // Fill with dark blue (RGBX8888: 0xFF1a1a40)
-      uint32_t* pixels = static_cast<uint32_t*>(ptr);
-      for (int y = 0; y < size[1]; y++) {
-        uint32_t* row = reinterpret_cast<uint32_t*>(
-            static_cast<uint8_t*>(ptr) + y * stride);
-        for (int x = 0; x < size[0]; x++)
-          row[x] = 0xFF401a1a;  // BGRA dark blue
+    int bstride = 0, bsize[2] = {0, 0}, bfmt = 0;
+    if (buf[0]) {
+      screen_get_buffer_property_iv(buf[0], SCREEN_PROPERTY_STRIDE, &bstride);
+      screen_get_buffer_property_iv(buf[0], SCREEN_PROPERTY_BUFFER_SIZE, bsize);
+      screen_get_buffer_property_iv(buf[0], SCREEN_PROPERTY_FORMAT, &bfmt);
+    }
+    int wsize[2] = {0, 0}, wbufsize[2] = {0, 0}, wsrc[2] = {0, 0}, wfmt = 0;
+    screen_get_window_property_iv(window_, SCREEN_PROPERTY_SIZE, wsize);
+    screen_get_window_property_iv(window_, SCREEN_PROPERTY_BUFFER_SIZE, wbufsize);
+    screen_get_window_property_iv(window_, SCREEN_PROPERTY_SOURCE_SIZE, wsrc);
+    screen_get_window_property_iv(window_, SCREEN_PROPERTY_FORMAT, &wfmt);
+    char dbg[256];
+    snprintf(dbg, sizeof(dbg),
+             "QNX:OzWin: buf stride=%d size=%dx%d fmt=%d | win size=%dx%d "
+             "bufsize=%dx%d src=%dx%d fmt=%d\n",
+             bstride, bsize[0], bsize[1], bfmt, wsize[0], wsize[1],
+             wbufsize[0], wbufsize[1], wsrc[0], wsrc[1], wfmt);
+    ::write(2, dbg, strlen(dbg));
+
+    if (!gl_mode && buf[0]) {
+      // Software mode: fill initial buffer with a visible color.
+      void* ptr = nullptr;
+      screen_get_buffer_property_pv(buf[0], SCREEN_PROPERTY_POINTER, &ptr);
+      if (ptr) {
+        for (int y = 0; y < size[1]; y++) {
+          uint32_t* row = reinterpret_cast<uint32_t*>(
+              static_cast<uint8_t*>(ptr) + y * bstride);
+          for (int x = 0; x < size[0]; x++)
+            row[x] = 0xFF401a1a;  // BGRA dark blue
+        }
+        int dirty[4] = {0, 0, size[0], size[1]};
+        screen_post_window(window_, buf[0], 1, dirty, 0);
+        QNX_TRACE_MSG("QNX:OzWin: Initial buffer posted (dark blue)\n");
       }
-      int dirty[4] = {0, 0, size[0], size[1]};
-      screen_post_window(window_, buf[0], 1, dirty, 0);
-      QNX_TRACE_MSG("QNX:OzWin: Initial buffer posted (dark blue)\n");
     }
   }
 
@@ -137,6 +177,34 @@ QnxScreenWindow::QnxScreenWindow(PlatformWindowDelegate* delegate,
     PlatformEventSource::GetInstance()->AddPlatformEventDispatcher(this);
 
   delegate_->OnAcceleratedWidgetAvailable(widget_);
+}
+
+static void QnxKbdDbgLog(const char* s) {
+  static const bool on = getenv("QNX_KBD_DEBUG") != nullptr;
+  if (on)
+    ::write(2, s, strlen(s));
+}
+
+void QnxScreenWindow::ClaimKeyboardFocus() {
+  if (!window_)
+    return;
+  screen_group_t group = nullptr;
+  int grc = screen_get_window_property_pv(window_, SCREEN_PROPERTY_GROUP,
+                                          reinterpret_cast<void**>(&group));
+  if (grc != 0 || !group) {
+    QNX_TRACE_MSG("QNX:OzWin: get window GROUP failed\n");
+    QnxKbdDbgLog("KBD:focus get-group FAILED\n");
+    return;
+  }
+  int src = screen_set_group_property_pv(group, SCREEN_PROPERTY_FOCUS,
+                                         reinterpret_cast<void**>(&window_));
+  if (src != 0) {
+    QNX_TRACE_MSG("QNX:OzWin: set group keyboard FOCUS failed\n");
+    QnxKbdDbgLog("KBD:focus set-FOCUS FAILED\n");
+  } else {
+    QNX_TRACE_MSG("QNX:OzWin: claimed group keyboard FOCUS\n");
+    QnxKbdDbgLog("KBD:focus claimed OK\n");
+  }
 }
 
 QnxScreenWindow::~QnxScreenWindow() {
@@ -181,6 +249,9 @@ void QnxScreenWindow::Show(bool inactive) {
   if (window_) {
     int visible = 1;
     screen_set_window_property_iv(window_, SCREEN_PROPERTY_VISIBLE, &visible);
+    // Re-assert keyboard focus in case becoming visible/active reset it.
+    if (!inactive)
+      ClaimKeyboardFocus();
     int dirty[4] = {0, 0, bounds_.width(), bounds_.height()};
     screen_post_window(window_, nullptr, 0, dirty, 0);
   }

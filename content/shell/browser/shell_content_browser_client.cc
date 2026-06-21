@@ -63,6 +63,12 @@
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switch_dependent_feature_overrides.h"
 #include "content/public/common/content_switches.h"
+#if BUILDFLAG(IS_QNX)
+#include "gpu/config/gpu_switches.h"
+#include "ui/display/display_switches.h"
+#include "ui/gl/gl_switches.h"
+#include "ui/ozone/public/ozone_switches.h"
+#endif
 #include "content/public/common/url_constants.h"
 #include "content/public/common/user_agent.h"
 #include "content/shell/browser/shell.h"
@@ -425,6 +431,29 @@ void ShellContentBrowserClient::AppendExtraCommandLineSwitches(
 
   command_line->CopySwitchesFrom(*base::CommandLine::ForCurrentProcess(),
                                  kForwardSwitches);
+
+#if BUILDFLAG(IS_QNX)
+  // QNX: only forward display/GPU flags to the gpu-process. Renderers must not
+  // init qnx_screen/EGL (that spins or crashes); the browser owns the window.
+  static const char* const kQnxCommonForwardSwitches[] = {
+      switches::kDisableFeatures,
+      switches::kForceDeviceScaleFactor,
+  };
+  command_line->CopySwitchesFrom(*base::CommandLine::ForCurrentProcess(),
+                                 kQnxCommonForwardSwitches);
+
+  if (command_line->GetSwitchValueASCII(switches::kProcessType) ==
+      switches::kGpuProcess) {
+    static const char* const kQnxGpuForwardSwitches[] = {
+        switches::kUseGL,
+        switches::kOzonePlatform,
+        switches::kIgnoreGpuBlocklist,
+        switches::kEnableGpuRasterization,
+    };
+    command_line->CopySwitchesFrom(*base::CommandLine::ForCurrentProcess(),
+                                   kQnxGpuForwardSwitches);
+  }
+#endif
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(

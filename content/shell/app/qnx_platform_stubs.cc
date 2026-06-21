@@ -29,6 +29,7 @@
 #include "base/files/file_path_watcher.h"
 #include "base/files/scoped_file.h"
 #include "base/functional/callback.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/no_destructor.h"
 #include "base/process/memory.h"
 #include "base/process/process.h"
@@ -214,7 +215,16 @@ void TerminateOnThread() {}
 
 void PlatformThreadBase::SetName(const std::string& name) {}
 
-size_t GetDefaultThreadStackSize(const pthread_attr_t& attributes) { return 0; }
+size_t GetDefaultThreadStackSize(const pthread_attr_t& attributes) {
+  // Returning 0 means "use the platform default stack". On Linux that is ~8MB,
+  // but QNX's default pthread stack is only a few hundred KB - far too small for
+  // Chromium's deep compositor/Skia raster and V8 call chains, which overflow it
+  // and crash with SIGSEGV/SIGBUS at an address next to the stack pointer a few
+  // seconds after a page starts rendering. Give every Chromium-created thread an
+  // 8MB stack to match Linux. The reservation is virtual (committed on demand),
+  // so this is cheap on the 32-bit address space.
+  return 8 * 1024 * 1024;
+}
 
 ProcessId GetParentProcessId(ProcessHandle process) { return 1; }
 
@@ -445,31 +455,40 @@ gfx::Image& ResourceBundle::GetNativeImageNamed(int resource_id) {
 // =====================================================================
 // GL/GPU stubs
 // =====================================================================
-#include "ui/gl/gl_context.h"
-#include "ui/gl/gl_surface.h"
-#include "ui/gl/gl_display.h"
-#include "ui/gl/gl_implementation.h"
-namespace gl::init {
-scoped_refptr<GLContext> CreateGLContext(GLShareGroup* share_group,
-                                         GLSurface* compatible_surface,
-                                         const GLContextAttribs& attribs) { return nullptr; }
-scoped_refptr<GLSurface> CreateOffscreenGLSurfaceWithFormat(
-    GLDisplay* display, const gfx::Size& size, GLSurfaceFormat format) { return nullptr; }
-std::vector<GLImplementationParts> GetAllowedGLImplementations() { return {}; }
-bool GetGLWindowSystemBindingInfo(const GLVersionInfo& gl_info,
-                                  GLWindowSystemBindingInfo* info) { return false; }
-bool InitializeExtensionSettingsOneOffPlatform(GLDisplay* display) { return true; }
-GLDisplay* InitializeGLOneOffPlatform(gl::GpuPreference pref) { return nullptr; }
-bool InitializeStaticGLBindings(GLImplementationParts impl) { return false; }
-void SetDisabledExtensionsPlatform(const std::string& disabled) {}
-void ShutdownGLPlatform(GLDisplay* display) {}
-}  // namespace gl::init
+// NOTE: The gl::init free functions (GetAllowedGLImplementations,
+// CreateGLContext, CreateOffscreenGLSurfaceWithFormat, InitializeGLOneOffPlatform,
+// InitializeStaticGLBindings, ShutdownGLPlatform, ...) are intentionally NOT
+// stubbed here anymore. The real Ozone implementations in libgl_init.a
+// (gl_factory_ozone.cc + gl_initializer_ozone.cc) provide them and route to the
+// qnx_screen GLOzone (native EGL/GLES2 on the Adreno). Stubbing them shadowed the
+// archive members and forced GL = none (empty allowed-impl list), which broke
+// GPU compositing.
 
+// On-screen GPU output surface. The upstream Ozone implementation lives in
+// gpu/ipc/service/image_transport_surface_linux.cc, but that file is only built
+// for is_linux || is_chromeos (not QNX), so we provide the same behavior here.
+// Returning nullptr (the old stub) forced every GPU command buffer / Viz output
+// surface to fall back to offscreen + software blit to the QNX window, which is
+// why nothing ever reached our QnxScreenGLOzoneEGL::CreateViewGLSurface and the
+// browser stayed on software compositing. Route to the real Ozone view surface.
 #include "gpu/ipc/service/image_transport_surface.h"
+#include "gpu/ipc/service/pass_through_image_transport_surface.h"
+#include "ui/gl/init/gl_factory.h"
 namespace gpu {
 scoped_refptr<gl::GLSurface> ImageTransportSurface::CreateNativeGLSurface(
-    gl::GLDisplay*, base::WeakPtr<ImageTransportSurfaceDelegate>,
-    gpu::SurfaceHandle, gl::GLSurfaceFormat) { return nullptr; }
+    gl::GLDisplay* display,
+    base::WeakPtr<ImageTransportSurfaceDelegate> delegate,
+    gpu::SurfaceHandle surface_handle,
+    gl::GLSurfaceFormat format) {
+  scoped_refptr<gl::GLSurface> surface =
+      gl::init::CreateViewGLSurface(display, surface_handle);
+  if (!surface)
+    return surface;
+  return base::MakeRefCounted<PassThroughImageTransportSurface>(
+      delegate, surface.get(), /*override_vsync_for_multi_window_swap=*/false);
+}
+// QNX has no surfaceless/overlay presenter; returning null makes Viz fall back
+// to the on-screen GLSurface path above (SkiaOutputDeviceGL).
 scoped_refptr<gl::Presenter> ImageTransportSurface::CreatePresenter(
     gl::GLDisplay*, base::WeakPtr<ImageTransportSurfaceDelegate>,
     SurfaceHandle, gl::GLSurfaceFormat) { return nullptr; }

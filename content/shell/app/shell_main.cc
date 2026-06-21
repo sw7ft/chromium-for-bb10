@@ -79,6 +79,7 @@ int main(int argc, const char** argv) {
 #else
 
 #if BUILDFLAG(IS_QNX)
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <cstring>
@@ -156,6 +157,14 @@ static void qnx_segv_handler(int sig, siginfo_t* info, void* ctx) {
 
 int main(int argc, const char** argv) {
 #if BUILDFLAG(IS_QNX)
+  // When stdout/stderr are redirected to the shared log file (not a tty) they
+  // are block-buffered, so output from a process that later hangs or is killed
+  // (e.g. an unresponsive renderer) is lost before it ever reaches disk. Make
+  // them unbuffered so every diagnostic line is flushed immediately. This is
+  // essential for debugging the multi-process child startup path, where the
+  // children produced no visible output despite running.
+  setvbuf(stdout, nullptr, _IONBF, 0);
+  setvbuf(stderr, nullptr, _IONBF, 0);
   for (int i = 1; i < argc; ++i) {
     if (strcmp(argv[i], "--qnx-trace") == 0)
       g_qnx_trace_enabled = true;
@@ -171,6 +180,35 @@ int main(int argc, const char** argv) {
       base::QnxBerryDaemonForceEnable();
   }
   QNX_TRACE_MSG("QNX: main() entered\n");
+  /* Child processes are exec'd by the browser, not the launcher, so they miss
+   * launcher's log setup. Append their stdout/stderr to the shared log. */
+  {
+    bool is_child = false;
+    const char* proc_type = "";
+    for (int i = 1; i < argc; ++i) {
+      if (strncmp(argv[i], "--type=", 7) == 0 && argv[i][7]) {
+        is_child = true;
+        proc_type = argv[i] + 7;
+        break;
+      }
+    }
+    if (is_child) {
+      int lfd = open("/accounts/1000/shared/misc/berry-kbd.log",
+                     O_WRONLY | O_CREAT | O_APPEND, 0644);
+      if (lfd >= 0) {
+        dup2(lfd, 1);
+        dup2(lfd, 2);
+        if (lfd > 2)
+          close(lfd);
+      }
+      fprintf(stderr, "QNX: child process type=%s pid=%d argc=%d\n", proc_type,
+              (int)getpid(), argc);
+      for (int i = 0; i < argc && i < 20; ++i)
+        fprintf(stderr, "QNX: child argv[%d]=%s\n", i,
+                argv[i] ? argv[i] : "(null)");
+      fflush(stderr);
+    }
+  }
   {
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
@@ -255,9 +293,16 @@ int main(int argc, const char** argv) {
   if (!getenv("LOGNAME")) setenv("LOGNAME", "user", 1);
   if (!getenv("SHELL")) setenv("SHELL", "/bin/sh", 1);
   if (!getenv("LANG")) setenv("LANG", "C", 1);
-  if (getenv("QNX_GPU_PROBE")) {
-    if (gpu::qnx::InitializeGpuLibraries())
-      gpu::qnx::PrintGpuInfo();
+  // Only run the standalone GPU probe when explicitly enabled (value != "0").
+  // The probe leaves an EGL display initialized and a context current on this
+  // thread, which can confuse the real GLOzone GL init, so it must stay off in
+  // normal GPU runs.
+  {
+    const char* gpu_probe = getenv("QNX_GPU_PROBE");
+    if (gpu_probe && gpu_probe[0] != '0') {
+      if (gpu::qnx::InitializeGpuLibraries())
+        gpu::qnx::ProbeGpuContext();
+    }
   }
   QNX_TRACE_MSG("QNX: env vars set, creating delegate\n");
 #endif
@@ -267,6 +312,22 @@ int main(int argc, const char** argv) {
   params.argv = argv;
 #if BUILDFLAG(IS_QNX)
   QNX_TRACE_MSG("QNX: calling ContentMain\n");
+  {
+    bool is_child = false;
+    const char* proc_type = "";
+    for (int i = 1; i < argc; ++i) {
+      if (strncmp(argv[i], "--type=", 7) == 0 && argv[i][7]) {
+        is_child = true;
+        proc_type = argv[i] + 7;
+        break;
+      }
+    }
+    if (is_child) {
+      fprintf(stderr, "QNX: child calling ContentMain type=%s pid=%d\n",
+              proc_type, (int)getpid());
+      fflush(stderr);
+    }
+  }
 #endif
   return content::ContentMain(std::move(params));
 }

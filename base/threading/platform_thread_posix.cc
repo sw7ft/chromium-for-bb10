@@ -127,6 +127,38 @@ void* ThreadFunc(void* params) {
   return nullptr;
 }
 
+#if BUILDFLAG(IS_QNX) && defined(__arm__)
+// QNX's thread-creation trampoline only guarantees 8-byte (AAPCS double-word)
+// stack alignment when it enters a thread's start routine. Chromium/Skia,
+// however, are compiled (like the upstream Android/Linux ARM configs) assuming a
+// 16-byte aligned stack: clang emits 16-byte-aligned NEON loads/stores
+// (e.g. `vld1.64 {d16-d17}, [rN :128]`) for q-register spills and
+// skvx::Vec<4,float> locals *without* a stack-realigning prologue. Running that
+// code on an only-8-byte-aligned stack faults with SIGBUS/BUS_ADRALN -- observed
+// crashing in GrQuadUtils::TessellationHelper::inset on the compositor thread a
+// few seconds into rendering. Fix it once, at thread entry: realign sp down to a
+// 16-byte boundary before any Chromium code runs. clang then keeps the stack
+// 16-byte aligned for the entire call tree below.
+extern "C" {
+void* QnxThreadFuncAligned(void* params) {
+  return ThreadFunc(params);
+}
+__attribute__((naked)) void* QnxThreadFuncTrampoline(void* /*params*/) {
+  // Tail-call: r0 (params) and lr are left untouched; only sp is realigned.
+  // Thumb-2 disallows SP as an operand of BIC/AND, so round down via the
+  // call-clobbered scratch register ip (r12).
+  __asm__ volatile(
+      "mov ip, sp\n\t"
+      "bic ip, ip, #15\n\t"
+      "mov sp, ip\n\t"
+      "b QnxThreadFuncAligned\n\t");
+}
+}  // extern "C"
+#define CHROMIUM_THREAD_START_ROUTINE QnxThreadFuncTrampoline
+#else
+#define CHROMIUM_THREAD_START_ROUTINE ThreadFunc
+#endif
+
 bool CreateThread(size_t stack_size,
                   bool joinable,
                   PlatformThread::Delegate* delegate,
@@ -158,7 +190,8 @@ bool CreateThread(size_t stack_size,
   params->message_pump_type = message_pump_type;
 
   pthread_t handle;
-  int err = pthread_create(&handle, &attributes, ThreadFunc, params.get());
+  int err = pthread_create(&handle, &attributes, CHROMIUM_THREAD_START_ROUTINE,
+                           params.get());
   bool success = !err;
   if (success) {
     // ThreadParams should be deleted on the created thread after used.

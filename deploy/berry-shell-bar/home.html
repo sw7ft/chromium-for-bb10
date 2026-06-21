@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Berry Browser</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: rgba(0,0,0,0); }
+  html, body { margin: 0; padding: 0; height: 100%;
+    font-family: -apple-system, "Slate Pro", Arial, sans-serif;
+    background: #11161c; color: #e8eef5; }
+  .wrap { max-width: 680px; margin: 0 auto; padding: 28px 20px; }
+  .logo { text-align: center; font-size: 40px; font-weight: 700;
+    letter-spacing: .5px; margin: 18px 0 6px; }
+  .logo span { color: #4aa3ff; }
+  .tag { text-align: center; color: #7e8a99; font-size: 16px; margin-bottom: 26px; }
+  form { display: flex; gap: 10px; margin-bottom: 10px; }
+  #omni { flex: 1; font-size: 26px; padding: 16px 18px; border-radius: 12px;
+    border: 2px solid #2b3744; background: #0b0f14; color: #fff; outline: none; }
+  #omni:focus { border-color: #4aa3ff; }
+  #go { font-size: 24px; padding: 0 24px; border: none; border-radius: 12px;
+    background: #4aa3ff; color: #06243f; font-weight: 700; }
+  .hint { text-align: center; color: #5a6776; font-size: 14px; margin-bottom: 26px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .tile { display: block; text-decoration: none; text-align: center;
+    padding: 22px 8px; border-radius: 14px; background: #1b2530; color: #dce6f1;
+    font-size: 20px; border: 1px solid #26333f; }
+  .tile b { display: block; font-size: 30px; margin-bottom: 6px; }
+  .tile:active { background: #24323f; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="logo">Berry<span>Browser</span></div>
+    <div class="tag">Chromium 120 on BlackBerry 10</div>
+
+    <form id="f">
+      <input id="omni" type="text" inputmode="url" autocomplete="off"
+             autocapitalize="off" spellcheck="false"
+             placeholder="Search or type a URL">
+      <button id="go" type="submit">Go</button>
+    </form>
+    <div class="hint">Type an address (example.com) or a search, then press Enter</div>
+
+    <div class="grid">
+      <a class="tile" href="https://www.google.com/"><b>G</b>Google</a>
+      <a class="tile" href="https://en.wikipedia.org/"><b>W</b>Wikipedia</a>
+      <a class="tile" href="https://www.youtube.com/"><b>▶</b>YouTube</a>
+      <a class="tile" href="https://www.bbc.com/news"><b>📰</b>BBC News</a>
+      <a class="tile" href="https://news.ycombinator.com/"><b>Y</b>Hacker News</a>
+      <a class="tile" href="https://duckduckgo.com/"><b>🦆</b>DuckDuckGo</a>
+    </div>
+  </div>
+
+<script>
+  var f = document.getElementById('f');
+  var omni = document.getElementById('omni');
+  f.addEventListener('submit', function(e){
+    e.preventDefault();
+    var v = (omni.value || '').trim();
+    if (!v) return;
+    var isUrl = /^[a-z]+:\/\//i.test(v) ||
+      (/^[^\s]+\.[^\s]{2,}/.test(v) && !/\s/.test(v));
+    var dest;
+    if (/^[a-z]+:\/\//i.test(v)) dest = v;
+    else if (isUrl) dest = 'https://' + v;
+    else dest = 'https://www.google.com/search?q=' + encodeURIComponent(v);
+    window.location.href = dest;
+  });
+  omni.focus();
+</script>
+</body>
+</html>

@@ -930,7 +930,8 @@ void GpuInit::InitializeInProcess(base::CommandLine* command_line,
       /*init_bindings=*/true,
       /*gpu_preference=*/gl::GpuPreference::kDefault);
   if (!gl_display) {
-    VLOG(1) << "gl::init::InitializeGLNoExtensionsOneOff failed";
+    LOG(ERROR) << "gl::init::InitializeGLNoExtensionsOneOff failed";
+    init_successful_ = false;
     return;
   }
   bool gl_disabled = gl::GetGLImplementation() == gl::kGLImplementationDisabled;

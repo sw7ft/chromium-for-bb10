@@ -342,8 +342,30 @@ void MessagePumpLibevent::Run(Delegate* delegate) {
 
     // If there is delayed work.
     DCHECK(!next_work_info.delayed_run_time.is_null());
+    TimeDelta timer_delay;
+    bool have_timer_delay = false;
     if (!next_work_info.delayed_run_time.is_max()) {
-      const TimeDelta delay = next_work_info.remaining_delay();
+      timer_delay = next_work_info.remaining_delay();
+      have_timer_delay = true;
+    }
+#if defined(__QNX__) || defined(__QNXNTO__)
+    // QNX: never block the IO thread indefinitely in event_base_loop(). A
+    // cross-thread/channel readability wakeup can be lost on QNX (see
+    // deploy/HARDENING.md), which strands an inbound browser->renderer Mojo
+    // message (e.g. NavigationClient::CommitNavigation) unread in the channel
+    // socket and wedges navigation. select() is level-triggered, so forcing a
+    // periodic wake re-scans all watched FDs and reads any pending data even if
+    // its original wakeup was dropped. Cap the wait at 50ms.
+    {
+      const TimeDelta kQnxMaxWait = Milliseconds(50);
+      if (!have_timer_delay || timer_delay > kQnxMaxWait) {
+        timer_delay = kQnxMaxWait;
+        have_timer_delay = true;
+      }
+    }
+#endif
+    if (have_timer_delay) {
+      const TimeDelta delay = timer_delay;
 
       // Setup a timer to break out of the event loop at the right time.
       struct timeval poll_tv;

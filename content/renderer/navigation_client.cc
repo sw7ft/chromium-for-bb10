@@ -55,7 +55,7 @@ void NavigationClient::CommitNavigation(
     mojom::CookieManagerInfoPtr cookie_manager_info,
     mojom::StorageInfoPtr storage_info,
     CommitNavigationCallback callback) {
-  QNX_TRACE_MSG("QNX:NavClient:Commit\n");
+  QNX_NAV_LOG_FMT("QNX:NavClient:Commit pid=%d\n", static_cast<int>(getpid()));
   DCHECK(blink::IsRequestDestinationFrame(common_params->request_destination));
 
   // TODO(https://crbug.com/1467502): The reset should be done when the
@@ -103,9 +103,17 @@ void NavigationClient::CommitFailedNavigation(
 
 void NavigationClient::Bind(
     mojo::PendingAssociatedReceiver<mojom::NavigationClient> receiver) {
+#if BUILDFLAG(IS_QNX)
+  // Bind synchronously on the current main-thread sequence. Posting to the
+  // navigation-associated task runner can defer bind/commit past the browser
+  // commit timeout when the renderer goes idle (MP white screen).
+  QNX_NAV_LOG_FMT("QNX:Nav:Bind pid=%d\n", static_cast<int>(getpid()));
+  navigation_client_receiver_.Bind(std::move(receiver));
+#else
   navigation_client_receiver_.Bind(
       std::move(receiver), render_frame_->GetTaskRunner(
                                blink::TaskType::kInternalNavigationAssociated));
+#endif
   SetDisconnectionHandler();
 }
 

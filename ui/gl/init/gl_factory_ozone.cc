@@ -17,12 +17,20 @@
 #include "ui/gl/init/ozone_util.h"
 #include "ui/gl/presenter.h"
 
+#include <cstdio>
+
 namespace gl {
 namespace init {
 
 std::vector<GLImplementationParts> GetAllowedGLImplementations() {
-  DCHECK(GetSurfaceFactoryOzone());
-  return GetSurfaceFactoryOzone()->GetAllowedGLImplementations();
+  ui::SurfaceFactoryOzone* f = GetSurfaceFactoryOzone();
+  fprintf(stderr, "QNX GL TRACE: ozone GetAllowedGLImplementations factory=%p\n",
+          static_cast<void*>(f));
+  if (!f)
+    return {};
+  std::vector<GLImplementationParts> v = f->GetAllowedGLImplementations();
+  fprintf(stderr, "QNX GL TRACE: ozone allowed size=%zu\n", v.size());
+  return v;
 }
 
 bool GetGLWindowSystemBindingInfo(const GLVersionInfo& gl_info,

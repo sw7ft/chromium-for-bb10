@@ -2,9 +2,9 @@
 <qnx xmlns="http://www.qnx.com/schemas/application/1.0">
     <id>com.sw7ft.BerryShell</id>
 
-    <name>Berry Browser</name>
-    <versionNumber>1.0.0</versionNumber>
-    <buildId>1</buildId>
+    <name>BerryBrowser V2</name>
+    <versionNumber>2.0.1</versionNumber>
+    <buildId>3</buildId>
     <description>Chromium content_shell browser for BlackBerry 10 (QNX, on-screen via qnx_screen).</description>
     <author>sw7ft</author>
 
@@ -25,6 +25,9 @@
     <asset path="payload/icudtl.dat">icudtl.dat</asset>
     <asset path="payload/snapshot_blob.bin">snapshot_blob.bin</asset>
     <asset path="payload/root_store.certs">root_store.certs</asset>
+
+    <!-- Local start page (omnibox + bookmarks) loaded by default. -->
+    <asset path="home.html">home.html</asset>
 
     <icon>
       <image>icon.png</image>

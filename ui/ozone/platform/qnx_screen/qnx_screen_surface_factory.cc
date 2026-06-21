@@ -15,6 +15,8 @@
 #include "third_party/skia/include/core/SkSurface.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/gfx/vsync_provider.h"
+#include "ui/gl/gl_implementation.h"
+#include "ui/ozone/platform/qnx_screen/qnx_screen_gl_ozone_egl.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_window.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_window_manager.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_overlay_callback.h"
@@ -131,13 +133,27 @@ class QnxScreenCanvas : public SurfaceOzoneCanvas {
 
 QnxScreenSurfaceFactory::QnxScreenSurfaceFactory(
     QnxScreenWindowManager* window_manager)
-    : window_manager_(window_manager) {}
+    : window_manager_(window_manager),
+      egl_ozone_(std::make_unique<QnxScreenGLOzoneEGL>(window_manager)) {}
 
 QnxScreenSurfaceFactory::~QnxScreenSurfaceFactory() = default;
 
 std::vector<gl::GLImplementationParts>
 QnxScreenSurfaceFactory::GetAllowedGLImplementations() {
-  return {};
+  // Native EGL/GLES2 (Adreno 330). Software is still used when --disable-gpu is
+  // set; Chromium only routes to the GLOzone when GPU is enabled.
+  fprintf(stderr, "QNX GL: GetAllowedGLImplementations -> EGLGLES2\n");
+  return {gl::GLImplementationParts(gl::kGLImplementationEGLGLES2)};
+}
+
+GLOzone* QnxScreenSurfaceFactory::GetGLOzone(
+    const gl::GLImplementationParts& implementation) {
+  switch (implementation.gl) {
+    case gl::kGLImplementationEGLGLES2:
+      return egl_ozone_.get();
+    default:
+      return nullptr;
+  }
 }
 
 std::unique_ptr<SurfaceOzoneCanvas>

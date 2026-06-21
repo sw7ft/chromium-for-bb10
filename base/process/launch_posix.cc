@@ -7,6 +7,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <fcntl.h>
 #include <sched.h>
 #include <setjmp.h>
 #include <signal.h>
@@ -69,6 +70,21 @@ extern char** environ;
 namespace base {
 
 namespace {
+
+#if defined(__QNX__)
+void QnxLogChildLaunchFail(const char* step) {
+  int fd = open("/accounts/1000/shared/misc/berry-kbd.log",
+                O_WRONLY | O_CREAT | O_APPEND, 0644);
+  if (fd < 0)
+    return;
+  const char* prefix = "QNX:LaunchFail:";
+  write(fd, prefix, 15);
+  for (const char* p = step; *p; ++p)
+    write(fd, p, 1);
+  write(fd, "\n", 1);
+  close(fd);
+}
+#endif  // defined(__QNX__)
 
 // Get the process's "environment" (i.e. the thing that setenv/getenv
 // work with).
@@ -377,12 +393,18 @@ Process LaunchProcess(const std::vector<std::string>& argv,
       base::ScopedFD null_fd(HANDLE_EINTR(open("/dev/null", O_RDONLY)));
       if (!null_fd.is_valid()) {
         RAW_LOG(ERROR, "Failed to open /dev/null");
+#if defined(__QNX__)
+        QnxLogChildLaunchFail("open_devnull");
+#endif
         _exit(127);
       }
 
       int new_fd = HANDLE_EINTR(dup2(null_fd.get(), STDIN_FILENO));
       if (new_fd != STDIN_FILENO) {
         RAW_LOG(ERROR, "Failed to dup /dev/null for stdin");
+#if defined(__QNX__)
+        QnxLogChildLaunchFail("dup2_stdin");
+#endif
         _exit(127);
       }
     }
@@ -392,6 +414,9 @@ Process LaunchProcess(const std::vector<std::string>& argv,
       // starts off a new process group with pgid equal to its process ID.
       if (setpgid(0, 0) < 0) {
         RAW_LOG(ERROR, "setpgid failed");
+#if defined(__QNX__)
+        QnxLogChildLaunchFail("setpgid");
+#endif
         _exit(127);
       }
     }
@@ -450,8 +475,12 @@ Process LaunchProcess(const std::vector<std::string>& argv,
       SetEnvironment(new_environ.get());
 
     // fd_shuffle1 is mutated by this call because it cannot malloc.
-    if (!ShuffleFileDescriptors(&fd_shuffle1))
+    if (!ShuffleFileDescriptors(&fd_shuffle1)) {
+#if defined(__QNX__)
+      QnxLogChildLaunchFail("shuffle_fds");
+#endif
       _exit(127);
+    }
 
     CloseSuperfluousFds(fd_shuffle2);
 
@@ -491,6 +520,9 @@ Process LaunchProcess(const std::vector<std::string>& argv,
 
     RAW_LOG(ERROR, "LaunchProcess: failed to execvp:");
     RAW_LOG(ERROR, argv_cstr[0]);
+#if defined(__QNX__)
+    QnxLogChildLaunchFail("execvp");
+#endif
     _exit(127);
   } else {
     // Parent process
@@ -591,8 +623,12 @@ static bool GetAppOutputInternal(
       for (size_t i = 0; i < fd_shuffle1.size(); ++i)
         fd_shuffle2.push_back(fd_shuffle1[i]);
 
-      if (!ShuffleFileDescriptors(&fd_shuffle1))
+      if (!ShuffleFileDescriptors(&fd_shuffle1)) {
+#if defined(__QNX__)
+        QnxLogChildLaunchFail("shuffle_fds_forkdelegate");
+#endif
         _exit(127);
+      }
 
       CloseSuperfluousFds(fd_shuffle2);
 

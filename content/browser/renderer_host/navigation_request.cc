@@ -33,6 +33,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/system/sys_info.h"
 #include "base/task/sequenced_task_runner.h"
+#include "base/run_loop.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "base/timer/elapsed_timer.h"
@@ -5890,13 +5891,18 @@ void NavigationRequest::CommitNavigation() {
   }
 
 #if BUILDFLAG(IS_QNX)
-  // Single-process: yield to let renderer bind NavigationClient before we send
-  // CommitNavigation Mojo. Without this, the Mojo may be delivered before the
-  // renderer has processed the GetInterface for NavigationClient.
+  // Yield so the renderer can bind NavigationClient before CommitNavigation.
+  // Multi-process needs a longer browser pump: is_connected() is unreliable
+  // on QNX and the renderer may still be processing frame-setup IPC.
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kSingleProcess)) {
     for (int i = 0; i < 5; i++) {
       base::PlatformThread::YieldCurrentThread();
+      base::PlatformThread::Sleep(base::Milliseconds(10));
+    }
+  } else {
+    for (int i = 0; i < 30; i++) {
+      base::RunLoop().RunUntilIdle();
       base::PlatformThread::Sleep(base::Milliseconds(10));
     }
   }

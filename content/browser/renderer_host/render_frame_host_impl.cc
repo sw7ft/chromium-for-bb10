@@ -51,6 +51,8 @@
 #include "base/types/optional_util.h"
 #include "build/build_config.h"
 #include "base/qnx_trace.h"
+#include "base/run_loop.h"
+#include "base/threading/platform_thread.h"
 #include "components/download/public/common/download_url_parameters.h"
 #include "components/viz/common/features.h"
 #include "content/browser/about_url_loader_factory.h"
@@ -325,6 +327,47 @@ BASE_FEATURE(kEvictOnAXEvents,
 }  // namespace features
 
 namespace content {
+
+#if BUILDFLAG(IS_QNX)
+namespace {
+
+void WaitForRendererProcessReady(RenderFrameHostImpl* frame_host) {
+  const base::TimeTicks deadline =
+      base::TimeTicks::Now() + base::Seconds(15);
+  int iterations = 0;
+  while (base::TimeTicks::Now() < deadline) {
+    base::RunLoop().RunUntilIdle();
+    base::PlatformThread::Sleep(base::Milliseconds(10));
+    ++iterations;
+    if (frame_host->GetProcess()->IsReady()) {
+      QNX_NAV_LOG_FMT("QNX:RFHI:NavClient process ready rph=%d iter=%d\n",
+                      frame_host->GetProcess()->GetID(), iterations);
+      return;
+    }
+  }
+  QNX_NAV_LOG_FMT("QNX:RFHI:NavClient process ready timeout rph=%d\n",
+                  frame_host->GetProcess()->GetID());
+}
+
+void PumpAfterNavigationClientGetInterface(RenderFrameHostImpl* frame_host) {
+  // Renderer ContentMain + BindNavigationClient typically land ~4s after the
+  // process channel connects; a shorter pump sends CommitNavigation before bind.
+  const base::TimeTicks deadline =
+      base::TimeTicks::Now() + base::Seconds(6);
+  int iterations = 0;
+  while (base::TimeTicks::Now() < deadline) {
+    base::RunLoop().RunUntilIdle();
+    base::PlatformThread::Sleep(base::Milliseconds(10));
+    ++iterations;
+  }
+  QNX_NAV_LOG_FMT(
+      "QNX:RFHI:NavClient post-GetInterface pump rph=%d iter=%d live=%d\n",
+      frame_host->GetProcess()->GetID(), iterations,
+      static_cast<int>(frame_host->IsRenderFrameLive()));
+}
+
+}  // namespace
+#endif
 
 #if defined(AX_FAIL_FAST_BUILD)
 // Enable fast fails on clusterfuzz and other builds used to debug Chrome,
@@ -10583,8 +10626,6 @@ void RenderFrameHostImpl::CommitNavigation(
     }
 
     QNX_TRACE_MSG("QNX:RFHI:4 preNavClient\n");
-    mojom::NavigationClient* navigation_client =
-        navigation_request->GetCommitNavigationClient();
 
     // Record the metrics about the state of the old main frame at the moment
     // when we navigate away from it as it matters for whether the page
@@ -10634,6 +10675,8 @@ void RenderFrameHostImpl::CommitNavigation(
     }
 
     QNX_TRACE_MSG("QNX:RFHI:5 preSendCommit\n");
+    mojom::NavigationClient* navigation_client =
+        navigation_request->GetCommitNavigationClient();
     SendCommitNavigation(
         navigation_client, navigation_request, std::move(common_params),
         std::move(commit_params), std::move(head), std::move(response_body),
@@ -11324,6 +11367,18 @@ bool RenderFrameHostImpl::WindowManagementAllowsFullscreen() {
 mojo::AssociatedRemote<mojom::NavigationClient>
 RenderFrameHostImpl::GetNavigationClientFromInterfaceProvider() {
   mojo::AssociatedRemote<mojom::NavigationClient> navigation_client_remote;
+#if BUILDFLAG(IS_QNX)
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kSingleProcess)) {
+    // Request NavigationClient only after the renderer IPC channel is up.
+    WaitForRendererProcessReady(this);
+    QNX_NAV_LOG_FMT("QNX:RFHI:NavClient GetInterface rph=%d\n",
+                    GetProcess()->GetID());
+    GetRemoteAssociatedInterfaces()->GetInterface(&navigation_client_remote);
+    PumpAfterNavigationClientGetInterface(this);
+    return navigation_client_remote;
+  }
+#endif
   GetRemoteAssociatedInterfaces()->GetInterface(&navigation_client_remote);
   return navigation_client_remote;
 }
@@ -13821,7 +13876,7 @@ void RenderFrameHostImpl::SendCommitNavigation(
   }
 
   commit_params->commit_sent = base::TimeTicks::Now();
-  QNX_TRACE_MSG("QNX:Browser:SendCommit\n");
+  QNX_NAV_LOG_FMT("QNX:Browser:SendCommit rph=%d\n", GetProcess()->GetID());
   navigation_client->CommitNavigation(
       std::move(common_params), std::move(commit_params),
       std::move(response_head), std::move(response_body),

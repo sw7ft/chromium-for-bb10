@@ -7,6 +7,7 @@
 #include "base/auto_reset.h"
 #include "base/logging.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 
 #if BUILDFLAG(IS_QNX)
@@ -67,11 +68,17 @@ void MessagePumpDefault::Run(Delegate* delegate) {
 #if BUILDFLAG(IS_QNX)
       QNX_TRACE_FMT("QNX:MPD:Wait tid=%x p=%p inf=1\n",
                     (unsigned)pthread_self(), (void*)this);
-#endif
-      event_.Wait();
-#if BUILDFLAG(IS_QNX)
+      // QNX: never park infinitely. Cross-thread WaitableEvent::Signal() can be
+      // lost on QNX (see deploy/HARDENING.md idle-wakeup stall), which wedges
+      // the renderer main thread so a browser->renderer associated Mojo message
+      // (e.g. NavigationClient::CommitNavigation) posted to this thread's queue
+      // is never serviced. Poll on a bounded TimedWait so DoWork() re-runs and
+      // drains any queued task even if its wakeup Signal was dropped.
+      event_.TimedWait(Milliseconds(50));
       QNX_TRACE_FMT("QNX:MPD:Wake tid=%x p=%p inf=1\n",
                     (unsigned)pthread_self(), (void*)this);
+#else
+      event_.Wait();
 #endif
     } else {
 #if BUILDFLAG(IS_QNX)

@@ -78,8 +78,79 @@ static void resolve_dir(char* dir, size_t n, const char* argv0) {
 int main(int argc, char** argv) {
   char dir[2048];
   resolve_dir(dir, sizeof(dir), argv[0]);
-  chdir(dir);
+
+  /* content_shell derives its writable base (TMPDIR, shared memory, caches)
+   * from getcwd() (see shell_main.cc). The Navigator launches the .bar with cwd
+   * inside the READ-ONLY install image (/apps/<sandbox>/native), so if we leave
+   * cwd there, Chromium cannot create its tmp dir / shared memory and
+   * CHECK-crashes (SIGTRAP) ~15s in. Switch cwd to a WRITABLE sandbox dir:
+   * prefer HOME (the BB10 sandbox's writable data dir), else compute
+   * <sandbox>/data from the asset dir, else fall back to the asset dir. All
+   * assets (libs, paks, home.html) are referenced by absolute path below, so
+   * moving cwd off the asset dir is safe. */
+  char work[2048];
+  work[0] = '\0';
+  {
+    const char* home = getenv("HOME");
+    if (home && home[0] && access(home, W_OK) == 0) {
+      strncpy(work, home, sizeof(work) - 1);
+      work[sizeof(work) - 1] = '\0';
+    } else {
+      strncpy(work, dir, sizeof(work) - 1);
+      work[sizeof(work) - 1] = '\0';
+      char* p = strstr(work, "/app/native");
+      if (p) {
+        *p = '\0';
+        strncat(work, "/data", sizeof(work) - strlen(work) - 1);
+      }
+      if (access(work, W_OK) != 0) {
+        strncpy(work, dir, sizeof(work) - 1);
+        work[sizeof(work) - 1] = '\0';
+      }
+    }
+  }
+  if (work[0])
+    chdir(work);
+
+  /* Default to single-process (stable GPU + on-screen rendering). Multi-process
+   * is experimental on QNX. Enable it either via QNX_MULTI_PROCESS=1 (SSH runs)
+   * or by creating the marker file below — the Navigator UI launch can't set
+   * env vars, and a UI launch is the ONLY context where BB10 hands the app a
+   * working EGL display, so the marker lets us test MP from a real app launch
+   * without reinstalling the .bar. Remove the marker to go back to SP. */
+  const char* mp_env = getenv("QNX_MULTI_PROCESS");
+  int use_multi_process = (mp_env && mp_env[0] == '1');
+  if (!use_multi_process &&
+      access("/accounts/1000/shared/misc/berry-mp.enable", F_OK) == 0)
+    use_multi_process = 1;
+  const int use_single_process = !use_multi_process;
+
+  /* DIAGNOSTIC: the .bar runs sandboxed under a per-app uid, so its own data
+   * dir and slog2 buffer are not readable over SSH as devuser. Redirect
+   * content_shell's stdout+stderr to the SHARED folder (group-readable by
+   * devuser) so we can capture startup/crash output and the QNX_KBD_DEBUG probe
+   * from the actual app. Requires <access_shared> (declared in the descriptor).
+   * Harmless if the open fails (e.g. permission) - the app still runs. */
+  {
+    int lfd = open("/accounts/1000/shared/misc/berry-kbd.log",
+                   O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (lfd >= 0) {
+      dup2(lfd, 1);
+      dup2(lfd, 2);
+      if (lfd > 2)
+        close(lfd);
+    }
+    setenv("QNX_KBD_DEBUG", "1", 1);
+    /* Probe already confirmed Adreno 330 / EGL 1.4 / GLES2 works in-app; the
+     * real GLOzone path now drives GL, so leave the standalone probe off to
+     * avoid leaving a stray EGL context current before content GL init. */
+    setenv("QNX_GPU_PROBE", "0", 1);
+  }
+
   fprintf(stderr, "BerryShell: app dir = %s\n", dir);
+  fprintf(stderr, "BerryShell: work dir (cwd) = %s\n", work);
+  fprintf(stderr, "BerryShell: %s\n",
+          use_single_process ? "single-process mode" : "multi-process mode");
 
   /* Bundled shared libs sit next to content_shell. */
   {
@@ -102,25 +173,57 @@ int main(int argc, char** argv) {
   setenv("QNX_SCREEN_ROTATION", kRotation, 0);
 
   char shell[2100];
-  snprintf(shell, sizeof(shell), "%s/content_shell", dir);
+  snprintf(shell, sizeof(shell), "%s/content_shell.bin", dir);
 
-  const char* url = (argc > 1 && argv[1] && argv[1][0]) ? argv[1] : kDefaultUrl;
+  /* Default to the bundled start page (omnibox + bookmarks) so the user can
+   * navigate anywhere. Built from our own dir for a valid in-sandbox file://
+   * path. A URL arg overrides. */
+  char home[2300];
+  snprintf(home, sizeof(home), "file://%s/home.html", dir);
+  const char* url = (argc > 1 && argv[1] && argv[1][0]) ? argv[1] : home;
+  (void)kDefaultUrl;
 
-  char* const new_argv[] = {
-      shell,
-      (char*)"--no-sandbox",
-      (char*)"--no-zygote",
-      (char*)"--single-process",
-      (char*)"--disable-gpu",
-      (char*)"--disable-gpu-compositing",
-      (char*)"--ozone-platform=qnx_screen",
-      (char*)kScaleFactor,
-      (char*)kDisableFeatures,
-      (char*)url,
-      NULL,
-  };
+  char subprocess_path[2300];
+  snprintf(subprocess_path, sizeof(subprocess_path),
+           "--browser-subprocess-path=%s/content_shell.exe", dir);
 
-  execv(shell, new_argv);
+  /* Multi-process is the main performance win once GPU is stable: the browser
+   * UI thread stays responsive while the renderer parses/layouts in a separate
+   * process and the GPU process handles GL. QNX has no zygote (keep --no-zygote)
+   * and no sandbox (--no-sandbox). Set QNX_MULTI_PROCESS=1 to try multi-process;
+   * single-process is the default until MP GPU init is stable.
+   *
+   * Separate gpu-process on QNX currently spins/crashes (no shared Screen
+   * context with the browser window). Keep GL in the browser via --in-process-gpu
+   * while renderer/utility stay out-of-process.
+   *
+   * Children are launched by base::LaunchProcess (content/browser/
+   * child_process_launcher_helper_qnx.cc), which already forwards LD_LIBRARY_PATH
+   * and the rest of the env. Point them straight at content_shell.exe (the real
+   * binary) rather than the content_shell.bin log-and-exec wrapper: the wrapper
+   * does no env setup and only adds an extra execv hop that silently failed for
+   * children (they spawned but never reached main()). */
+  char* argv_buf[19];
+  int n = 0;
+  argv_buf[n++] = shell;
+  argv_buf[n++] = (char*)"--no-sandbox";
+  argv_buf[n++] = (char*)"--no-zygote";
+  if (use_single_process)
+    argv_buf[n++] = (char*)"--single-process";
+  if (!use_single_process) {
+    argv_buf[n++] = subprocess_path;
+    argv_buf[n++] = (char*)"--in-process-gpu";
+  }
+  argv_buf[n++] = (char*)"--use-gl=egl";
+  argv_buf[n++] = (char*)"--ozone-platform=qnx_screen";
+  argv_buf[n++] = (char*)"--ignore-gpu-blocklist";
+  argv_buf[n++] = (char*)"--enable-gpu-rasterization";
+  argv_buf[n++] = (char*)kScaleFactor;
+  argv_buf[n++] = (char*)kDisableFeatures;
+  argv_buf[n++] = (char*)url;
+  argv_buf[n++] = NULL;
+
+  execv(shell, argv_buf);
 
   /* Only reached if exec fails. */
   perror("BerryShell: execv content_shell failed");

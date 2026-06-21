@@ -2163,7 +2163,8 @@ void RenderFrameImpl::BindFrameBindingsControl(
 
 void RenderFrameImpl::BindNavigationClient(
     mojo::PendingAssociatedReceiver<mojom::NavigationClient> receiver) {
-  QNX_TRACE_MSG("QNX:RFI:BindNavClient\n");
+  QNX_NAV_LOG_FMT("QNX:RFI:BindNavClient pid=%d\n",
+                  static_cast<int>(getpid()));
   navigation_client_impl_ = std::make_unique<NavigationClient>(this);
   navigation_client_impl_->Bind(std::move(receiver));
 }
@@ -2667,7 +2668,7 @@ void RenderFrameImpl::CommitNavigation(
     mojom::CookieManagerInfoPtr cookie_manager_info,
     mojom::StorageInfoPtr storage_info,
     mojom::NavigationClient::CommitNavigationCallback commit_callback) {
-  QNX_TRACE_MSG("QNX:RFI:CommitNav enter\n");
+  QNX_NAV_LOG("QNX:RFI:CommitNav enter\n");
   DCHECK(navigation_client_impl_);
   DCHECK(!blink::IsRendererDebugURL(common_params->url));
   DCHECK(!NavigationTypeUtils::IsSameDocument(common_params->navigation_type));
@@ -3810,7 +3811,7 @@ void RenderFrameImpl::DidCommitNavigation(
     bool should_reset_browser_interface_broker,
     const blink::ParsedPermissionsPolicy& permissions_policy_header,
     const blink::DocumentPolicyFeatureState& document_policy_header) {
-  QNX_TRACE_MSG("QNX:RFI:DidCommitNav\n");
+  QNX_NAV_LOG("QNX:RFI:DidCommitNav\n");
   CHECK_EQ(NavigationCommitState::kWillCommit, navigation_commit_state_);
   navigation_commit_state_ = NavigationCommitState::kDidCommit;
 
@@ -4088,7 +4089,7 @@ void RenderFrameImpl::DidHandleOnloadEvents() {
 }
 
 void RenderFrameImpl::DidFinishLoad() {
-  QNX_TRACE_MSG("QNX:RFI:DidFinishLoad\n");
+  QNX_NAV_LOG("QNX:RFI:DidFinishLoad\n");
   TRACE_EVENT1("navigation,benchmark,rail", "RenderFrameImpl::didFinishLoad",
                "id", routing_id_);
   if (!frame_->Parent()) {

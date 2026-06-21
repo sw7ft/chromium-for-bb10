@@ -87,6 +87,15 @@ bool InitializeEglDisplay(void** out_display, void** out_config);
 // Print GPU vendor/renderer/version info
 void PrintGpuInfo();
 
+// Create Screen connection + initialize EGL display before ContentMain.
+// BB10 rejects eglGetDisplay if Screen is set up too late in browser startup.
+// Does not create a GL context (unlike ProbeGpuContext).
+bool WarmUpEglEarly();
+
+// Full probe: init EGL, create a 1x1 pbuffer GLES2 context, make it current,
+// and print real GL strings. Proves the Adreno driver is usable.
+bool ProbeGpuContext();
+
 // Release GPU resources
 void ShutdownGpu();
 
