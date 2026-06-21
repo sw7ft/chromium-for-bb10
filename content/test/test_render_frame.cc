@@ -210,6 +210,7 @@ class MockFrameHost : public mojom::FrameHost {
   }
 
   void DidStopLoading() override {}
+  void DidBindNavigationClient() override {}
 
 #if BUILDFLAG(IS_ANDROID)
   void UpdateUserGestureCarryoverInfo() override {}

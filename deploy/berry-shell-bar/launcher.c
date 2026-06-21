@@ -35,7 +35,8 @@ static const char* kScaleFactor = "--force-device-scale-factor=2";
  * an invalid state via the dedicated network thread + sync cookie IPC). Viz is
  * intentionally left ENABLED because on-screen qnx_screen rendering needs it. */
 static const char* kDisableFeatures =
-    "--disable-features=ServiceWorker,NetworkServiceDedicatedThread,MojoIpcz";
+    "--disable-features=ServiceWorker,NetworkServiceDedicatedThread,MojoIpcz,"
+    "Translate,OptimizationHints,MediaRouter,PreconnectToSearch";
 
 /* Resolve the directory that holds this executable (the app's native asset
  * dir). The Navigator launches the app with cwd=/accounts/devuser (NOT the
@@ -140,7 +141,12 @@ int main(int argc, char** argv) {
       if (lfd > 2)
         close(lfd);
     }
-    setenv("QNX_KBD_DEBUG", "1", 1);
+    /* Verbose touch/screen + nav IPC tracing costs measurable load time on BB10.
+     * Enable only when debugging: touch berry-kbd.debug in shared/misc. */
+    if (access("/accounts/1000/shared/misc/berry-kbd.debug", F_OK) == 0) {
+      setenv("QNX_KBD_DEBUG", "1", 1);
+      setenv("QNX_NAV_DEBUG", "1", 1);
+    }
     /* Probe already confirmed Adreno 330 / EGL 1.4 / GLES2 works in-app; the
      * real GLOzone path now drives GL, so leave the standalone probe off to
      * avoid leaving a stray EGL context current before content GL init. */
@@ -187,11 +193,11 @@ int main(int argc, char** argv) {
   snprintf(subprocess_path, sizeof(subprocess_path),
            "--browser-subprocess-path=%s/content_shell.exe", dir);
 
-  /* Multi-process is the main performance win once GPU is stable: the browser
-   * UI thread stays responsive while the renderer parses/layouts in a separate
-   * process and the GPU process handles GL. QNX has no zygote (keep --no-zygote)
-   * and no sandbox (--no-sandbox). Set QNX_MULTI_PROCESS=1 to try multi-process;
-   * single-process is the default until MP GPU init is stable.
+  /* Single-process is the default and fastest path on BB10 (no cross-process
+   * Mojo IPC for every navigation). Multi-process is experimental: it improves
+   * crash isolation, not raw load speed. QNX has no zygote (keep --no-zygote)
+   * and no sandbox (--no-sandbox). Set QNX_MULTI_PROCESS=1 or create
+   * berry-mp.enable to try multi-process.
    *
    * Separate gpu-process on QNX currently spins/crashes (no shared Screen
    * context with the browser window). Keep GL in the browser via --in-process-gpu
@@ -203,7 +209,7 @@ int main(int argc, char** argv) {
    * binary) rather than the content_shell.bin log-and-exec wrapper: the wrapper
    * does no env setup and only adds an extra execv hop that silently failed for
    * children (they spawned but never reached main()). */
-  char* argv_buf[19];
+  char* argv_buf[32];
   int n = 0;
   argv_buf[n++] = shell;
   argv_buf[n++] = (char*)"--no-sandbox";
@@ -214,6 +220,18 @@ int main(int argc, char** argv) {
     argv_buf[n++] = subprocess_path;
     argv_buf[n++] = (char*)"--in-process-gpu";
   }
+  /* Startup / load-speed flags (safe on QNX; see deploy/HARDENING.md). */
+  argv_buf[n++] = (char*)"--disable-background-networking";
+  argv_buf[n++] = (char*)"--disable-client-side-phishing-detection";
+  argv_buf[n++] = (char*)"--disable-default-apps";
+  argv_buf[n++] = (char*)"--disable-domain-reliability";
+  argv_buf[n++] = (char*)"--disable-hang-monitor";
+  argv_buf[n++] = (char*)"--disable-prompt-on-repost";
+  argv_buf[n++] = (char*)"--disable-sync";
+  argv_buf[n++] = (char*)"--disable-translate";
+  argv_buf[n++] = (char*)"--no-first-run";
+  argv_buf[n++] = (char*)"--no-default-browser-check";
+  argv_buf[n++] = (char*)"--disable-component-update";
   argv_buf[n++] = (char*)"--use-gl=egl";
   argv_buf[n++] = (char*)"--ozone-platform=qnx_screen";
   argv_buf[n++] = (char*)"--ignore-gpu-blocklist";

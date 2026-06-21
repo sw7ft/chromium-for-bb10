@@ -2167,6 +2167,12 @@ void RenderFrameImpl::BindNavigationClient(
                   static_cast<int>(getpid()));
   navigation_client_impl_ = std::make_unique<NavigationClient>(this);
   navigation_client_impl_->Bind(std::move(receiver));
+#if BUILDFLAG(IS_QNX)
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kSingleProcess)) {
+    GetFrameHost()->DidBindNavigationClient();
+  }
+#endif
 }
 
 // Unload this RenderFrame so the frame can navigate to a document rendered by

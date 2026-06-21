@@ -3362,6 +3362,7 @@ class CONTENT_EXPORT RenderFrameHostImpl
   void UpdateState(const blink::PageState& state) override;
   void OpenURL(blink::mojom::OpenURLParamsPtr params) override;
   void DidStopLoading() override;
+  void DidBindNavigationClient() override;
 
   // blink::mojom::AssociatedInterfaceProvider:
   void GetAssociatedInterface(

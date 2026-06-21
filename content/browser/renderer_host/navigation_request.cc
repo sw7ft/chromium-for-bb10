@@ -216,6 +216,11 @@ constexpr base::TimeDelta kDefaultCommitTimeout = base::Seconds(30);
 // Overrideable via SetCommitTimeoutForTesting.
 base::TimeDelta g_commit_timeout = kDefaultCommitTimeout;
 
+#if BUILDFLAG(IS_QNX)
+constexpr int kQnxCommitRetryMaxAttempts = 480;
+constexpr base::TimeDelta kQnxCommitRetryInterval = base::Milliseconds(250);
+#endif
+
 #if BUILDFLAG(IS_ANDROID)
 // Timeout for locking the compositor at the beginning of navigation.
 constexpr base::TimeDelta kCompositorLockTimeout = base::Milliseconds(150);
@@ -2019,6 +2024,10 @@ NavigationRequest::~NavigationRequest() {
   // any sort of state change. For example, when the delegate is informed that a
   // navigation has started the delegate is not expected to call Stop().
   DCHECK(is_safe_to_delete_);
+#endif
+
+#if BUILDFLAG(IS_QNX)
+  StopQnxCommitRetry();
 #endif
 
   // Close the last child event. Tracing no longer outputs the end event name,
@@ -5891,16 +5900,11 @@ void NavigationRequest::CommitNavigation() {
   }
 
 #if BUILDFLAG(IS_QNX)
-  // Yield so the renderer can bind NavigationClient before CommitNavigation.
-  // Multi-process needs a longer browser pump: is_connected() is unreliable
-  // on QNX and the renderer may still be processing frame-setup IPC.
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+  // Multi-process only: pump the IO thread so the renderer can bind
+  // NavigationClient before CommitNavigation IPC is sent (see
+  // RenderFrameHostImpl::GetNavigationClientFromInterfaceProvider).
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kSingleProcess)) {
-    for (int i = 0; i < 5; i++) {
-      base::PlatformThread::YieldCurrentThread();
-      base::PlatformThread::Sleep(base::Milliseconds(10));
-    }
-  } else {
     for (int i = 0; i < 30; i++) {
       base::RunLoop().RunUntilIdle();
       base::PlatformThread::Sleep(base::Milliseconds(10));
@@ -7820,6 +7824,185 @@ void NavigationRequest::GetResponseBody(ResponseBodyCallback callback) {
   response_body_watcher_->ArmOrNotify();
 }
 
+#if BUILDFLAG(IS_QNX)
+struct NavigationRequest::QnxPendingCommit {
+  blink::mojom::CommonNavigationParamsPtr common_params;
+  blink::mojom::CommitNavigationParamsPtr commit_params;
+  network::mojom::URLResponseHeadPtr response_head;
+  mojo::ScopedDataPipeConsumerHandle response_body;
+  network::mojom::URLLoaderClientEndpointsPtr url_loader_client_endpoints;
+  std::unique_ptr<blink::PendingURLLoaderFactoryBundle> subresource_loader_factories;
+  absl::optional<std::vector<blink::mojom::TransferrableURLLoaderPtr>>
+      subresource_overrides;
+  blink::mojom::ControllerServiceWorkerInfoPtr controller;
+  blink::mojom::ServiceWorkerContainerInfoForClientPtr container_info;
+  mojo::PendingRemote<network::mojom::URLLoaderFactory>
+      subresource_proxying_loader_factory;
+  mojo::PendingRemote<network::mojom::URLLoaderFactory> keep_alive_loader_factory;
+  mojo::PendingAssociatedRemote<blink::mojom::FetchLaterLoaderFactory>
+      fetch_later_loader_factory;
+  blink::DocumentToken document_token;
+  base::UnguessableToken devtools_navigation_token;
+  absl::optional<blink::ParsedPermissionsPolicy> permissions_policy;
+  blink::mojom::PolicyContainerPtr policy_container;
+  mojo::PendingRemote<blink::mojom::CodeCacheHost> code_cache_host;
+  mojo::PendingRemote<blink::mojom::ResourceCache> resource_cache_remote;
+  mojom::CookieManagerInfoPtr cookie_manager_info;
+  mojom::StorageInfoPtr storage_info;
+  mojom::NavigationClient::CommitNavigationCallback callback;
+};
+
+void NavigationRequest::BeginDeferredQnxCommitIpc(
+    blink::mojom::CommonNavigationParamsPtr common_params,
+    blink::mojom::CommitNavigationParamsPtr commit_params,
+    network::mojom::URLResponseHeadPtr response_head,
+    mojo::ScopedDataPipeConsumerHandle response_body,
+    network::mojom::URLLoaderClientEndpointsPtr url_loader_client_endpoints,
+    std::unique_ptr<blink::PendingURLLoaderFactoryBundle> subresource_loader_factories,
+    absl::optional<std::vector<blink::mojom::TransferrableURLLoaderPtr>>
+        subresource_overrides,
+    blink::mojom::ControllerServiceWorkerInfoPtr controller,
+    blink::mojom::ServiceWorkerContainerInfoForClientPtr container_info,
+    mojo::PendingRemote<network::mojom::URLLoaderFactory>
+        subresource_proxying_loader_factory,
+    mojo::PendingRemote<network::mojom::URLLoaderFactory>
+        keep_alive_loader_factory,
+    mojo::PendingAssociatedRemote<blink::mojom::FetchLaterLoaderFactory>
+        fetch_later_loader_factory,
+    const blink::DocumentToken& document_token,
+    const base::UnguessableToken& devtools_navigation_token,
+    const absl::optional<blink::ParsedPermissionsPolicy>& permissions_policy,
+    blink::mojom::PolicyContainerPtr policy_container,
+    mojo::PendingRemote<blink::mojom::CodeCacheHost> code_cache_host,
+    mojo::PendingRemote<blink::mojom::ResourceCache> resource_cache_remote,
+    mojom::CookieManagerInfoPtr cookie_manager_info,
+    mojom::StorageInfoPtr storage_info,
+    mojom::NavigationClient::CommitNavigationCallback callback) {
+  if (qnx_pending_commit_)
+    return;
+
+  qnx_pending_commit_ = std::make_unique<QnxPendingCommit>();
+  qnx_pending_commit_->common_params = std::move(common_params);
+  qnx_pending_commit_->commit_params = std::move(commit_params);
+  qnx_pending_commit_->response_head = std::move(response_head);
+  qnx_pending_commit_->response_body = std::move(response_body);
+  qnx_pending_commit_->url_loader_client_endpoints =
+      std::move(url_loader_client_endpoints);
+  qnx_pending_commit_->subresource_loader_factories =
+      std::move(subresource_loader_factories);
+  qnx_pending_commit_->subresource_overrides = std::move(subresource_overrides);
+  qnx_pending_commit_->controller = std::move(controller);
+  qnx_pending_commit_->container_info = std::move(container_info);
+  qnx_pending_commit_->subresource_proxying_loader_factory =
+      std::move(subresource_proxying_loader_factory);
+  qnx_pending_commit_->keep_alive_loader_factory =
+      std::move(keep_alive_loader_factory);
+  qnx_pending_commit_->fetch_later_loader_factory =
+      std::move(fetch_later_loader_factory);
+  qnx_pending_commit_->document_token = document_token;
+  qnx_pending_commit_->devtools_navigation_token = devtools_navigation_token;
+  qnx_pending_commit_->permissions_policy = permissions_policy;
+  qnx_pending_commit_->policy_container = std::move(policy_container);
+  qnx_pending_commit_->code_cache_host = std::move(code_cache_host);
+  qnx_pending_commit_->resource_cache_remote = std::move(resource_cache_remote);
+  qnx_pending_commit_->cookie_manager_info = std::move(cookie_manager_info);
+  qnx_pending_commit_->storage_info = std::move(storage_info);
+  qnx_pending_commit_->callback = std::move(callback);
+
+  QNX_NAV_LOG_FMT("QNX:Browser:DeferCommit rph=%d\n",
+                  GetRenderFrameHost()->GetProcess()->GetID());
+  StartQnxCommitRetry();
+}
+
+void NavigationRequest::StartQnxCommitRetry() {
+  if (qnx_commit_retry_timer_.IsRunning())
+    return;
+
+  qnx_commit_retry_attempts_ = 0;
+  qnx_commit_retry_timer_.Start(
+      FROM_HERE, kQnxCommitRetryInterval,
+      base::BindRepeating(&NavigationRequest::OnQnxCommitRetry,
+                          base::Unretained(this)));
+  OnQnxCommitRetry();
+}
+
+void NavigationRequest::StopQnxCommitRetry() {
+  qnx_commit_retry_timer_.Stop();
+  qnx_pending_commit_.reset();
+  qnx_commit_retry_attempts_ = 0;
+  qnx_commit_post_send_done_ = false;
+  qnx_commit_sent_ = false;
+}
+
+bool NavigationRequest::TrySendQnxPendingCommit() {
+  if (!qnx_pending_commit_ || state_ != READY_TO_COMMIT || qnx_commit_sent_)
+    return false;
+
+  mojom::NavigationClient* navigation_client = GetCommitNavigationClient();
+  if (!navigation_client)
+    return false;
+
+  QNX_NAV_LOG_FMT("QNX:Browser:SendCommit rph=%d retry=%d\n",
+                  GetRenderFrameHost()->GetProcess()->GetID(),
+                  qnx_commit_retry_attempts_);
+
+  navigation_client->CommitNavigation(
+      std::move(qnx_pending_commit_->common_params),
+      std::move(qnx_pending_commit_->commit_params),
+      std::move(qnx_pending_commit_->response_head),
+      std::move(qnx_pending_commit_->response_body),
+      std::move(qnx_pending_commit_->url_loader_client_endpoints),
+      std::move(qnx_pending_commit_->subresource_loader_factories),
+      std::move(qnx_pending_commit_->subresource_overrides),
+      std::move(qnx_pending_commit_->controller),
+      std::move(qnx_pending_commit_->container_info),
+      std::move(qnx_pending_commit_->subresource_proxying_loader_factory),
+      std::move(qnx_pending_commit_->keep_alive_loader_factory),
+      std::move(qnx_pending_commit_->fetch_later_loader_factory),
+      qnx_pending_commit_->document_token,
+      qnx_pending_commit_->devtools_navigation_token,
+      qnx_pending_commit_->permissions_policy,
+      std::move(qnx_pending_commit_->policy_container),
+      std::move(qnx_pending_commit_->code_cache_host),
+      std::move(qnx_pending_commit_->resource_cache_remote),
+      std::move(qnx_pending_commit_->cookie_manager_info),
+      std::move(qnx_pending_commit_->storage_info),
+      std::move(qnx_pending_commit_->callback));
+
+  qnx_commit_sent_ = true;
+
+  if (!qnx_commit_post_send_done_) {
+    qnx_commit_post_send_done_ = true;
+    UpdateNavigationHandleTimingsOnCommitSent();
+    RenderProcessHostImpl::NotifySpareManagerAboutRecentlyUsedBrowserContext(
+        GetRenderFrameHost()->GetSiteInstance()->GetBrowserContext());
+    SendDeferredConsoleMessages();
+  }
+
+  return true;
+}
+
+void NavigationRequest::OnQnxNavigationClientBound() {
+  QNX_NAV_LOG_FMT("QNX:Browser:NavClientBound rph=%d\n",
+                  GetRenderFrameHost()->GetProcess()->GetID());
+  TrySendQnxPendingCommit();
+}
+
+void NavigationRequest::OnQnxCommitRetry() {
+  if (!qnx_pending_commit_ || state_ != READY_TO_COMMIT)
+    return StopQnxCommitRetry();
+
+  ++qnx_commit_retry_attempts_;
+  if (qnx_commit_retry_attempts_ > kQnxCommitRetryMaxAttempts) {
+    QNX_NAV_LOG_FMT("QNX:Browser:CommitRetry give up attempts=%d\n",
+                    qnx_commit_retry_attempts_);
+    return StopQnxCommitRetry();
+  }
+
+  base::RunLoop().RunUntilIdle();
+}
+#endif  // BUILDFLAG(IS_QNX)
+
 void NavigationRequest::RenderProcessBlockedStateChanged(bool blocked) {
   if (blocked)
     StopCommitTimeout();
@@ -7831,6 +8014,9 @@ void NavigationRequest::StopCommitTimeout() {
   commit_timeout_timer_.Stop();
   render_process_blocked_state_changed_subscription_ = {};
   GetRenderFrameHost()->GetRenderWidgetHost()->RendererIsResponsive();
+#if BUILDFLAG(IS_QNX)
+  StopQnxCommitRetry();
+#endif
 }
 
 void NavigationRequest::RestartCommitTimeout() {

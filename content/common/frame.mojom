@@ -825,4 +825,7 @@ interface FrameHost {
 
   // Called when the renderer is done loading a frame.
   DidStopLoading();
+
+  // QNX multi-process: renderer notifies browser after NavigationClient bind.
+  DidBindNavigationClient();
 };

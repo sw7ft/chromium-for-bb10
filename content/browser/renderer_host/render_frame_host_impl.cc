@@ -8171,6 +8171,15 @@ void RenderFrameHostImpl::GetAssociatedInterface(
     return;
 }
 
+void RenderFrameHostImpl::DidBindNavigationClient() {
+#if BUILDFLAG(IS_QNX)
+  if (NavigationRequest* request =
+          FindLatestNavigationRequestThatIsStillCommitting()) {
+    request->OnQnxNavigationClientBound();
+  }
+#endif
+}
+
 void RenderFrameHostImpl::DidStopLoading() {
   TRACE_EVENT("navigation", "RenderFrameHostImpl::DidStopLoading",
               ChromeTrackEvent::kRenderFrameHost, this);
@@ -13877,6 +13886,27 @@ void RenderFrameHostImpl::SendCommitNavigation(
 
   commit_params->commit_sent = base::TimeTicks::Now();
   QNX_NAV_LOG_FMT("QNX:Browser:SendCommit rph=%d\n", GetProcess()->GetID());
+#if BUILDFLAG(IS_QNX)
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kSingleProcess) &&
+      navigation_request) {
+    navigation_request->BeginDeferredQnxCommitIpc(
+        std::move(common_params), std::move(commit_params),
+        std::move(response_head), std::move(response_body),
+        std::move(url_loader_client_endpoints),
+        std::move(subresource_loader_factories), std::move(subresource_overrides),
+        std::move(controller), std::move(container_info),
+        std::move(subresource_proxying_loader_factory),
+        std::move(keep_alive_loader_factory),
+        std::move(fetch_later_loader_factory), document_token,
+        devtools_navigation_token, permissions_policy,
+        std::move(policy_container), std::move(code_cache_host),
+        std::move(resource_cache_remote), std::move(cookie_manager_info),
+        std::move(storage_info),
+        BuildCommitNavigationCallback(navigation_request));
+    return;
+  }
+#endif
   navigation_client->CommitNavigation(
       std::move(common_params), std::move(commit_params),
       std::move(response_head), std::move(response_body),

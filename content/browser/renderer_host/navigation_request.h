@@ -590,6 +590,11 @@ class CONTENT_EXPORT NavigationRequest
   // for commit.
   mojom::NavigationClient* GetCommitNavigationClient();
 
+#if BUILDFLAG(IS_QNX)
+  // Called when the renderer has bound its NavigationClient endpoint.
+  void OnQnxNavigationClientBound();
+#endif
+
   void set_transition(ui::PageTransition transition) {
     common_params_->transition = transition;
   }
@@ -1302,6 +1307,7 @@ class CONTENT_EXPORT NavigationRequest
 
  private:
   friend class NavigationRequestTest;
+  friend class RenderFrameHostImpl;
 
   struct ConsoleMessage {
     blink::mojom::ConsoleMessageLevel level;
@@ -1723,6 +1729,47 @@ class CONTENT_EXPORT NavigationRequest
 
   void StopCommitTimeout();
   void RestartCommitTimeout();
+
+#if BUILDFLAG(IS_QNX)
+  // QNX multi-process: defer CommitNavigation IPC until NavigationClient bind.
+  struct QnxPendingCommit;
+  void BeginDeferredQnxCommitIpc(
+      blink::mojom::CommonNavigationParamsPtr common_params,
+      blink::mojom::CommitNavigationParamsPtr commit_params,
+      network::mojom::URLResponseHeadPtr response_head,
+      mojo::ScopedDataPipeConsumerHandle response_body,
+      network::mojom::URLLoaderClientEndpointsPtr url_loader_client_endpoints,
+      std::unique_ptr<blink::PendingURLLoaderFactoryBundle>
+          subresource_loader_factories,
+      absl::optional<std::vector<blink::mojom::TransferrableURLLoaderPtr>>
+          subresource_overrides,
+      blink::mojom::ControllerServiceWorkerInfoPtr controller,
+      blink::mojom::ServiceWorkerContainerInfoForClientPtr container_info,
+      mojo::PendingRemote<network::mojom::URLLoaderFactory>
+          subresource_proxying_loader_factory,
+      mojo::PendingRemote<network::mojom::URLLoaderFactory>
+          keep_alive_loader_factory,
+      mojo::PendingAssociatedRemote<blink::mojom::FetchLaterLoaderFactory>
+          fetch_later_loader_factory,
+      const blink::DocumentToken& document_token,
+      const base::UnguessableToken& devtools_navigation_token,
+      const absl::optional<blink::ParsedPermissionsPolicy>& permissions_policy,
+      blink::mojom::PolicyContainerPtr policy_container,
+      mojo::PendingRemote<blink::mojom::CodeCacheHost> code_cache_host,
+      mojo::PendingRemote<blink::mojom::ResourceCache> resource_cache_remote,
+      mojom::CookieManagerInfoPtr cookie_manager_info,
+      mojom::StorageInfoPtr storage_info,
+      mojom::NavigationClient::CommitNavigationCallback callback);
+  void StartQnxCommitRetry();
+  void StopQnxCommitRetry();
+  void OnQnxCommitRetry();
+  bool TrySendQnxPendingCommit();
+  std::unique_ptr<QnxPendingCommit> qnx_pending_commit_;
+  base::RepeatingTimer qnx_commit_retry_timer_;
+  int qnx_commit_retry_attempts_ = 0;
+  bool qnx_commit_post_send_done_ = false;
+  bool qnx_commit_sent_ = false;
+#endif
 
   std::vector<std::string> TakeRemovedRequestHeaders() {
     return std::move(removed_request_headers_);

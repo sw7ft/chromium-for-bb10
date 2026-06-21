@@ -67,7 +67,7 @@
     else dest = 'https://www.google.com/search?q=' + encodeURIComponent(v);
     window.location.href = dest;
   });
-  omni.focus();
+  requestAnimationFrame(function(){ omni.focus(); });
 </script>
 </body>
 </html>

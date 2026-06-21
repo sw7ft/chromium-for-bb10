@@ -278,10 +278,6 @@ void ChannelPosix::WillDestroyCurrentMessageLoop() {
 void ChannelPosix::OnFileCanReadWithoutBlocking(int fd) {
   QNX_TRACE_FMT("QNX:Mojo:Read fd=%d\n", fd);
   CHECK_EQ(fd, socket_.get());
-#if defined(__QNX__)
-  QNX_NAV_LOG_FMT("QNX:Mojo:ChanRead pid=%d fd=%d\n",
-                  static_cast<int>(getpid()), fd);
-#endif
 
   bool validation_error = false;
   bool read_error = false;
@@ -301,6 +297,10 @@ void ChannelPosix::OnFileCanReadWithoutBlocking(int fd) {
       incoming_fds_.emplace_back(std::move(incoming_fd));
 
     if (read_result > 0) {
+#if defined(__QNX__)
+      QNX_NAV_LOG_FMT("QNX:Mojo:ChanRead pid=%d fd=%d bytes=%zd\n",
+                      static_cast<int>(getpid()), fd, read_result);
+#endif
       bytes_read = static_cast<size_t>(read_result);
       total_bytes_read += bytes_read;
       if (!OnReadComplete(bytes_read, &next_read_size)) {

@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <unistd.h>
 
 extern bool g_qnx_trace_enabled;
@@ -51,20 +52,36 @@ inline const char* QnxSafeStr(const char* s) {
 #define QNX_TRACE_THEN(msg, result) \
   ([&]() -> decltype(auto) { QNX_TRACE_MSG(msg); return (result); }())
 
-// Low-volume navigation milestones for multi-process bring-up. Always on so
-// berry-kbd.log stays readable without QNX_TRACE=1.
+// Low-volume navigation milestones for multi-process bring-up. Off by default
+// for production load speed; enable with QNX_NAV_DEBUG=1 or the berry-kbd.debug
+// marker on device (launcher sets both when that marker exists).
+namespace base {
+inline bool QnxNavLogEnabled() {
+  static const bool on = []() {
+    if (getenv("QNX_NAV_DEBUG"))
+      return true;
+    return access("/accounts/1000/shared/misc/berry-kbd.debug", F_OK) == 0;
+  }();
+  return on;
+}
+}  // namespace base
+
 #define QNX_NAV_LOG(msg)                       \
   do {                                         \
-    const char _qn[] = msg;                    \
-    ::write(2, _qn, sizeof(_qn) - 1);         \
+    if (base::QnxNavLogEnabled()) {            \
+      const char _qn[] = msg;                  \
+      ::write(2, _qn, sizeof(_qn) - 1);       \
+    }                                          \
   } while (0)
 
 #define QNX_NAV_LOG_FMT(fmt, ...)              \
   do {                                         \
-    char _qn[256];                             \
-    int _ql = snprintf(_qn, sizeof(_qn), fmt, __VA_ARGS__); \
-    if (_ql > 0)                               \
-      ::write(2, _qn, _ql);                    \
+    if (base::QnxNavLogEnabled()) {            \
+      char _qn[256];                           \
+      int _ql = snprintf(_qn, sizeof(_qn), fmt, __VA_ARGS__); \
+      if (_ql > 0)                             \
+        ::write(2, _qn, _ql);                  \
+    }                                          \
   } while (0)
 
 #else
