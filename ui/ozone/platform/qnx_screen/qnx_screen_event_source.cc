@@ -10,12 +10,15 @@
 #include <cstdio>
 #include <cstdlib>
 #include "base/qnx_trace.h"
+#include "base/qnx_pump_activity.h"
 #include "base/time/time.h"
 #include "ui/events/event.h"
 #include "ui/events/types/event_type.h"
 #include "ui/events/keycodes/dom/dom_code.h"
 #include "ui/events/keycodes/dom/dom_key.h"
+#include "ui/events/keycodes/keyboard_code_conversion.h"
 #include "ui/events/keycodes/keyboard_codes.h"
+#include "ui/ozone/platform/qnx_screen/qnx_screen_sizes.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_input_callback.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_overlay_callback.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_repaint.h"
@@ -63,7 +66,9 @@ QnxScreenEventSource::QnxScreenEventSource(screen_context_t ctx,
     QnxKbdLogf("KBD:navigator_request_events FAILED\n");
   QnxKbdLogf("KBD:bps registered ok\n");
 
-  poll_timer_.Start(FROM_HERE, base::Milliseconds(8),
+  // Poll BPS/screen input at 2ms during touch/pinch so multitouch moves reach
+  // the gesture recognizer without waiting on a slow periodic tick (was 4ms).
+  poll_timer_.Start(FROM_HERE, base::Milliseconds(2),
                     base::BindRepeating(&QnxScreenEventSource::PollEvents,
                                         base::Unretained(this)));
 }
@@ -90,6 +95,8 @@ void QnxScreenEventSource::PollEvents() {
     if (bps_get_event(&event, 0) != BPS_SUCCESS || !event)
       break;
 
+    base::MarkQnxProcessPumpActive();
+
     int domain = bps_event_get_domain(event);
     if (domain == screen_get_domain()) {
       screen_event_t se = screen_event_get_event(event);
@@ -115,14 +122,21 @@ void QnxScreenEventSource::PollEvents() {
         case NAVIGATOR_ORIENTATION:
           navigator_done_orientation(event);
           break;
+        case NAVIGATOR_EXIT: {
+          QnxKbdLogf("KBD:nav EXIT\n");
+          if (auto cb = GetQnxScreenExitCallback())
+            cb();
+          break;
+        }
         default:
           break;
       }
     }
   }
 
-  if (ConsumeQnxScreenRepaintRequest())
-    RepaintToolbar();
+  // Toolbar updates are composited in PresentCanvas (single present path).
+  // RepaintToolbar() posted a second screen_post_window every 4ms and caused
+  // flicker that worsened during navigation.
 }
 
 void QnxScreenEventSource::ProcessEvent(screen_event_t ev) {
@@ -143,18 +157,27 @@ void QnxScreenEventSource::ProcessEvent(screen_event_t ev) {
 }
 
 void QnxScreenEventSource::ProcessTouchEvent(screen_event_t ev, int type) {
+  base::MarkQnxProcessPumpActive();
   int pos[2] = {0, 0};
   screen_get_event_property_iv(ev, SCREEN_PROPERTY_POSITION, pos);
-  QNX_TRACE_FMT("QNX:Touch: type=%d pos=(%d,%d)\n", type, pos[0], pos[1]);
+  int x = pos[0], y = pos[1];
+  QnxScreenMapOutputToRender(pos[0], pos[1], &x, &y);
+  QNX_TRACE_FMT("QNX:Touch: type=%d pos=(%d,%d)->(%d,%d)\n", type, pos[0],
+                pos[1], x, y);
 
   auto touch_cb = GetQnxScreenTouchCallback();
   if (touch_cb) {
     int cb_type = 2;
     if (type == SCREEN_EVENT_MTOUCH_TOUCH) cb_type = 0;
     else if (type == SCREEN_EVENT_MTOUCH_MOVE) cb_type = 1;
-    if (touch_cb(cb_type, pos[0], pos[1]))
+    NotifyQnxScreenTouchGesture(type != SCREEN_EVENT_MTOUCH_RELEASE,
+                                type == SCREEN_EVENT_MTOUCH_MOVE);
+    if (touch_cb(cb_type, x, y))
       return;
   }
+
+  NotifyQnxScreenTouchGesture(type != SCREEN_EVENT_MTOUCH_RELEASE,
+                              type == SCREEN_EVENT_MTOUCH_MOVE);
 
   EventType et = ET_TOUCH_RELEASED;
   if (type == SCREEN_EVENT_MTOUCH_TOUCH) et = ET_TOUCH_PRESSED;
@@ -162,8 +185,7 @@ void QnxScreenEventSource::ProcessTouchEvent(screen_event_t ev, int type) {
   int tid = 0;
   screen_get_event_property_iv(ev, SCREEN_PROPERTY_TOUCH_ID, &tid);
   PointerDetails details(EventPointerType::kTouch, tid, 1.0f, 1.0f, 0.0f);
-  TouchEvent touch(et, gfx::Point(pos[0], pos[1]),
-                   base::TimeTicks::Now(), details);
+  TouchEvent touch(et, gfx::Point(x, y), base::TimeTicks::Now(), details);
   DispatchEvent(&touch);
 }
 
@@ -184,6 +206,8 @@ QnxKeyMap MapQnxKey(int sym) {
   switch (sym) {
     case KEYCODE_RETURN:
     case KEYCODE_KP_ENTER:
+    case 0x0d:
+    case 0x0a:
       m = {VKEY_RETURN, DomCode::ENTER, DomKey::ENTER, true};
       return m;
     case KEYCODE_BACKSPACE:
@@ -234,6 +258,7 @@ QnxKeyMap MapQnxKey(int sym) {
   // InputMethod inserts the right text. VKEY is best-effort for shortcuts.
   if (sym >= 0x20 && sym < 0xE000) {
     m.dom_key = DomKey::FromCharacter(sym);
+    m.dom_code = UsLayoutDomKeyToDomCode(m.dom_key);
     m.valid = true;
     if (sym >= 'a' && sym <= 'z')
       m.key_code = static_cast<KeyboardCode>(VKEY_A + (sym - 'a'));
@@ -243,6 +268,8 @@ QnxKeyMap MapQnxKey(int sym) {
       m.key_code = static_cast<KeyboardCode>(VKEY_0 + (sym - '0'));
     else if (sym == ' ')
       m = {VKEY_SPACE, DomCode::SPACE, DomKey::FromCharacter(' '), true};
+    else if (m.key_code == VKEY_UNKNOWN && m.dom_code != DomCode::NONE)
+      m.key_code = DomCodeToUsLayoutKeyboardCode(m.dom_code);
   }
   return m;
 }
@@ -250,6 +277,7 @@ QnxKeyMap MapQnxKey(int sym) {
 }  // namespace
 
 void QnxScreenEventSource::ProcessKeyboardEvent(screen_event_t ev) {
+  base::MarkQnxProcessPumpActive();
   int kflags = 0;
   screen_get_event_property_iv(ev, SCREEN_PROPERTY_KEY_FLAGS, &kflags);
   int sym = 0;
@@ -264,10 +292,22 @@ void QnxScreenEventSource::ProcessKeyboardEvent(screen_event_t ev) {
     return;
 
   QnxKeyMap m = MapQnxKey(sym);
+  if (m.valid) {
+    if (m.dom_code == DomCode::NONE) {
+      if (m.dom_key != DomKey::NONE)
+        m.dom_code = UsLayoutDomKeyToDomCode(m.dom_key);
+      else if (m.key_code != VKEY_UNKNOWN)
+        m.dom_code = UsLayoutKeyboardCodeToDomCode(m.key_code);
+    }
+    if (m.key_code == VKEY_UNKNOWN && m.dom_code != DomCode::NONE)
+      m.key_code = DomCodeToUsLayoutKeyboardCode(m.dom_code);
+  }
   QNX_TRACE_FMT("QNX:Key: sym=0x%x down=%d vk=%d mods=0x%x valid=%d\n", sym,
                 down ? 1 : 0, m.key_code, mods, m.valid ? 1 : 0);
-  QnxKbdLogf("KBD:key sym=0x%x down=%d vk=%d mods=0x%x valid=%d\n", sym,
-             down ? 1 : 0, m.key_code, mods, m.valid ? 1 : 0);
+  QnxKbdLogf("KBD:key sym=0x%x down=%d vk=%d dc=%u mods=0x%x valid=%d\n", sym,
+             down ? 1 : 0, m.key_code,
+             static_cast<unsigned>(static_cast<uint32_t>(m.dom_code)), mods,
+             m.valid ? 1 : 0);
   if (!m.valid)
     return;
 

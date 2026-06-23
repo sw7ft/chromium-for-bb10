@@ -494,6 +494,15 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) URLLoader
   void OnResponseBodyStreamReady(MojoResult result);
   void DeleteSelf();
   void SendResponseToClient();
+#if defined(__QNX__) || defined(__QNXNTO__)
+  // SendResponseToClient posts OnReceiveResponse; OnComplete must not run first
+  // or Blink RawResource::NotifyFinished CHECKs on heavy pages (e.g. Google).
+  void SendCompletionToClient(URLLoaderCompletionStatus status);
+  void RunQnxDeferredClientCompletion();
+  bool qnx_response_delivery_pending_ = false;
+  bool qnx_completion_pending_ = false;
+  URLLoaderCompletionStatus qnx_pending_completion_status_;
+#endif
   void CompletePendingWrite(bool success);
   void SetRawResponseHeaders(scoped_refptr<const net::HttpResponseHeaders>);
   void NotifyEarlyResponse(scoped_refptr<const net::HttpResponseHeaders>);

@@ -1,6 +1,7 @@
 // Copyright 2025 SW7FT. All rights reserved.
 // QNX Screen window implementation for Ozone
 
+#include "ui/ozone/platform/qnx_screen/qnx_screen_sizes.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_window.h"
 
 #include <screen/screen.h>
@@ -33,24 +34,16 @@ QnxScreenWindow::QnxScreenWindow(PlatformWindowDelegate* delegate,
       bounds_(bounds) {
   widget_ = static_cast<gfx::AcceleratedWidget>(g_next_widget_id++);
 
-  // On the BB10 single-window display we fill the whole panel rather than honor
-  // content_shell's 800x600 default. Default to the Passport's 1440x1440;
-  // QNX_SCREEN_WIDTH/HEIGHT override for other panels/bring-up. Overriding
-  // bounds_ here (before OnAcceleratedWidgetAvailable) makes Chromium's
-  // compositor render at full size too, so the page isn't a small patch.
-  int disp_w = 1440;
-  int disp_h = 1440;
-  if (const char* e = getenv("QNX_SCREEN_WIDTH")) {
-    int v = atoi(e);
-    if (v > 0)
-      disp_w = v;
-  }
-  if (const char* e = getenv("QNX_SCREEN_HEIGHT")) {
-    int v = atoi(e);
-    if (v > 0)
-      disp_h = v;
-  }
-  bounds_ = gfx::Rect(0, 0, disp_w, disp_h);
+  // Render at QNX_SCREEN_WIDTH×HEIGHT (default 720) for GPU/CPU savings; upscale
+  // to the physical panel via QNX_SCREEN_OUTPUT_* (default 1440) so the window
+  // still fills the Passport display.
+  int render_w = 720, render_h = 720;
+  int output_w = 1440, output_h = 1440;
+  QnxScreenGetRenderSize(&render_w, &render_h);
+  QnxScreenGetOutputSize(&output_w, &output_h);
+  bounds_ = gfx::Rect(0, 0, render_w, render_h);
+  output_w_ = output_w;
+  output_h_ = output_h;
 
   int rc = screen_create_window(&window_, ctx_);
   if (rc != 0) {
@@ -94,9 +87,12 @@ QnxScreenWindow::QnxScreenWindow(PlatformWindowDelegate* delegate,
   screen_set_window_property_iv(window_, SCREEN_PROPERTY_USAGE, &usage);
 
   int size[2] = {bounds_.width(), bounds_.height()};
-  if (size[0] <= 0) size[0] = 1440;
-  if (size[1] <= 0) size[1] = 1440;
-  screen_set_window_property_iv(window_, SCREEN_PROPERTY_SIZE, size);
+  if (size[0] <= 0) size[0] = 720;
+  if (size[1] <= 0) size[1] = 720;
+  int out_size[2] = {output_w_, output_h_};
+  if (out_size[0] <= 0) out_size[0] = 1440;
+  if (out_size[1] <= 0) out_size[1] = 1440;
+  screen_set_window_property_iv(window_, SCREEN_PROPERTY_SIZE, out_size);
   screen_set_window_property_iv(window_, SCREEN_PROPERTY_SOURCE_SIZE, size);
   screen_set_window_property_iv(window_, SCREEN_PROPERTY_BUFFER_SIZE, size);
 
@@ -230,7 +226,8 @@ void QnxScreenWindow::SetBoundsInPixels(const gfx::Rect& bounds) {
   // lays out at full size.
   if (window_) {
     int size[2] = {bounds_.width(), bounds_.height()};
-    screen_set_window_property_iv(window_, SCREEN_PROPERTY_SIZE, size);
+    int out_size[2] = {output_w_, output_h_};
+    screen_set_window_property_iv(window_, SCREEN_PROPERTY_SIZE, out_size);
     screen_set_window_property_iv(window_, SCREEN_PROPERTY_SOURCE_SIZE, size);
   }
   delegate_->OnBoundsChanged({/*origin_changed=*/true});

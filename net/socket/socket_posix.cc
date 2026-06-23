@@ -608,7 +608,7 @@ void SocketPosix::QnxRearmReadPoll() {
       FROM_HERE,
       base::BindOnce(&SocketPosix::QnxRearmReadPoll,
                      weak_factory_.GetWeakPtr()),
-      base::Milliseconds(100));
+      base::Milliseconds(25));
 }
 
 void SocketPosix::QnxPollForConnect() {
@@ -654,7 +654,7 @@ void SocketPosix::QnxPollForConnect() {
       FROM_HERE,
       base::BindOnce(&SocketPosix::QnxPollForConnect,
                      weak_factory_.GetWeakPtr()),
-      base::Milliseconds(50));
+      base::Milliseconds(10));
 }
 #endif
 

@@ -20,8 +20,10 @@
 #include "ui/events/ozone/layout/stub/stub_keyboard_layout_engine.h"
 #include "ui/ozone/common/bitmap_cursor_factory.h"
 #include "ui/ozone/common/stub_overlay_manager.h"
+#include "base/qnx_trace.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_event_source.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_surface_factory.h"
+#include "ui/ozone/platform/qnx_screen/qnx_screen_sizes.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_window.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_window_manager.h"
 #include "ui/ozone/public/gpu_platform_support_host.h"
@@ -38,9 +40,11 @@ namespace {
 class QnxPlatformScreen : public PlatformScreen {
  public:
   QnxPlatformScreen() {
+    int rw = 720, rh = 720;
+    QnxScreenGetRenderSize(&rw, &rh);
     display::Display primary(/*id=*/1);
-    primary.set_bounds(gfx::Rect(0, 0, 1440, 1440));
-    primary.set_work_area(gfx::Rect(0, 0, 1440, 1440));
+    primary.set_bounds(gfx::Rect(0, 0, rw, rh));
+    primary.set_work_area(gfx::Rect(0, 0, rw, rh));
     display_list_.AddDisplay(primary, display::DisplayList::Type::PRIMARY);
   }
 
@@ -161,7 +165,7 @@ class OzonePlatformQnxScreen : public OzonePlatform {
   void EnsureSurfaceFactory() {
     if (surface_factory_)
       return;
-    fprintf(stderr, "QNX GL TRACE: EnsureSurfaceFactory creating factory\n");
+    QNX_GL_LOG_MSG("QNX GL TRACE: EnsureSurfaceFactory creating factory\n");
     if (!window_manager_)
       window_manager_ = std::make_unique<QnxScreenWindowManager>();
     surface_factory_ =
@@ -171,7 +175,7 @@ class OzonePlatformQnxScreen : public OzonePlatform {
   void* GetScreenContextForGL() const { return screen_ctx_; }
 
   bool InitializeUI(const InitParams& params) override {
-    fprintf(stderr, "QNX GL TRACE: OzonePlatform::InitializeUI\n");
+    QNX_GL_LOG_MSG("QNX GL TRACE: OzonePlatform::InitializeUI\n");
     int rc = screen_create_context(&screen_ctx_, SCREEN_APPLICATION_CONTEXT);
     if (rc != 0) {
       QNX_TRACE_MSG("QNX:Ozone: screen_create_context failed\n");
@@ -196,7 +200,7 @@ class OzonePlatformQnxScreen : public OzonePlatform {
   }
 
   void InitializeGPU(const InitParams& params) override {
-    fprintf(stderr, "QNX GL TRACE: OzonePlatform::InitializeGPU\n");
+    QNX_GL_LOG_MSG("QNX GL TRACE: OzonePlatform::InitializeGPU\n");
     EnsureSurfaceFactory();
   }
 

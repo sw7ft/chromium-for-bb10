@@ -14,6 +14,7 @@
 #include "base/task/single_thread_task_runner.h"
 #include "base/trace_event/trace_event.h"
 #include "base/qnx_trace.h"
+#include "build/build_config.h"
 #include "components/viz/common/features.h"
 #include "components/viz/service/performance_hint/hint_session.h"
 
@@ -115,6 +116,10 @@ void DisplayScheduler::SetVisible(bool visible) {
   }
 
   visible_ = visible;
+#if BUILDFLAG(IS_QNX)
+  if (visible_)
+    needs_draw_ = true;
+#endif
   // If going invisible, we'll stop observing begin frames once we try
   // to draw and fail.
   MaybeStartObservingBeginFrames();
@@ -227,6 +232,11 @@ bool DisplayScheduler::DrawAndSwap() {
   if (!success)
     return false;
 
+#if BUILDFLAG(IS_QNX)
+  // Sparse-damage mode capped BB10 at ~12 presents/sec while BeginFrame ran
+  // ~50/sec. Keep drawing while visible so the Screen path can pace to refresh.
+  if (!visible_)
+#endif
   needs_draw_ = false;
   return true;
 }
@@ -235,6 +245,44 @@ bool DisplayScheduler::OnBeginFrame(const BeginFrameArgs& args) {
   base::TimeTicks now = base::TimeTicks::Now();
   TRACE_EVENT2("viz", "DisplayScheduler::BeginFrame", "args", args.AsValue(),
                "now", now);
+#if BUILDFLAG(IS_QNX)
+  if (base::QnxFpsLogEnabled()) {
+    static base::TimeTicks s_bf_window_start;
+    static base::TimeTicks s_last_bf_time;
+    static int s_bf_count = 0;
+    static double s_sum_bf_delta_ms = 0;
+    static double s_max_bf_delta_ms = 0;
+    static double s_last_interval_ms = 0;
+    if (!s_last_bf_time.is_null() && args.frame_time > s_last_bf_time) {
+      double delta_ms =
+          (args.frame_time - s_last_bf_time).InMicrosecondsF() / 1000.0;
+      s_bf_count++;
+      s_sum_bf_delta_ms += delta_ms;
+      if (delta_ms > s_max_bf_delta_ms)
+        s_max_bf_delta_ms = delta_ms;
+    }
+    s_last_bf_time = args.frame_time;
+    s_last_interval_ms = args.interval.InMicrosecondsF() / 1000.0;
+    if (s_bf_window_start.is_null())
+      s_bf_window_start = now;
+    base::TimeDelta bf_elapsed = now - s_bf_window_start;
+    if (bf_elapsed >= base::Seconds(1) && s_bf_count > 0) {
+      char line[160];
+      int n = snprintf(
+          line, sizeof(line),
+          "QNX:BF count=%d interval=%.1fms delta avg=%.1f max=%.1fms "
+          "needs_draw=%d\n",
+          s_bf_count, s_last_interval_ms, s_sum_bf_delta_ms / s_bf_count,
+          s_max_bf_delta_ms, (int)needs_draw_);
+      if (n > 0)
+        ::write(2, line, n);
+      s_bf_window_start = now;
+      s_bf_count = 0;
+      s_sum_bf_delta_ms = 0;
+      s_max_bf_delta_ms = 0;
+    }
+  }
+#endif
   QNX_TRACE_FMT("QNX:DS:onbf type=%d needs_draw=%d\n", (int)args.type,
                 (int)needs_draw_);
 
@@ -295,6 +343,13 @@ bool DisplayScheduler::OnBeginFrame(const BeginFrameArgs& args) {
     delta = BeginFrameArgs::DefaultEstimatedDisplayDrawTime(save_args.interval);
   }
   current_begin_frame_args_.deadline -= delta;
+
+#if BUILDFLAG(IS_QNX)
+  if (visible_ && !output_surface_lost_ &&
+      !damage_tracker_->root_frame_missing()) {
+    needs_draw_ = true;
+  }
+#endif
 
   inside_begin_frame_deadline_interval_ = true;
 
@@ -439,9 +494,13 @@ DisplayScheduler::DesiredBeginFrameDeadlineMode() const {
 
   // Only wait if we actually have pending surfaces and we're not forcing draw
   // due to an ongoing interaction.
+#if BUILDFLAG(IS_QNX)
+  bool wait_for_pending_surfaces = false;
+#else
   bool wait_for_pending_surfaces =
       has_pending_surfaces_ && !(DrawImmediatelyWhenInteractive() &&
                                  damage_tracker_->HasDamageDueToInteraction());
+#endif
 
   bool all_surfaces_ready =
       !wait_for_pending_surfaces && damage_tracker_->IsRootSurfaceValid() &&
@@ -452,6 +511,13 @@ DisplayScheduler::DesiredBeginFrameDeadlineMode() const {
   // necessary, but accommodate damage as a result of missed BeginFrames from
   // clients otherwise.
   bool allow_early_deadline_without_draw = wait_for_all_surfaces_before_draw_;
+
+#if BUILDFLAG(IS_QNX)
+  if (visible_ && needs_draw_ && !output_surface_lost_ &&
+      !damage_tracker_->root_frame_missing()) {
+    return BeginFrameDeadlineMode::kImmediate;
+  }
+#endif
 
   if (all_surfaces_ready &&
       (needs_draw_ || allow_early_deadline_without_draw)) {
@@ -538,7 +604,9 @@ bool DisplayScheduler::AttemptDrawAndSwap() {
     // |expecting_root_surface_damage_because_of_resize_| is true?
     damage_tracker_->reset_expecting_root_surface_damage_because_of_resize();
 
+#if !BUILDFLAG(IS_QNX)
     StopObservingBeginFrames();
+#endif
   }
   return false;
 }

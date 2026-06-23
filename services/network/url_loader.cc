@@ -1046,6 +1046,20 @@ void URLLoader::OnDoneBeginningTrustTokenOperation(
 void URLLoader::ScheduleStart() {
   QNX_TRACE_FMT("QNX:UL:SchedStart url=%s\n",
                  url_request_ ? url_request_->url().spec().c_str() : "null");
+#if defined(__QNX__) || defined(__QNXNTO__)
+  if (resource_type_ == 0) {
+    QNX_NAV_LOG_FMT(
+        "BerryNav: URLReqStart url=\"%s\" ms=%lld abs=%lld\n",
+        url_request_ ? url_request_->url().spec().substr(0, 120).c_str()
+                       : "null",
+        url_request_ && url_request_->creation_time().is_null() == false
+            ? static_cast<long long>(
+                  (base::TimeTicks::Now() - url_request_->creation_time())
+                      .InMilliseconds())
+            : -1LL,
+        base::QnxNowMs());
+  }
+#endif
   bool defer = false;
   if (resource_scheduler_client_) {
     resource_scheduler_request_handle_ =
@@ -1054,6 +1068,12 @@ void URLLoader::ScheduleStart() {
     resource_scheduler_request_handle_->set_resume_callback(
         base::BindOnce(&URLLoader::ResumeStart, base::Unretained(this)));
     resource_scheduler_request_handle_->WillStartRequest(&defer);
+#if defined(__QNX__) || defined(__QNXNTO__)
+    // Main-frame navigations must not sit behind subresource throttling on a
+    // single-core-class device; deferral showed up as multi-second TTFB gaps.
+    if (resource_type_ == 0)  // blink::mojom::ResourceType::kMainFrame
+      defer = false;
+#endif
   }
   if (defer) {
     url_request_->LogBlockedBy("ResourceScheduler");
@@ -1607,6 +1627,10 @@ void URLLoader::ProcessInboundAttributionInterceptorOnResponseStarted() {
 void URLLoader::OnResponseStarted(net::URLRequest* url_request, int net_error) {
 #if defined(__QNX__)
   QNX_TRACE_FMT("QNX:UL:OnRespStarted err=%d\n", net_error);
+  if (resource_type_ == 0) {
+    QNX_NAV_LOG_FMT("BerryNav: IOReqDone err=%d abs=%lld\n", net_error,
+                    base::QnxNowMs());
+  }
 #endif
   DCHECK(url_request == url_request_.get());
   has_received_response_ = true;
@@ -2101,6 +2125,34 @@ void URLLoader::CancelRequest() {
   url_request_->CancelWithError(net::ERR_SSL_CLIENT_AUTH_CERT_NEEDED);
 }
 
+#if defined(__QNX__) || defined(__QNXNTO__)
+void URLLoader::SendCompletionToClient(URLLoaderCompletionStatus status) {
+  if (qnx_response_delivery_pending_) {
+    qnx_completion_pending_ = true;
+    qnx_pending_completion_status_ = std::move(status);
+    return;
+  }
+  if (memory_cache_writer_)
+    memory_cache_writer_->OnCompleted(status);
+  if (url_loader_client_.Get())
+    url_loader_client_.Get()->OnComplete(status);
+  DeleteSelf();
+}
+
+void URLLoader::RunQnxDeferredClientCompletion() {
+  qnx_response_delivery_pending_ = false;
+  if (!qnx_completion_pending_)
+    return;
+  qnx_completion_pending_ = false;
+  URLLoaderCompletionStatus status = std::move(qnx_pending_completion_status_);
+  if (memory_cache_writer_)
+    memory_cache_writer_->OnCompleted(status);
+  if (url_loader_client_.Get())
+    url_loader_client_.Get()->OnComplete(status);
+  DeleteSelf();
+}
+#endif
+
 void URLLoader::NotifyCompleted(int error_code) {
   // Ensure sending the final upload progress message here, since
   // OnResponseCompleted can be called without OnResponseStarted on cancellation
@@ -2160,10 +2212,15 @@ void URLLoader::NotifyCompleted(int error_code) {
       status.ssl_info = url_request_->ssl_info();
     }
 
+#if defined(__QNX__) || defined(__QNXNTO__)
+    SendCompletionToClient(std::move(status));
+    return;
+#else
     if (memory_cache_writer_)
       memory_cache_writer_->OnCompleted(status);
 
     url_loader_client_.Get()->OnComplete(status);
+#endif
   }
 
   DeleteSelf();
@@ -2201,30 +2258,36 @@ void URLLoader::SendResponseToClient() {
   response_->emitted_extra_info = emitted_devtools_raw_request_;
 
 #if defined(__QNX__) || defined(__QNXNTO__)
-  // Defer client notification so the IO thread can continue ReadMore() and
-  // socket pumping before entering Mojo deserialization (avoids reentrancy
-  // deadlocks on heavy pages with many concurrent subresources).
-  network::mojom::URLResponseHeadPtr head = response_->Clone();
-  mojo::ScopedDataPipeConsumerHandle body = std::move(consumer_handle_);
-  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
-      FROM_HERE,
-      base::BindOnce(
-          [](base::WeakPtr<URLLoader> loader,
-             network::mojom::URLResponseHeadPtr head,
-             mojo::ScopedDataPipeConsumerHandle body) {
-            if (!loader)
-              return;
-            mojom::URLLoaderClient* client = loader->url_loader_client_.Get();
-            if (!client)
-              return;
-            client->OnReceiveResponse(std::move(head), std::move(body),
-                                      absl::nullopt);
+  // Defer subresource responses so the IO thread can keep ReadMore() without
+  // reentrancy deadlocks. Main-frame navigations must not sit in the IO task
+  // queue behind subresources — that added ~15–20s TTFB on BB10.
+  if (resource_type_ != 0) {
+    qnx_response_delivery_pending_ = true;
+    network::mojom::URLResponseHeadPtr head = response_->Clone();
+    mojo::ScopedDataPipeConsumerHandle body = std::move(consumer_handle_);
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE,
+        base::BindOnce(
+            [](base::WeakPtr<URLLoader> loader,
+               network::mojom::URLResponseHeadPtr head,
+               mojo::ScopedDataPipeConsumerHandle body) {
+              if (!loader)
+                return;
+              mojom::URLLoaderClient* client = loader->url_loader_client_.Get();
+              if (!client) {
+                loader->RunQnxDeferredClientCompletion();
+                return;
+              }
+              client->OnReceiveResponse(std::move(head), std::move(body),
+                                        absl::nullopt);
 #if defined(__QNX__)
-            QNX_TRACE_MSG("QNX:UL:SendRespDone\n");
+              QNX_TRACE_MSG("QNX:UL:SendRespDone\n");
 #endif
-          },
-          weak_ptr_factory_.GetWeakPtr(), std::move(head), std::move(body)));
-  return;
+              loader->RunQnxDeferredClientCompletion();
+            },
+            weak_ptr_factory_.GetWeakPtr(), std::move(head), std::move(body)));
+    return;
+  }
 #endif
 
   url_loader_client_.Get()->OnReceiveResponse(

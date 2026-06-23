@@ -687,6 +687,12 @@ cc::LayerTreeSettings GenerateLayerTreeSettings(
   settings.disable_frame_rate_limit =
       cmd.HasSwitch(::switches::kDisableFrameRateLimit);
 
+#if BUILDFLAG(IS_QNX)
+  settings.disable_frame_rate_limit = true;
+  // wait_for_all_pipeline_stages_before_draw adds end-to-end latency on BB10;
+  // root compositor uses BackToBackBeginFrame on QNX instead.
+#endif
+
   settings.enable_variable_refresh_rate =
       ::features::IsVariableRefreshRateAlwaysOn();
 

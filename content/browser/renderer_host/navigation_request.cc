@@ -4002,6 +4002,38 @@ void NavigationRequest::OnResponseStarted(
                 response_head ? response_head->headers->response_code() : -1,
                 (int)is_download,
                 response_head ? response_head->mime_type.c_str() : "null");
+#if BUILDFLAG(IS_QNX)
+  if (IsInOutermostMainFrame()) {
+    std::string spec = common_params_->url.spec();
+    if (spec.size() > 120)
+      spec = spec.substr(0, 120);
+    QNX_NAV_LOG_FMT(
+        "BerryNav: ResponseStarted url=\"%s\" ms=%lld code=%d\n",
+        spec.c_str(),
+        static_cast<long long>(
+            (base::TimeTicks::Now() - NavigationStart()).InMilliseconds()),
+        response_head && response_head->headers
+            ? response_head->headers->response_code()
+            : -1);
+    if (response_head) {
+      const net::LoadTimingInfo& t = response_head->load_timing;
+      const net::LoadTimingInfo::ConnectTiming& c = t.connect_timing;
+      auto delta_ms = [](base::TimeTicks a, base::TimeTicks b) -> long long {
+        if (a.is_null() || b.is_null() || b < a)
+          return -1;
+        return (b - a).InMilliseconds();
+      };
+      QNX_NAV_LOG_FMT(
+          "BerryNav: NetTiming dns=%lld connect=%lld ssl=%lld req=%lld "
+          "ttfb=%lld\n",
+          delta_ms(c.domain_lookup_start, c.domain_lookup_end),
+          delta_ms(c.connect_start, c.connect_end),
+          delta_ms(c.ssl_start, c.ssl_end),
+          delta_ms(t.request_start, t.send_start),
+          delta_ms(t.send_start, t.receive_headers_start));
+    }
+  }
+#endif
   if (response_head && response_head->headers) {
     std::string raw = response_head->headers->raw_headers();
     for (size_t i = 0; i < raw.size(); i++) {
@@ -4948,6 +4980,7 @@ void NavigationRequest::OnStartChecksComplete(
       (frame_tree_node_->pending_frame_policy().sandbox_flags &
        network::mojom::WebSandboxFlags::kOrigin) !=
       network::mojom::WebSandboxFlags::kOrigin;
+#if !BUILDFLAG(IS_QNX)
   if (can_create_service_worker) {
     ServiceWorkerContextWrapper* service_worker_context =
         static_cast<ServiceWorkerContextWrapper*>(
@@ -4957,6 +4990,11 @@ void NavigationRequest::OnStartChecksComplete(
         base::BindRepeating(&NavigationRequest::OnServiceWorkerAccessed,
                             weak_factory_.GetWeakPtr()));
   }
+#else
+  // BB10 builds disable ServiceWorker; probing registration during the nav
+  // interceptor chain still cost ~10–20s before the network request started.
+  (void)can_create_service_worker;
+#endif
 
   // Mark the fetch_start (Navigation Timing API).
   commit_params_->navigation_timing->fetch_start = base::TimeTicks::Now();
@@ -5080,6 +5118,17 @@ void NavigationRequest::OnStartChecksComplete(
       base::TimeTicks::Now() - will_start_request_time_);
 
   QNX_TRACE_MSG("QNX:NR:preLoaderStart\n");
+#if BUILDFLAG(IS_QNX)
+  if (IsInOutermostMainFrame()) {
+    std::string spec = common_params_->url.spec();
+    if (spec.size() > 120)
+      spec = spec.substr(0, 120);
+    QNX_NAV_LOG_FMT(
+        "BerryNav: LoaderStart url=\"%s\" ms=%lld\n", spec.c_str(),
+        static_cast<long long>(
+            (base::TimeTicks::Now() - NavigationStart()).InMilliseconds()));
+  }
+#endif
   loader_->Start();
   QNX_TRACE_MSG("QNX:NR:postLoaderStart\n");
   // DO NOT ADD CODE after this. The previous call to
@@ -8000,6 +8049,7 @@ void NavigationRequest::OnQnxCommitRetry() {
   }
 
   base::RunLoop().RunUntilIdle();
+  TrySendQnxPendingCommit();
 }
 #endif  // BUILDFLAG(IS_QNX)
 

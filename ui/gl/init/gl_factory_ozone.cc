@@ -7,6 +7,10 @@
 #include "base/check.h"
 #include "base/notreached.h"
 #include "base/trace_event/trace_event.h"
+#include "build/build_config.h"
+#if BUILDFLAG(IS_QNX)
+#include "base/qnx_trace.h"
+#endif
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_context_stub.h"
 #include "ui/gl/gl_egl_api_implementation.h"
@@ -24,12 +28,16 @@ namespace init {
 
 std::vector<GLImplementationParts> GetAllowedGLImplementations() {
   ui::SurfaceFactoryOzone* f = GetSurfaceFactoryOzone();
-  fprintf(stderr, "QNX GL TRACE: ozone GetAllowedGLImplementations factory=%p\n",
-          static_cast<void*>(f));
+#if BUILDFLAG(IS_QNX)
+  QNX_GL_LOG("QNX GL TRACE: ozone GetAllowedGLImplementations factory=%p\n",
+             static_cast<void*>(f));
+#endif
   if (!f)
     return {};
   std::vector<GLImplementationParts> v = f->GetAllowedGLImplementations();
-  fprintf(stderr, "QNX GL TRACE: ozone allowed size=%zu\n", v.size());
+#if BUILDFLAG(IS_QNX)
+  QNX_GL_LOG("QNX GL TRACE: ozone allowed size=%zu\n", v.size());
+#endif
   return v;
 }
 

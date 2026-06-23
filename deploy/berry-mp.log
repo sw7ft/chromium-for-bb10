@@ -1,0 +1,61 @@
+BerryShell: app dir = /accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/app/native
+BerryShell: work dir (cwd) = /accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/data
+BerryShell: multi-process mode
+QNX: writable_dir=/accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/data TMPDIR=/accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/data/tmp
+[305643725:1:0619/222119.396711:WARNING:icu_util.cc(308)] QNX: Loading ICU data from: /accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/app/native/icudtl.dat
+[305643725:1:0619/222119.398711:WARNING:icu_util.cc(323)] QNX: ICU data file size: 10717392
+[305643725:1:0619/222119.609711:WARNING:icu_util.cc(337)] QNX: ICU data loaded, passing to udata_setCommonData
+[305643725:1:0619/222119.610711:WARNING:shell_main_delegate.cc(358)] QNX: Loading resource bundle from: /accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/app/native/content_shell.pak
+QNX GL TRACE: OzonePlatform::InitializeUI
+QNX GL TRACE: EnsureSurfaceFactory creating factory
+KBD:bps registered ok
+KBD:focus claimed OK
+QNX:OzWin: buf stride=5760 size=1440x1440 fmt=9 | win size=1440x1440 bufsize=1440x1440 src=1440x1440 fmt=9
+
+DevTools listening on ws://127.0.0.1:57836/devtools/browser/fbe1e514-588a-4377-85cc-d56de6625849
+KBD:evt type=2
+KBD:evt type=2
+KBD:nav code=27
+KBD:nav code=0
+KBD:nav code=3
+KBD:nav code=3
+KBD:nav code=26
+KBD:evt type=12
+QNX:Stub:ORR:0
+QNX:Stub:ORR:1 preHeadQNX:RH:0
+QNX:RH:1 reqTime
+QNX:RH:2 respTime
+QNX:RH:3 headers
+QNX:RH:3b mime
+QNX:RH:4 charset
+QNX:RH:5 ctpolicy
+QNX:RH:6 loadtiming
+QNX:RH:7 conninfo
+QNX:RH:8 alpn
+QNX:RH:9 proxy
+QNX:RH:10 ssl
+QNX:RH:11 cors
+QNX:RH:12 respstart
+QNX:RH:13 parsedheaders
+QNX:RH:14 prefetchtoken
+QNX:RH:15 dnsaliases
+QNX:RH:16 webbundle
+QNX:RH:17 triggerverif
+QNX:RH:18 pnapreflight
+QNX:RH:19 done-premove
+QNX:RH:20 done-postmove
+QNX:Stub:ORR:2 postHeadQNX:Stub:ORR:2b preBody
+QNX:Stub:ORR:2c postBodyTake
+QNX:Stub:ORR:3 postBodyQNX:Stub:ORR:4 postMetaQNX:Stub:ORR:5 preImplQNX:Stub:ORR:6 postImpl[305643725:1:0619/222136.279711:WARNING:shell.cc(777)] renderer unresponsive
+KBD:nav code=26
+KBD:evt type=12
+KBD:nav code=10
+KBD:nav code=3
+KBD:nav code=10
+KBD:nav code=3
+KBD:nav code=26
+KBD:nav code=3
+KBD:nav code=28
+KBD:nav code=29
+KBD:nav code=3
+KBD:evt type=12

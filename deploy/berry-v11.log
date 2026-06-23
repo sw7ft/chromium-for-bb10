@@ -1,0 +1,313 @@
+BerryShell: app dir = /accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/app/native
+BerryShell: work dir (cwd) = /accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/data
+QNX: writable_dir=/accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/data TMPDIR=/accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/data/tmp
+[199225593:1:0619/143422.558245:WARNING:icu_util.cc(308)] QNX: Loading ICU data from: /accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/app/native/icudtl.dat
+[199225593:1:0619/143422.562245:WARNING:icu_util.cc(323)] QNX: ICU data file size: 10717392
+[199225593:1:0619/143422.745245:WARNING:icu_util.cc(337)] QNX: ICU data loaded, passing to udata_setCommonData
+[199225593:1:0619/143422.750245:WARNING:v8_initializer.cc(158)] QNX: V8 file path: /accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/app/native/snapshot_blob.bin
+[199225593:1:0619/143422.751245:WARNING:v8_initializer.cc(621)] QNX: V8 snapshot size: 285644
+[199225593:1:0619/143422.757245:WARNING:v8_initializer.cc(650)] QNX: V8 snapshot loaded OK (285644 bytes)
+[199225593:1:0619/143422.772245:WARNING:shell_main_delegate.cc(358)] QNX: Loading resource bundle from: /accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/app/native/content_shell.pak
+QNX GL TRACE: OzonePlatform::InitializeUI
+QNX GL TRACE: EnsureSurfaceFactory creating factory
+KBD:bps registered ok
+QNX GL TRACE: OzonePlatform::InitializeGPU
+QNX GL TRACE: ozone GetAllowedGLImplementations factory=606d1a0
+QNX GL: GetAllowedGLImplementations -> EGLGLES2
+QNX GL TRACE: ozone allowed size=1
+[199225593:10:0619/143423.312245:WARNING:qnx_screen_gl_ozone_egl.cc(171)] QNX GL: native EGL/GLES2 bindings loaded
+QNX GL TRACE: ozone GetAllowedGLImplementations factory=606d1a0
+QNX GL: GetAllowedGLImplementations -> EGLGLES2
+QNX GL TRACE: ozone allowed size=1
+QNX GL TRACE: CreateOffscreenGLSurface 0x0
+[199225593:10:0619/143423.484245:ERROR:gpu_init.cc(192)] Vulkan not supported with in process gpu
+KBD:focus claimed OK
+QNX:OzWin: buf stride=5760 size=1440x1440 fmt=9 | win size=1440x1440 bufsize=1440x1440 src=1440x1440 fmt=9
+
+DevTools listening on ws://127.0.0.1:24350/devtools/browser/3033482e-6b3b-43bb-ab25-348502e8e99c
+KBD:evt type=2
+KBD:evt type=2
+KBD:evt type=12
+KBD:nav code=27
+KBD:nav code=0
+KBD:nav code=3
+KBD:nav code=36
+KBD:nav code=26
+QNX GL TRACE: CreateGLContext (forced ES2)
+QNX GL TRACE: CreateGLContext -> ok
+QNX GL TRACE: CreateGLContext (forced ES2)
+QNX GL TRACE: CreateGLContext -> ok
+QNX GL TRACE: CreateViewGLSurface widget=1 win=617c050
+QNX GL TRACE: CreateViewGLSurface -> ok, EGL surface size=1440x1440
+[199225593:1:0619/143442.344245:WARNING:shell.cc(777)] renderer unresponsive
+QNX:Stub:ORR:0
+QNX:Stub:ORR:1 preHeadQNX:RH:0
+QNX:RH:1 reqTime
+QNX:RH:2 respTime
+QNX:RH:3 headers
+QNX:RH:3b mime
+QNX:RH:4 charset
+QNX:RH:5 ctpolicy
+QNX:RH:6 loadtiming
+QNX:RH:7 conninfo
+QNX:RH:8 alpn
+QNX:RH:9 proxy
+QNX:RH:10 ssl
+QNX:RH:11 cors
+QNX:RH:12 respstart
+QNX:RH:13 parsedheaders
+QNX:RH:14 prefetchtoken
+QNX:RH:15 dnsaliases
+QNX:RH:16 webbundle
+QNX:RH:17 triggerverif
+QNX:RH:18 pnapreflight
+QNX:RH:19 done-premove
+QNX:RH:20 done-postmove
+QNX:Stub:ORR:2 postHeadQNX:Stub:ORR:2b preBody
+QNX:Stub:ORR:2c postBodyTake
+QNX:Stub:ORR:3 postBodyQNX:Stub:ORR:4 postMetaQNX:Stub:ORR:5 preImplQNX:Stub:ORR:6 postImplQNX:RH:0
+QNX:RH:1 reqTime
+QNX:RH:2 respTime
+QNX:RH:3 headers
+QNX:RH:3b mime
+QNX:RH:4 charset
+QNX:RH:5 ctpolicy
+QNX:RH:6 loadtiming
+QNX:RH:7 conninfo
+QNX:RH:8 alpn
+QNX:RH:9 proxy
+QNX:RH:10 ssl
+QNX:RH:11 cors
+QNX:RH:12 respstart
+QNX:RH:13 parsedheaders
+QNX:RH:14 prefetchtoken
+QNX:RH:15 dnsaliases
+QNX:RH:16 webbundle
+QNX:RH:17 triggerverif
+QNX:RH:18 pnapreflight
+QNX:RH:19 done-premove
+QNX:RH:20 done-postmove
+KBD:evt type=2
+KBD:evt type=2
+KBD:evt type=2
+KBD:evt type=2
+KBD:nav code=10
+KBD:evt type=12
+KBD:evt type=100
+KBD:evt type=101
+KBD:evt type=101
+KBD:evt type=101
+KBD:evt type=101
+KBD:evt type=101
+KBD:evt type=101
+KBD:evt type=101
+KBD:evt type=101
+KBD:evt type=102
+KBD:evt type=100
+KBD:evt type=101
+KBD:evt type=101
+KBD:evt type=101
+KBD:evt type=101
+KBD:evt type=101
+KBD:evt type=101
+KBD:evt type=102
+KBD:evt type=100
+KBD:evt type=102
+KBD:evt type=100
+KBD:evt type=101
+KBD:evt type=101
+KBD:evt type=101
+KBD:evt type=101
+KBD:evt type=101
+KBD:evt type=102
+KBD:evt type=12
+[199225593:3:0619/143506.555245:INFO:system_trust_store.cc(345)] QNX: loaded 144 trust anchors from /accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/app/native/root_store.certs
+[199225593:3:0619/143506.558245:WARNING:ev_root_ca_metadata.cc(119)] Not implemented
+[199225593:3:0619/143506.559245:ERROR:cert_verify_proc_builtin.cc(625)] No net_fetcher for performing AIA chasing.
+QNX:Stub:ORR:0
+QNX:Stub:ORR:1 preHeadQNX:RH:0
+QNX:RH:1 reqTime
+QNX:RH:2 respTime
+QNX:RH:3 headers
+QNX:RH:3b mime
+QNX:RH:4 charset
+QNX:RH:5 ctpolicy
+QNX:RH:6 loadtiming
+QNX:RH:7 conninfo
+QNX:RH:8 alpn
+QNX:RH:9 proxy
+QNX:RH:10 ssl
+QNX:RH:11 cors
+QNX:RH:12 respstart
+QNX:RH:13 parsedheaders
+QNX:RH:14 prefetchtoken
+QNX:RH:15 dnsaliases
+QNX:RH:16 webbundle
+QNX:RH:17 triggerverif
+QNX:RH:18 pnapreflight
+QNX:RH:19 done-premove
+QNX:RH:20 done-postmove
+QNX:Stub:ORR:2 postHeadQNX:Stub:ORR:2b preBody
+QNX:Stub:ORR:2c postBodyTake
+QNX:Stub:ORR:3 postBodyQNX:Stub:ORR:4 postMetaQNX:Stub:ORR:5 preImplQNX:Stub:ORR:6 postImplQNX:Stub:ORR:0
+QNX:Stub:ORR:1 preHeadQNX:RH:0
+QNX:RH:1 reqTime
+QNX:RH:2 respTime
+QNX:RH:3 headers
+QNX:RH:3b mime
+QNX:RH:4 charset
+QNX:RH:5 ctpolicy
+QNX:RH:6 loadtiming
+QNX:RH:7 conninfo
+QNX:RH:8 alpn
+QNX:RH:9 proxy
+QNX:RH:10 ssl
+QNX:RH:11 cors
+QNX:RH:12 respstart
+QNX:RH:13 parsedheaders
+QNX:RH:14 prefetchtoken
+QNX:RH:15 dnsaliases
+QNX:RH:16 webbundle
+QNX:RH:17 triggerverif
+QNX:RH:18 pnapreflight
+QNX:RH:19 done-premove
+QNX:RH:20 done-postmove
+QNX:Stub:ORR:2 postHeadQNX:Stub:ORR:2b preBody
+QNX:Stub:ORR:2c postBodyTake
+QNX:Stub:ORR:3 postBodyQNX:Stub:ORR:4 postMetaQNX:Stub:ORR:5 preImplQNX:Stub:ORR:6 postImplQNX:RH:0
+QNX:RH:1 reqTime
+QNX:RH:2 respTime
+QNX:RH:3 headers
+QNX:RH:3b mime
+QNX:RH:4 charset
+QNX:RH:5 ctpolicy
+QNX:RH:6 loadtiming
+QNX:RH:7 conninfo
+QNX:RH:8 alpn
+QNX:RH:9 proxy
+QNX:RH:10 ssl
+QNX:RH:11 cors
+QNX:RH:12 respstart
+QNX:RH:13 parsedheaders
+QNX:RH:14 prefetchtoken
+QNX:RH:15 dnsaliases
+QNX:RH:16 webbundle
+QNX:RH:17 triggerverif
+QNX:RH:18 pnapreflight
+QNX:RH:19 done-premove
+QNX:RH:20 done-postmove
+QNX:Stub:ORR:0
+QNX:Stub:ORR:1 preHeadQNX:RH:0
+QNX:RH:1 reqTime
+QNX:RH:2 respTime
+QNX:RH:3 headers
+QNX:RH:3b mime
+QNX:RH:4 charset
+QNX:RH:5 ctpolicy
+QNX:RH:6 loadtiming
+QNX:RH:7 conninfo
+QNX:RH:8 alpn
+QNX:RH:9 proxy
+QNX:RH:10 ssl
+QNX:RH:11 cors
+QNX:RH:12 respstart
+QNX:RH:13 parsedheaders
+QNX:RH:14 prefetchtoken
+QNX:RH:15 dnsaliases
+QNX:RH:16 webbundle
+QNX:RH:17 triggerverif
+QNX:RH:18 pnapreflight
+QNX:RH:19 done-premove
+QNX:RH:20 done-postmove
+QNX:Stub:ORR:2 postHeadQNX:Stub:ORR:2b preBody
+QNX:Stub:ORR:2c postBodyTake
+QNX:Stub:ORR:3 postBodyQNX:Stub:ORR:4 postMetaQNX:Stub:ORR:5 preImplQNX:Stub:ORR:6 postImplQNX:Stub:ORR:0
+QNX:Stub:ORR:1 preHeadQNX:RH:0
+QNX:RH:1 reqTime
+QNX:RH:2 respTime
+QNX:RH:3 headers
+QNX:RH:3b mime
+QNX:RH:4 charset
+QNX:RH:5 ctpolicy
+QNX:RH:6 loadtiming
+QNX:RH:7 conninfo
+QNX:RH:8 alpn
+QNX:RH:9 proxy
+QNX:RH:10 ssl
+QNX:RH:11 cors
+QNX:RH:12 respstart
+QNX:RH:13 parsedheaders
+QNX:RH:14 prefetchtoken
+QNX:RH:15 dnsaliases
+QNX:RH:16 webbundle
+QNX:RH:17 triggerverif
+QNX:RH:18 pnapreflight
+QNX:RH:19 done-premove
+QNX:RH:20 done-postmove
+QNX:Stub:ORR:2 postHeadQNX:Stub:ORR:2b preBody
+QNX:Stub:ORR:2c postBodyTake
+QNX:Stub:ORR:3 postBodyQNX:Stub:ORR:4 postMetaQNX:Stub:ORR:5 preImplQNX:Stub:ORR:6 postImplQNX:Stub:ORR:0
+QNX:Stub:ORR:1 preHeadQNX:RH:0
+QNX:RH:1 reqTime
+QNX:RH:2 respTime
+QNX:RH:3 headers
+QNX:RH:3b mime
+QNX:RH:4 charset
+QNX:RH:5 ctpolicy
+QNX:RH:6 loadtiming
+QNX:RH:7 conninfo
+QNX:RH:8 alpn
+QNX:RH:9 proxy
+QNX:RH:10 ssl
+QNX:RH:11 cors
+QNX:RH:12 respstart
+QNX:RH:13 parsedheaders
+QNX:RH:14 prefetchtoken
+QNX:RH:15 dnsaliases
+QNX:RH:16 webbundle
+QNX:RH:17 triggerverif
+QNX:RH:18 pnapreflight
+QNX:RH:19 done-premove
+QNX:RH:20 done-postmove
+QNX:Stub:ORR:2 postHeadQNX:Stub:ORR:2b preBody
+QNX:Stub:ORR:2c postBodyTake
+QNX:Stub:ORR:3 postBodyQNX:Stub:ORR:4 postMetaQNX:Stub:ORR:5 preImplQNX:Stub:ORR:6 postImplQNX:Stub:ORR:0
+QNX:Stub:ORR:1 preHeadQNX:RH:0
+QNX:RH:1 reqTime
+QNX:RH:2 respTime
+QNX:RH:3 headers
+QNX:RH:3b mime
+QNX:RH:4 charset
+QNX:RH:5 ctpolicy
+QNX:RH:6 loadtiming
+QNX:RH:7 conninfo
+QNX:RH:8 alpn
+QNX:RH:9 proxy
+QNX:RH:10 ssl
+QNX:RH:11 cors
+QNX:RH:12 respstart
+QNX:RH:13 parsedheaders
+QNX:RH:14 prefetchtoken
+QNX:RH:15 dnsaliases
+QNX:RH:16 webbundle
+QNX:RH:17 triggerverif
+QNX:RH:18 pnapreflight
+QNX:RH:19 done-premove
+QNX:RH:20 done-postmove
+QNX:Stub:ORR:2 postHeadQNX:Stub:ORR:2b preBody
+QNX:Stub:ORR:2c postBodyTake
+QNX:Stub:ORR:3 postBodyQNX:Stub:ORR:4 postMetaQNX:Stub:ORR:5 preImplQNX:Stub:ORR:6 postImplKBD:evt type=12
+KBD:evt type=100
+KBD:evt type=101
+
+QNX:CRASH tid=a sig=?(10) code=1 fault=0x7ac1ac88 pc=0x3274762 lr=0x3274701 sp=0x7ac1a920
+QNX:PC /accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/app/native/content_shell:_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_+0x2657035
+QNX:LR /accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/app/native/content_shell:_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_+0x2656fd4
+QNX:EXEBASE 0x10000 /accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/app/native/content_shell
+QNX:R0-3 0x0 0x7ac1a9b0 0x0 0x7ac1aab0
+QNX:R4-7 0x7ac1ac88 0x7ac1a958 0x7ac1aba8 0x7ac1aa68
+QNX:R8-11 0x7ac1a968 0x7ac1ac10 0x7ac1ab30 0x7ac1a938
+QNX:R12-15 0x7ac1a988 0x7ac1a920 0x3274701 0x3274762
+QNX:STACKABS: c0400 c0400 32b8ce0 32a8c78 6ce6a8 32b7b0a 3249f62 32a8b24 32b548e 32b5330 324e6e8 323dcca 323d8a8 83400 c4c340
+Received signal 10 BUS_ADRALN 00007ac1ac88
+[end of stack trace]

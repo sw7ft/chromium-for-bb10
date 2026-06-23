@@ -78,6 +78,8 @@ class QnxScreenWindow : public PlatformWindow, public PlatformEventDispatcher {
   screen_context_t ctx_;
   screen_window_t window_ = nullptr;
   gfx::Rect bounds_;
+  int output_w_ = 1440;
+  int output_h_ = 1440;
   bool visible_ = false;
   gfx::AcceleratedWidget widget_;
   char group_name_[64] = {0};

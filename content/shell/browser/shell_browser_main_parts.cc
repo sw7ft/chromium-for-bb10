@@ -30,6 +30,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/first_party_sets_handler.h"
+#include "content/public/browser/network_service_instance.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/result_codes.h"
@@ -86,6 +87,22 @@
 namespace content {
 
 namespace {
+
+#if BUILDFLAG(IS_QNX)
+// First navigation used to pay for lazy network-service + NetworkContext init
+// (disk cache, cert stack, mojo pipes). Warm that up before LoadURL so
+// ResponseStarted reflects fetch time, not cold-start overhead.
+void WarmupNetworkStackBeforeFirstNavigation(BrowserContext* browser_context) {
+  QNX_TRACE_MSG("QNX:NetWarm:1 start\n");
+  // Synchronous kick-off only: CreateNetworkContext on QNX is direct (see
+  // network_service_instance_impl.cc). Do not nest RunLoop here — PreMainMessage
+  // LoopRun has not started yet and nested pumps have caused SIGTRAP on QNX.
+  GetNetworkService();
+  browser_context->GetDefaultStoragePartition()->GetNetworkContext();
+  QNX_TRACE_MSG("QNX:NetWarm:2 done\n");
+}
+#endif
+
 GURL GetStartupURL() {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kBrowserTest))
@@ -234,8 +251,25 @@ int ShellBrowserMainParts::PreMainMessageLoopRun() {
   Shell::Initialize(CreateShellPlatformDelegate());
   QNX_TRACE_MSG("QNX:PMLR:3 ShellInit\n");
   net::NetModule::SetResourceProvider(PlatformResourceProvider);
+#if BUILDFLAG(IS_QNX)
+  // DevTools HTTP server adds startup cost and port=0 still binds ephemeral.
+  // Enable only when explicitly debugging (QNX_DEVTOOLS=1).
+  if (getenv("QNX_DEVTOOLS")) {
+    ShellDevToolsManagerDelegate::StartHttpHandler(browser_context_.get());
+    QNX_TRACE_MSG("QNX:PMLR:4 DevTools\n");
+  } else {
+    QNX_TRACE_MSG("QNX:PMLR:4 DevTools skipped\n");
+  }
+#else
   ShellDevToolsManagerDelegate::StartHttpHandler(browser_context_.get());
   QNX_TRACE_MSG("QNX:PMLR:4 DevTools\n");
+#endif
+#if BUILDFLAG(IS_QNX)
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kProcessType)) {
+    WarmupNetworkStackBeforeFirstNavigation(browser_context_.get());
+  }
+#endif
   InitializeMessageLoopContext();
   QNX_TRACE_MSG("QNX:PMLR:5 MsgLoopCtx\n");
   return 0;

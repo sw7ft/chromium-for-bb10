@@ -21,12 +21,18 @@ class BerryBrowserChrome {
   void SetUrl(const std::string& url);
   const std::string& url() const { return url_; }
   void SetLoading(bool loading);
+  bool loading() const { return loading_; }
   void SetCanGoBack(bool can);
   void SetCanGoForward(bool can);
 
+  void StartEditing();
+  void CancelEditing();
   void OnChar(char c);
   void OnBackspace();
   void OnEnter();
+
+  // True after StartEditing(): first printable key replaces the whole field
+  // (standard omnibox behavior — avoids appending a query to https://.../ ).
 
   void Paint(SkCanvas* canvas);
   gfx::Rect GetWebContentBounds() const;
@@ -51,6 +57,7 @@ class BerryBrowserChrome {
   bool can_go_back_ = false;
   bool can_go_forward_ = false;
   bool url_committed_ = false;
+  bool replace_all_on_next_input_ = false;
 
   gfx::Rect back_rect_, forward_rect_, reload_rect_, url_rect_;
 };

@@ -420,6 +420,11 @@ int NumberOfRendererRasterThreads() {
 
   int num_raster_threads = num_processors / 2;
 
+#if BUILDFLAG(IS_QNX)
+  // Passport-class BB10: use all cores for tile raster (software path is CPU-bound).
+  num_raster_threads = num_processors;
+#endif
+
 #if BUILDFLAG(IS_ANDROID)
   // Limit the number of raster threads to 1 on Android.
   // TODO(reveman): Remove this when we have a better mechanims to prevent

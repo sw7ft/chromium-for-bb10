@@ -719,4 +719,29 @@ TEST_F(URLUtilTest, TestHasInvalidURLEscapeSequences) {
   }
 }
 
+#if defined(__QNX__)
+// QNX bypasses broken ParsePath() but must still split ?query from path.
+// Regression test for search%3Fq= (404 on Google) and log%3Fformat= (CORS).
+TEST_F(URLUtilTest, QnxQueryNotPercentEncodedInPath) {
+  struct {
+    const char* input;
+    const char* must_contain;
+  } cases[] = {
+      {"https://www.google.com/search?q=hi", "search?q=hi"},
+      {"https://play.google.com/log?format=json", "log?format=json"},
+  };
+  for (const auto& test_case : cases) {
+    absl::optional<std::string> canonicalized =
+        CanonicalizeSpec(test_case.input, false);
+    ASSERT_TRUE(canonicalized.has_value()) << test_case.input;
+    EXPECT_EQ(canonicalized->find("search%3Fq="), std::string::npos)
+        << test_case.input;
+    EXPECT_EQ(canonicalized->find("log%3Fformat="), std::string::npos)
+        << test_case.input;
+    EXPECT_NE(canonicalized->find(test_case.must_contain), std::string::npos)
+        << test_case.input << " -> " << *canonicalized;
+  }
+}
+#endif  // defined(__QNX__)
+
 }  // namespace url

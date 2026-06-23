@@ -734,6 +734,17 @@ void NavigationURLLoaderImpl::FallbackToNonInterceptedRequest(
     //   MaybeCreateLoaderForResponse, or
     // - PrefetchedNavigationLoaderInterceptor made an internal redirect.
     response_loader_receiver_.reset();
+#if defined(__QNX__) || defined(__QNXNTO__)
+    if (request_info_->common_params->navigation_start.is_null() == false) {
+      QNX_NAV_LOG_FMT(
+          "BerryNav: FactoryStart url=\"%s\" ms=%lld abs=%lld\n",
+          url_.spec().substr(0, 120).c_str(),
+          static_cast<long long>((base::TimeTicks::Now() -
+                                  request_info_->common_params->navigation_start)
+                                     .InMilliseconds()),
+          base::QnxNowMs());
+    }
+#endif
     url_loader_ = blink::ThrottlingURLLoader::CreateLoaderAndStart(
         std::move(factory), CreateURLLoaderThrottles(),
         global_request_id_.request_id, options, resource_request_.get(),
@@ -859,6 +870,15 @@ void NavigationURLLoaderImpl::OnReceiveResponse(
     absl::optional<mojo_base::BigBuffer> cached_metadata) {
 #if defined(__QNX__)
   QNX_TRACE_MSG("QNX:NULI:OnRecvResp!\n");
+  if (request_info_->common_params->navigation_start.is_null() == false) {
+    QNX_NAV_LOG_FMT(
+        "BerryNav: OnRecvResp url=\"%s\" ms=%lld abs=%lld\n",
+        url_.spec().substr(0, 120).c_str(),
+        static_cast<long long>((base::TimeTicks::Now() -
+                                request_info_->common_params->navigation_start)
+                                   .InMilliseconds()),
+        base::QnxNowMs());
+  }
 #endif
   DCHECK(!cached_metadata);
   LogQueueTimeHistogram("Navigation.QueueTime.OnReceiveResponse",

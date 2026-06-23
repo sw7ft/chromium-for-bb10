@@ -1677,6 +1677,7 @@ component("base") {
         "qnx_string_util.h",
         "qnx_trace.cc",
         "qnx_trace.h",
+        "qnx_pump_activity.h",
       ]
     }
 

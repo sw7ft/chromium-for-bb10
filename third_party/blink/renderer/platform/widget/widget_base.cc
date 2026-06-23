@@ -21,6 +21,7 @@
 #include "cc/trees/paint_holding_reason.h"
 #include "cc/trees/ukm_manager.h"
 #include "components/viz/common/features.h"
+#include "components/viz/common/frame_sinks/begin_frame_source.h"
 #include "gpu/command_buffer/client/shared_memory_limits.h"
 #include "gpu/command_buffer/common/context_creation_attribs.h"
 #include "gpu/ipc/client/gpu_channel_host.h"
@@ -139,9 +140,18 @@ CreateSyntheticBeginFrameSource() {
       Platform::Current()->CompositorThreadTaskRunner()
           ? Platform::Current()->CompositorThreadTaskRunner().get()
           : base::SingleThreadTaskRunner::GetCurrentDefault().get();
+  auto time_source = std::make_unique<viz::DelayBasedTimeSource>(
+      compositor_impl_side_task_runner);
+#if BUILDFLAG(IS_QNX)
+  // Match the root compositor: BackToBack here capped *content* updates at
+  // ~12fps while the display compositor repainted at ~44fps (CPU up, same
+  // visual speed). Use a free-running timer so rAF/animations can keep up.
+  return std::make_unique<viz::DelayBasedBeginFrameSource>(
+      std::move(time_source), viz::BeginFrameSource::kNotRestartableId);
+#else
   return std::make_unique<viz::BackToBackBeginFrameSource>(
-      std::make_unique<viz::DelayBasedTimeSource>(
-          compositor_impl_side_task_runner));
+      std::move(time_source));
+#endif
 }
 
 }  // namespace

@@ -1,0 +1,44 @@
+BerryShell: app dir = /accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/app/native
+BerryShell: work dir (cwd) = /accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/data
+QNX: writable_dir=/accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/data TMPDIR=/accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/data/tmp
+[48124137:1:0619/034655.928560:WARNING:icu_util.cc(308)] QNX: Loading ICU data from: /accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/app/native/icudtl.dat
+[48124137:1:0619/034655.930560:WARNING:icu_util.cc(323)] QNX: ICU data file size: 10717392
+[48124137:1:0619/034656.159560:WARNING:icu_util.cc(337)] QNX: ICU data loaded, passing to udata_setCommonData
+[48124137:1:0619/034656.159560:WARNING:v8_initializer.cc(158)] QNX: V8 file path: /accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/app/native/snapshot_blob.bin
+[48124137:1:0619/034656.160560:WARNING:v8_initializer.cc(621)] QNX: V8 snapshot size: 285644
+[48124137:1:0619/034656.168560:WARNING:v8_initializer.cc(650)] QNX: V8 snapshot loaded OK (285644 bytes)
+[48124137:1:0619/034656.169560:WARNING:shell_main_delegate.cc(358)] QNX: Loading resource bundle from: /accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/app/native/content_shell.pak
+QNX GL TRACE: OzonePlatform::InitializeUI
+QNX GL TRACE: EnsureSurfaceFactory creating factory
+KBD:bps registered ok
+QNX GL TRACE: OzonePlatform::InitializeGPU
+QNX GL TRACE: ozone GetAllowedGLImplementations factory=609c638
+QNX GL: GetAllowedGLImplementations -> EGLGLES2
+QNX GL TRACE: ozone allowed size=1
+KBD:focus claimed OK
+[48124137:10:0619/034656.261560:WARNING:qnx_screen_gl_ozone_egl.cc(113)] QNX GL: native EGL/GLES2 bindings loaded
+QNX GL TRACE: ozone GetAllowedGLImplementations factory=609c638
+QNX GL: GetAllowedGLImplementations -> EGLGLES2
+QNX GL TRACE: ozone allowed size=1
+
+DevTools listening on ws://127.0.0.1:44113/devtools/browser/64bda5f3-0e67-4b34-bcc4-b213942eaca5
+[48124137:10:0619/034656.340560:ERROR:gpu_init.cc(192)] Vulkan not supported with in process gpu
+KBD:evt type=2
+KBD:evt type=2
+KBD:nav code=27
+KBD:nav code=0
+KBD:nav code=3
+KBD:nav code=3
+KBD:nav code=26
+KBD:evt type=12
+
+QNX:CRASH tid=a sig=SIGSEGV(11) code=1 fault=0x0 pc=0x0 lr=0x28f8b8eb sp=0x7fee8a58
+QNX:LR /base/usr/lib/libGLESv2.so.1:glGetInternalformativ+0x56
+QNX:EXEBASE 0x10000 /accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/app/native/content_shell
+QNX:R0-3 0x8d41 0x8058 0x9380 0x1
+QNX:R4-7 0x6347f98 0x8058 0x8d41 0x0
+QNX:R8-11 0x9380 0x1 0x7fee8abc 0x63a04f8
+QNX:R12-15 0x9380 0x7fee8a58 0x28f8b8eb 0x0
+QNX:STACKABS: 457d3c2 457d3da 457d3c2 330d3a8 455c4 30000 330cf76 2fffe 30000 30000 3309502 1000000 330801a 3307d0e 3307b20 30000 30000 30000 30000 32fe808 32fdffa 4575270 1000100 200000 200000 3000000 4574da6 461e9b4 36d0016 36cfe8e 1000000 4633f9a 36d362e 29920a8 4633f10 461914c 461909e 461da58 5214394 29f5f1e 29bd580 29c001c 29c002c 29bd12a 6d3c6 f3bf4 52142ec 5217a3e 52179f4 29ba3ca 5214460 2be6f40 521359a 2be6f40 3a0b090 29c8ef0 29c0410 9307a6 235600 29cf616 29e6bf6 29f4b1e 29e6a14 29b82bc 29c89be 29c6768 29c9394 283f81c 29c92b8 299250c 29a8b28
+Received signal 11 SEGV_MAPERR 000000000000
+[end of stack trace]

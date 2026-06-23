@@ -13,8 +13,7 @@
 #include <utility>
 
 #if BUILDFLAG(IS_QNX)
-#include <stdlib.h>
-#include <unistd.h>
+#include "base/qnx_pump_activity.h"
 #endif
 #include "base/command_line.h"
 #include "base/functional/bind.h"
@@ -26,6 +25,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "base/qnx_berry_daemon.h"
 #include "base/qnx_hard_watchdog.h"
@@ -34,6 +34,8 @@
 #include "components/custom_handlers/protocol_handler_registry.h"
 #include "components/custom_handlers/simple_protocol_handler_registry_factory.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/browser_task_traits.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/color_chooser.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/file_select_listener.h"
@@ -246,8 +248,25 @@ Shell* Shell::CreateNewWindow(BrowserContext* browser_context,
                   true /* should_set_delegate */);
   QNX_TRACE_MSG("QNX:Shell:3 CreateShell\n");
 
-  if (!url.is_empty())
+  if (!url.is_empty()) {
+#if BUILDFLAG(IS_QNX)
+    // Navigation must not start during PreMainMessageLoopRun: the IO thread
+    // cannot service network-service Mojo until the UI message loop runs, which
+    // otherwise queues the first URLLoader for ~20s after FactoryStart.
+    Shell* shell_ptr = shell;
+    GURL load_url = url;
+    GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE, base::BindOnce(
+                       [](Shell* s, const GURL& u) {
+                         QNX_NAV_LOG_FMT("BerryNav: DeferredLoadURL \"%s\"\n",
+                                         u.spec().substr(0, 120).c_str());
+                         s->LoadURL(u);
+                       },
+                       base::Unretained(shell_ptr), load_url));
+#else
     shell->LoadURL(url);
+#endif
+  }
   QNX_TRACE_MSG("QNX:Shell:4 LoadURL done\n");
   return shell;
 }
@@ -268,6 +287,13 @@ void Shell::LoadURLForFrame(const GURL& url,
                             const std::string& frame_name,
                             ui::PageTransition transition_type) {
   QNX_TRACE_MSG("QNX:LoadURL:1 enter\n");
+#if BUILDFLAG(IS_QNX)
+  base::MarkQnxProcessPumpActive();
+  std::string spec = url.spec();
+  if (spec.size() > 120)
+    spec = spec.substr(0, 120);
+  QNX_NAV_LOG_FMT("BerryNav: LoadURL \"%s\"\n", spec.c_str());
+#endif
   NavigationController::LoadURLParams params(url);
   params.frame_name = frame_name;
   params.transition_type = transition_type;
@@ -705,7 +731,43 @@ void Shell::OnTimeout() {
     DumpDomAndExit(rfh);
 }
 
+void Shell::DidStartNavigation(NavigationHandle* navigation_handle) {
+#if BUILDFLAG(IS_QNX)
+  if (!navigation_handle->IsInPrimaryMainFrame())
+    return;
+  const GURL& url = navigation_handle->GetURL();
+  std::string spec = url.spec();
+  if (spec.size() > 120)
+    spec = spec.substr(0, 120);
+  QNX_NAV_LOG_FMT(
+      "BerryNav: DidStartNavigation url=\"%s\" same_doc=%d\n", spec.c_str(),
+      navigation_handle->IsSameDocument() ? 1 : 0);
+  // Update the toolbar as soon as navigation starts so the user sees the
+  // destination URL while the network fetch runs (commit can take 20+ s).
+  if (!navigation_handle->IsSameDocument()) {
+    g_platform->SetAddressBarURL(this, url);
+    g_platform->SetIsLoading(this, true);
+  }
+#endif
+}
+
 void Shell::DidFinishNavigation(NavigationHandle* navigation_handle) {
+#if BUILDFLAG(IS_QNX)
+  if (navigation_handle->IsInPrimaryMainFrame()) {
+    const GURL& url = navigation_handle->GetURL();
+    std::string spec = url.spec();
+    if (spec.size() > 120)
+      spec = spec.substr(0, 120);
+    const int64_t ms =
+        (base::TimeTicks::Now() - navigation_handle->NavigationStart())
+            .InMilliseconds();
+    QNX_NAV_LOG_FMT(
+        "BerryNav: DidFinishNavigation url=\"%s\" error=%d code=%d ms=%lld\n",
+        spec.c_str(), navigation_handle->IsErrorPage() ? 1 : 0,
+        static_cast<int>(navigation_handle->GetNetErrorCode()),
+        static_cast<long long>(ms));
+  }
+#endif
   MaybeArmDumpTimeout(navigation_handle);
 }
 

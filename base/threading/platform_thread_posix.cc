@@ -41,6 +41,10 @@
 #include <atomic>
 #endif
 
+#if BUILDFLAG(IS_QNX)
+#include <atomic>
+#endif
+
 #if BUILDFLAG(IS_FUCHSIA)
 #include <zircon/process.h>
 #else
@@ -420,8 +424,46 @@ namespace internal {
 
 void SetCurrentThreadTypeImpl(ThreadType thread_type,
                               MessagePumpType pump_type_hint) {
-#if BUILDFLAG(IS_NACL) || BUILDFLAG(IS_QNX)
+#if BUILDFLAG(IS_NACL)
   NOTIMPLEMENTED();
+#elif BUILDFLAG(IS_QNX)
+  // QNX is strictly priority-preemptive and (unlike Linux) does not apply nice
+  // values per-thread, so upstream leaves this unimplemented — every thread then
+  // runs at the inherited default priority. On a 2-core BB10 in single-process
+  // mode that lets ~10 CPU-bound renderer/compositor/raster threads round-robin
+  // with the browser IO thread, so the first navigation's network request sat
+  // unserviced for ~14s (measured: IO thread got ~34 timeslices/s instead of
+  // the pump's 500Hz cap). Apply the thread-type ordering via QNX scheduler
+  // priorities: demote background/utility tiers and modestly elevate the IO /
+  // compositing / display tiers (the browser IO thread is kCompositing) above
+  // the renderer main thread so navigation work wins the cores. Elevation is
+  // capped at +3 over the process base to avoid disturbing system services.
+  int policy = 0;
+  sched_param param = {};
+  if (pthread_getschedparam(pthread_self(), &policy, &param) != 0)
+    return;
+  static std::atomic<int> g_qnx_base_prio{-1};
+  int base = g_qnx_base_prio.load(std::memory_order_relaxed);
+  if (base < 0) {
+    int expected = -1;
+    g_qnx_base_prio.compare_exchange_strong(expected, param.sched_priority);
+    base = g_qnx_base_prio.load(std::memory_order_relaxed);
+  }
+  // kThreadTypeToNiceValueMap: lower nice == higher priority (kDisplayCritical
+  // is -8, kBackground is +10). Map nice to a delta around the process base.
+  const int nice_value = internal::ThreadTypeToNiceValue(thread_type);
+  int target = base - nice_value;
+  const int kMaxElevation = 3;
+  if (target > base + kMaxElevation)
+    target = base + kMaxElevation;
+  const int lo = sched_get_priority_min(policy);
+  const int hi = sched_get_priority_max(policy);
+  if (lo >= 0 && target < lo)
+    target = lo;
+  if (hi >= 0 && target > hi)
+    target = hi;
+  param.sched_priority = target;
+  pthread_setschedparam(pthread_self(), policy, &param);
 #else
   if (internal::SetCurrentThreadTypeForPlatform(thread_type, pump_type_hint))
     return;

@@ -18,6 +18,10 @@ QnxScreenTouchCallback GetQnxScreenTouchCallback();
 void SetQnxScreenKeyCallback(QnxScreenKeyCallback cb);
 QnxScreenKeyCallback GetQnxScreenKeyCallback();
 
+using QnxScreenExitCallback = void (*)();
+void SetQnxScreenExitCallback(QnxScreenExitCallback cb);
+QnxScreenExitCallback GetQnxScreenExitCallback();
+
 }  // namespace ui
 
 #endif

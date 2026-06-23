@@ -663,7 +663,13 @@ void InputHandler::PinchGestureUpdate(float magnify_delta,
     return;
   has_pinch_zoomed_ = true;
   GetViewport().PinchUpdate(magnify_delta, anchor);
+#if BUILDFLAG(IS_QNX)
+  // Impl-side page scale updates immediately (SetPageScaleOnActiveTree).
+  // Per-frame SetNeedsCommit() was blocking the main thread on software
+  // raster during pinch, making zoom feel frozen despite 60fps presents.
+#else
   SetNeedsCommit();
+#endif
   compositor_delegate_->DidUpdatePinchZoom();
   // Pinching can change the root scroll offset, so inform the synchronous input
   // handler.

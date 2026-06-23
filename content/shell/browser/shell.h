@@ -245,6 +245,7 @@ class Shell : public WebContentsDelegate, public WebContentsObserver {
   void DidFinishLoad(RenderFrameHost* render_frame_host,
                      const GURL& validated_url) override;
   void DOMContentLoaded(RenderFrameHost* render_frame_host) override;
+  void DidStartNavigation(NavigationHandle* navigation_handle) override;
   void DidFinishNavigation(NavigationHandle* navigation_handle) override;
 #if BUILDFLAG(IS_MAC)
   void PrimaryPageChanged(Page& page) override;

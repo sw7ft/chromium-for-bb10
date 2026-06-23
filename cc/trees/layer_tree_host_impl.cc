@@ -1419,17 +1419,21 @@ DrawResult LayerTreeHostImpl::CalculateRenderPasses(FrameData* frame) {
   // NotifyReadyToDraw. That means we're in as good shape as is possible now,
   // so there's no reason to stop the draw now (and this is not supported by
   // SingleThreadProxy).
+#if !BUILDFLAG(IS_QNX)
   if (have_missing_animated_tiles && !CommitToActiveTree())
     draw_result = DrawResult::kAbortedCheckerboardAnimations;
+#endif
 
   // When we require high res to draw, abort the draw (almost) always. This does
   // not cause the scheduler to do a main frame, instead it will continue to try
   // drawing until we finally complete, so the copy request will not be lost.
   // TODO(weiliangc): Remove RequiresHighResToDraw. crbug.com/469175
+#if !BUILDFLAG(IS_QNX)
   if (num_incomplete_tiles || num_missing_tiles) {
     if (RequiresHighResToDraw())
       draw_result = DrawResult::kAbortedMissingHighResContent;
   }
+#endif
 
   // Only enable frame rate estimation if it would help lower the composition
   // rate for videos.
@@ -3529,8 +3533,10 @@ void LayerTreeHostImpl::SetVisible(bool visible) {
   // If we just became visible, we have to ensure that we draw high res tiles,
   // to prevent checkerboard/low res flashes.
   if (visible_) {
+#if !BUILDFLAG(IS_QNX)
     // TODO(crbug.com/469175): Replace with RequiresHighResToDraw.
     SetRequiresHighResToDraw();
+#endif
     // Prior CompositorFrame may have been discarded and thus we need to ensure
     // that we submit a new one, even if there are no tiles. Therefore, force a
     // full viewport redraw. However, this is unnecessary when we become visible
@@ -3919,8 +3925,10 @@ bool LayerTreeHostImpl::InitializeFrameSink(
   // There will not be anything to draw here, so set high res
   // to avoid checkerboards, typically when we are recovering
   // from lost context.
+#if !BUILDFLAG(IS_QNX)
   // TODO(crbug.com/469175): Replace with RequiresHighResToDraw.
   SetRequiresHighResToDraw();
+#endif
 
   // Always allocate a new viz::LocalSurfaceId when we get a new
   // LayerTreeFrameSink to ensure that we do not reuse the same surface after

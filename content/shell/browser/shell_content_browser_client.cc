@@ -87,6 +87,7 @@
 #include "services/device/public/cpp/geolocation/location_system_permission_status.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/cpp/network_service_buildflags.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/mojom/network_context.mojom.h"
 #include "services/network/public/mojom/network_service.mojom.h"
 #include "third_party/blink/public/common/features.h"
@@ -645,10 +646,13 @@ void ShellContentBrowserClient::OpenURL(
 std::vector<std::unique_ptr<NavigationThrottle>>
 ShellContentBrowserClient::CreateThrottlesForNavigation(
     NavigationHandle* navigation_handle) {
-  std::vector<std::unique_ptr<NavigationThrottle>> empty_throttles;
-  if (create_throttles_for_navigation_callback_)
-    return create_throttles_for_navigation_callback_.Run(navigation_handle);
-  return empty_throttles;
+  std::vector<std::unique_ptr<NavigationThrottle>> throttles;
+  if (create_throttles_for_navigation_callback_) {
+    auto extra = create_throttles_for_navigation_callback_.Run(navigation_handle);
+    throttles.insert(throttles.end(), std::make_move_iterator(extra.begin()),
+                     std::make_move_iterator(extra.end()));
+  }
+  return throttles;
 }
 
 std::unique_ptr<LoginDelegate> ShellContentBrowserClient::CreateLoginDelegate(

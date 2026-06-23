@@ -17,6 +17,7 @@
 #include "base/task/single_thread_task_runner.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/traced_value.h"
+#include "build/build_config.h"
 #include "cc/base/devtools_instrumentation.h"
 #include "cc/metrics/begin_main_frame_metrics.h"
 #include "cc/metrics/compositor_frame_reporting_controller.h"
@@ -719,8 +720,10 @@ void Scheduler::ScheduleBeginImplFrameDeadline() {
       // soon so that display scheduler doesn't wait unnecessarily.
       // Note: This will only send one DidNotProduceFrame ack per begin frame.
       if (!state_machine_.NewActiveTreeLikely()) {
+#if !BUILDFLAG(IS_QNX)
         SendDidNotProduceFrame(begin_impl_frame_tracker_.Current(),
                                FrameSkippedReason::kNoDamage);
+#endif
       }
       break;
     }

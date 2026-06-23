@@ -335,11 +335,33 @@ void DoParseAfterScheme(const CHAR* spec,
                    &parsed->host, &parsed->port);
 #if defined(__QNX__)
   // ParsePath on QNX/ARM drops the path component (compiler/codegen bug).
-  // Bypass it and set path directly from the full_path range.
+  // Inline the same path/query/ref split logic here instead of lumping the
+  // entire full_path into parsed->path (which percent-encodes '?' as %3F).
   if (full_path.is_valid() && full_path.len > 0) {
-    parsed->path = full_path;
-    parsed->query.reset();
-    parsed->ref.reset();
+    int query_separator = -1;
+    int ref_separator = -1;
+    FindQueryAndRefParts(spec, full_path, &query_separator, &ref_separator);
+
+    const int path_end = full_path.begin + full_path.len;
+    int file_end;
+    int query_end;
+    if (ref_separator >= 0) {
+      file_end = query_end = ref_separator;
+      parsed->ref = MakeRange(ref_separator + 1, path_end);
+    } else {
+      file_end = query_end = path_end;
+      parsed->ref.reset();
+    }
+    if (query_separator >= 0) {
+      file_end = query_separator;
+      parsed->query = MakeRange(query_separator + 1, query_end);
+    } else {
+      parsed->query.reset();
+    }
+    if (file_end != full_path.begin)
+      parsed->path = MakeRange(full_path.begin, file_end);
+    else
+      parsed->path.reset();
   } else {
     ParsePath(spec, full_path, &parsed->path, &parsed->query, &parsed->ref);
   }

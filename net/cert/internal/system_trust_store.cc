@@ -18,6 +18,8 @@
 
 #include <memory>
 
+#include <cstdio>
+
 #include "base/containers/span.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -326,6 +328,8 @@ class QnxSystemCerts {
     std::string certs_file;
     if (!base::ReadFileToString(filename, &certs_file)) {
       LOG(ERROR) << "QNX: cannot load CA bundle from " << filename.value();
+      fprintf(stderr, "QNX: CA bundle MISSING: %s (HTTPS images may fail)\n",
+              filename.value().c_str());
       return;
     }
     CertificateList certs = X509Certificate::CreateCertificateListFromBytes(
@@ -344,6 +348,8 @@ class QnxSystemCerts {
     }
     LOG(INFO) << "QNX: loaded " << added << " trust anchors from "
               << filename.value();
+    fprintf(stderr, "QNX: loaded %d trust anchors from %s\n", added,
+            filename.value().c_str());
   }
 
   TrustStoreInMemory* system_trust_store() { return &system_trust_store_; }

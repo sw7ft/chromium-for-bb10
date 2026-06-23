@@ -258,6 +258,17 @@ bool CompositorFrameSinkSupport::ThrottleBeginFrame(base::TimeDelta interval,
     return true;
   }
 
+#if BUILDFLAG(IS_QNX)
+  // Renderer may request 30fps (2× default interval) to save power. On BB10
+  // the compositor is wait-bound at ~12fps presents; honoring the cap leaves
+  // cores idle. Never throttle below the display vsync rate.
+  if (last_known_vsync_interval_.is_positive() &&
+      interval > last_known_vsync_interval_) {
+    begin_frame_interval_ = base::TimeDelta();
+    return true;
+  }
+#endif
+
   if (!last_known_vsync_interval_.is_positive() || !simple_cadence_only) {
     // No known vsync interval or forcing throttle interval.
     begin_frame_interval_ = interval;
@@ -522,6 +533,12 @@ void CompositorFrameSinkSupport::EvictLastActiveSurface() {
 }
 
 void CompositorFrameSinkSupport::SetNeedsBeginFrame(bool needs_begin_frame) {
+#if BUILDFLAG(IS_QNX)
+  // BB10 software compositor is wait-bound; letting the client drop to idle
+  // caps frame production at ~12fps regardless of display refresh.
+  if (!needs_begin_frame)
+    return;
+#endif
   client_needs_begin_frame_ = needs_begin_frame;
   UpdateNeedsBeginFramesInternal();
 }
@@ -1428,6 +1445,11 @@ bool CompositorFrameSinkSupport::ShouldSendBeginFrame(
         can_throttle_if_unresponsive_or_excessive &&
         num_undrawn_frames > kUndrawnFrameLimit &&
         surface->GetActiveFrameMetadata().may_throttle_if_undrawn_frames;
+#if BUILDFLAG(IS_QNX)
+    // Slow software present must not throttle the renderer — that locks both
+    // sides at ~12fps when undrawn frames pile up.
+    should_throttle_undrawn_frames = false;
+#endif
   }
 
   bool frame_timing_details_all_failed = true;
@@ -1511,6 +1533,9 @@ bool CompositorFrameSinkSupport::ShouldAdjustBeginFrameArgs() const {
 bool CompositorFrameSinkSupport::ShouldThrottleBeginFrameAsRequested(
     base::TimeTicks frame_time,
     base::TimeDelta vsync_interval) {
+#if BUILDFLAG(IS_QNX)
+  return false;
+#endif
   if (!begin_frame_interval_.is_positive() || !vsync_interval.is_positive()) {
     return false;
   }

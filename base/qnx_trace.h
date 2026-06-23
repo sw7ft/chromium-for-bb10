@@ -8,11 +8,21 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <unistd.h>
 
 extern bool g_qnx_trace_enabled;
 
 namespace base {
+// Monotonic wall-clock milliseconds, readable from any thread without pulling in
+// base::TimeTicks. Used to correlate cross-thread nav timing (IO-thread network
+// vs UI-thread response delivery) in BerryNav logs.
+inline long long QnxNowMs() {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return static_cast<long long>(ts.tv_sec) * 1000 + ts.tv_nsec / 1000000;
+}
+
 // Returns |s| if it is a plausibly-valid C-string pointer, else a placeholder.
 // QNX libc printf/snprintf does NOT tolerate a null/garbage %s argument (it
 // calls strlen() and faults), unlike glibc. Mojo Connector/endpoint
@@ -25,6 +35,39 @@ inline const char* QnxSafeStr(const char* s) {
   if (v < 0x10000u || v > 0x7fffffffu)
     return "<bad>";
   return s;
+}
+
+inline bool QnxNavLogEnabled() {
+  static const bool on = []() {
+    if (getenv("QNX_NAV_DEBUG"))
+      return true;
+    return access("/accounts/1000/shared/misc/berry-nav.debug", F_OK) == 0 ||
+           access("/accounts/1000/shared/misc/berry-kbd.debug", F_OK) == 0;
+  }();
+  return on;
+}
+
+// Verbose GL/ozone bring-up (CreateGLContext, CreateViewGLSurface, etc.).
+// Off by default — each fprintf on BB10 costs measurable load time.
+inline bool QnxGlLogEnabled() {
+  static const bool on = []() {
+    if (getenv("QNX_GL_DEBUG"))
+      return true;
+    return access("/accounts/1000/shared/misc/berry-kbd.debug", F_OK) == 0;
+  }();
+  return on;
+}
+
+// Per-second frame/pump timing (berry-fps.enable or QNX_FPS=1). Shared by the
+// present path and the message pump re-scan cap diagnostics.
+inline bool QnxFpsLogEnabled() {
+  static const bool on = []() {
+    const char* e = getenv("QNX_FPS");
+    if (e && e[0] == '1')
+      return true;
+    return access("/accounts/1000/shared/misc/berry-fps.enable", F_OK) == 0;
+  }();
+  return on;
 }
 }  // namespace base
 
@@ -47,24 +90,8 @@ inline const char* QnxSafeStr(const char* s) {
     }                                            \
   } while (0)
 
-// For use in comma expressions: (QNX_TRACE_THEN("msg", value)) traces then
-// returns value.
 #define QNX_TRACE_THEN(msg, result) \
   ([&]() -> decltype(auto) { QNX_TRACE_MSG(msg); return (result); }())
-
-// Low-volume navigation milestones for multi-process bring-up. Off by default
-// for production load speed; enable with QNX_NAV_DEBUG=1 or the berry-kbd.debug
-// marker on device (launcher sets both when that marker exists).
-namespace base {
-inline bool QnxNavLogEnabled() {
-  static const bool on = []() {
-    if (getenv("QNX_NAV_DEBUG"))
-      return true;
-    return access("/accounts/1000/shared/misc/berry-kbd.debug", F_OK) == 0;
-  }();
-  return on;
-}
-}  // namespace base
 
 #define QNX_NAV_LOG(msg)                       \
   do {                                         \
@@ -77,11 +104,24 @@ inline bool QnxNavLogEnabled() {
 #define QNX_NAV_LOG_FMT(fmt, ...)              \
   do {                                         \
     if (base::QnxNavLogEnabled()) {            \
-      char _qn[256];                           \
+      char _qn[512];                           \
       int _ql = snprintf(_qn, sizeof(_qn), fmt, __VA_ARGS__); \
       if (_ql > 0)                             \
         ::write(2, _qn, _ql);                  \
     }                                          \
+  } while (0)
+
+#define QNX_GL_LOG(fmt, ...)                     \
+  do {                                           \
+    if (base::QnxGlLogEnabled()) {               \
+      fprintf(stderr, fmt, __VA_ARGS__);         \
+    }                                            \
+  } while (0)
+
+#define QNX_GL_LOG_MSG(msg)                      \
+  do {                                           \
+    if (base::QnxGlLogEnabled())                 \
+      fprintf(stderr, "%s", msg);                \
   } while (0)
 
 #else
@@ -91,6 +131,8 @@ inline bool QnxNavLogEnabled() {
 #define QNX_TRACE_THEN(msg, result) (result)
 #define QNX_NAV_LOG(msg) ((void)0)
 #define QNX_NAV_LOG_FMT(fmt, ...) ((void)0)
+#define QNX_GL_LOG(fmt, ...) ((void)0)
+#define QNX_GL_LOG_MSG(msg) ((void)0)
 
 #endif
 

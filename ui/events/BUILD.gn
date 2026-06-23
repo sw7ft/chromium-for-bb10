@@ -512,6 +512,8 @@ component("gesture_detection") {
     sources += [ "gesture_detection/gesture_configuration_ios.cc" ]
   } else if (is_castos) {
     sources += [ "gesture_detection/gesture_configuration_cast.cc" ]
+  } else if (is_qnx) {
+    sources += [ "gesture_detection/gesture_configuration_qnx.cc" ]
   } else if (use_aura) {
     sources += [ "gesture_detection/gesture_configuration_aura.cc" ]
   } else {

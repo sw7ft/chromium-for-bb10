@@ -31,6 +31,8 @@
 #include "build/build_config.h"
 #include "base/qnx_trace.h"
 #include "build/chromeos_buildflags.h"
+#include "cc/base/switches.h"
+#include "components/viz/common/switches.h"
 #include "components/tracing/common/trace_to_console.h"
 #include "components/tracing/common/tracing_switches.h"
 #include "content/app/content_main_runner_impl.h"
@@ -250,6 +252,23 @@ RunContentProcess(ContentMainParams params,
 #endif  // !BUILDFLAG(IS_ANDROID)
 
     QNX_TRACE_MSG("QNX: CommandLine init done\n");
+
+#if BUILDFLAG(IS_QNX)
+    // BB10: Chromium throttles timers/rAF when it thinks the page is backgrounded.
+    // On a phone browser that reads as low CPU + choppy scroll. Apply unless the
+    // launcher already passed these flags explicitly.
+    {
+      base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
+      if (!cl->HasSwitch(switches::kDisableBackgroundTimerThrottling))
+        cl->AppendSwitch(switches::kDisableBackgroundTimerThrottling);
+      if (!cl->HasSwitch(switches::kDisableRendererBackgrounding))
+        cl->AppendSwitch(switches::kDisableRendererBackgrounding);
+      if (!cl->HasSwitch(::switches::kDisableFrameRateLimit))
+        cl->AppendSwitch(::switches::kDisableFrameRateLimit);
+      if (!cl->HasSwitch(cc::switches::kNumRasterThreads))
+        cl->AppendSwitchASCII(cc::switches::kNumRasterThreads, "4");
+    }
+#endif
 
     InitTimeTicksAtUnixEpoch();
 

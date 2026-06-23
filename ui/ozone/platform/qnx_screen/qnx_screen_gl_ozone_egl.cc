@@ -7,6 +7,7 @@
 #include "base/logging.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/native_library.h"
+#include "base/qnx_trace.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_context_egl.h"
 #include "ui/gl/gl_display.h"
@@ -88,12 +89,11 @@ scoped_refptr<gl::GLContext> QnxScreenGLOzoneEGL::CreateGLContext(
   gl::GLContextAttribs es2 = attribs;
   es2.client_major_es_version = 2;
   es2.client_minor_es_version = 0;
-  fprintf(stderr, "QNX GL TRACE: CreateGLContext (forced ES2)\n");
+  QNX_GL_LOG_MSG("QNX GL TRACE: CreateGLContext (forced ES2)\n");
   scoped_refptr<gl::GLContext> ctx = gl::InitializeGLContext(
       base::MakeRefCounted<gl::GLContextEGL>(share_group), compatible_surface,
       es2);
-  fprintf(stderr, "QNX GL TRACE: CreateGLContext -> %s\n",
-          ctx ? "ok" : "NULL");
+  QNX_GL_LOG("QNX GL TRACE: CreateGLContext -> %s\n", ctx ? "ok" : "NULL");
   return ctx;
 }
 
@@ -109,20 +109,20 @@ scoped_refptr<gl::GLSurface> QnxScreenGLOzoneEGL::CreateViewGLSurface(
   // the screen_window_t handle passed straight to eglCreateWindowSurface.
   EGLNativeWindowType native =
       reinterpret_cast<EGLNativeWindowType>(window->screen_window());
-  fprintf(stderr, "QNX GL TRACE: CreateViewGLSurface widget=%u win=%p\n",
-          widget, window->screen_window());
+  QNX_GL_LOG("QNX GL TRACE: CreateViewGLSurface widget=%u win=%p\n", widget,
+             window->screen_window());
   scoped_refptr<gl::GLSurface> surface = gl::InitializeGLSurface(
       base::MakeRefCounted<QnxNativeViewGLSurfaceEGL>(
           display->GetAs<gl::GLDisplayEGL>(), native));
   if (surface) {
     gfx::Size sz = surface->GetSize();
-    fprintf(stderr,
-            "QNX GL TRACE: CreateViewGLSurface -> ok, EGL surface size=%dx%d\n",
-            sz.width(), sz.height());
+    QNX_GL_LOG(
+        "QNX GL TRACE: CreateViewGLSurface -> ok, EGL surface size=%dx%d\n",
+        sz.width(), sz.height());
   } else {
-    fprintf(stderr,
-            "QNX GL TRACE: CreateViewGLSurface -> NULL (eglCreateWindowSurface "
-            "failed)\n");
+    QNX_GL_LOG_MSG(
+        "QNX GL TRACE: CreateViewGLSurface -> NULL "
+        "(eglCreateWindowSurface failed)\n");
   }
   return surface;
 }
@@ -130,8 +130,8 @@ scoped_refptr<gl::GLSurface> QnxScreenGLOzoneEGL::CreateViewGLSurface(
 scoped_refptr<gl::GLSurface> QnxScreenGLOzoneEGL::CreateOffscreenGLSurface(
     gl::GLDisplay* display,
     const gfx::Size& size) {
-  fprintf(stderr, "QNX GL TRACE: CreateOffscreenGLSurface %dx%d\n",
-          size.width(), size.height());
+  QNX_GL_LOG("QNX GL TRACE: CreateOffscreenGLSurface %dx%d\n", size.width(),
+             size.height());
   return gl::InitializeGLSurface(base::MakeRefCounted<gl::PbufferGLSurfaceEGL>(
       display->GetAs<gl::GLDisplayEGL>(), size));
 }

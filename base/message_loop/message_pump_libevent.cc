@@ -10,9 +10,13 @@
 #if defined(__QNX__) || defined(__QNXNTO__)
 #include <fcntl.h>
 #include <pthread.h>
+#include <stdlib.h>
 #include <sys/socket.h>
 
+#include <atomic>
+
 #include "base/qnx_trace.h"
+#include "base/qnx_pump_activity.h"
 #endif
 
 #include <memory>
@@ -53,6 +57,15 @@ namespace {
 bool g_use_epoll = false;
 
 BASE_FEATURE(kMessagePumpEpoll, "MessagePumpEpoll", FEATURE_ENABLED_BY_DEFAULT);
+#endif
+
+#if defined(__QNX__) || defined(__QNXNTO__)
+// Process-wide "last time any pump thread did real work", in TimeTicks micros.
+// Drives the adaptive re-scan cap (see Run()): the thread that gates a frame is
+// usually the one *blocked waiting* for the next cross-thread hop and thus has
+// no local activity of its own, so the activity signal must be shared across all
+// pump threads in the process, not tracked per-thread.
+std::atomic<int64_t> g_qnx_last_active_us{0};
 #endif
 
 }  // namespace
@@ -327,6 +340,16 @@ void MessagePumpLibevent::Run(Delegate* delegate) {
     if (run_state.should_quit)
       break;
 
+#if defined(__QNX__) || defined(__QNXNTO__)
+    // Publish process-wide activity (task ran or a watched FD was serviced) so
+    // every pump thread keeps a tight re-scan while the frame pipeline is in
+    // flight, including threads that are only blocked waiting for the next hop.
+    if (attempt_more_work) {
+      g_qnx_last_active_us.store(TimeTicks::Now().since_origin().InMicroseconds(),
+                                std::memory_order_relaxed);
+    }
+#endif
+
     if (attempt_more_work)
       continue;
 
@@ -339,6 +362,7 @@ void MessagePumpLibevent::Run(Delegate* delegate) {
       continue;
 
     bool did_set_timer = false;
+    int qnx_cap_ms = 0;
 
     // If there is delayed work.
     DCHECK(!next_work_info.delayed_run_time.is_null());
@@ -355,9 +379,38 @@ void MessagePumpLibevent::Run(Delegate* delegate) {
     // message (e.g. NavigationClient::CommitNavigation) unread in the channel
     // socket and wedges navigation. select() is level-triggered, so forcing a
     // periodic wake re-scans all watched FDs and reads any pending data even if
-    // its original wakeup was dropped. Cap the wait at 50ms.
+    // its original wakeup was dropped.
+    //
+    // This cap is also the recovery latency for any *dropped* wakeup: a frame is
+    // produced across several thread hops (renderer compositor -> Viz -> UI ->
+    // present), and every hop whose wakeup is lost stalls until the next re-scan.
+    // At 50ms/hop that compounds into ~150-250ms per frame (~4-10fps) on an
+    // otherwise idle CPU. Lowering the cap directly raises the throughput floor.
+    // Adaptive: while any pump thread in this process is doing work (a frame is
+    // being produced across the renderer/Viz/UI hops), keep the re-scan tight
+    // (2ms) so a dropped wakeup is recovered quickly. Once the whole process
+    // goes quiet, relax back to 50ms to avoid idle wakeups and keep the
+    // original navigation safety net. A fixed cap can be forced for profiling
+    // via QNX_MPL_MAXWAIT_MS.
+    //
+    // BB10 browser: the 50ms idle cap was the dominant present gap (~64ms
+    // upstream wait at ~12fps on an otherwise idle CPU). Always use the tight
+    // cap so compositor hops do not sleep through most of a frame interval.
     {
-      const TimeDelta kQnxMaxWait = Milliseconds(50);
+      static const int kFixedCapMs = []() {
+        const char* e = getenv("QNX_MPL_MAXWAIT_MS");
+        int v = e ? atoi(e) : 0;
+        return (v >= 1 && v <= 1000) ? v : 0;  // 0 => adaptive
+      }();
+      constexpr int kActiveCapMs = 2;
+      int cap_ms;
+      if (kFixedCapMs) {
+        cap_ms = kFixedCapMs;
+      } else {
+        cap_ms = kActiveCapMs;
+      }
+      qnx_cap_ms = cap_ms;
+      const TimeDelta kQnxMaxWait = Milliseconds(cap_ms);
       if (!have_timer_delay || timer_delay > kQnxMaxWait) {
         timer_delay = kQnxMaxWait;
         have_timer_delay = true;
@@ -383,6 +436,7 @@ void MessagePumpLibevent::Run(Delegate* delegate) {
     // delayed task that will need servicing.
     delegate->BeforeWait();
 #if defined(__QNX__) || defined(__QNXNTO__)
+    const TimeTicks qnx_wait_enter = TimeTicks::Now();
     QNX_TRACE_FMT("QNX:MPL:Wait tid=%x p=%p timer=%d\n",
                   (unsigned)pthread_self(), (void*)this, (int)did_set_timer);
 #endif
@@ -391,6 +445,38 @@ void MessagePumpLibevent::Run(Delegate* delegate) {
     QNX_TRACE_FMT("QNX:MPL:Woke tid=%x p=%p io=%d\n",
                   (unsigned)pthread_self(), (void*)this,
                   (int)processed_io_events_);
+    if (base::QnxFpsLogEnabled()) {
+      const double wait_ms =
+          (TimeTicks::Now() - qnx_wait_enter).InMicrosecondsF() / 1000.0;
+      static TimeTicks s_window_start;
+      static int s_waits = 0;
+      static int s_cap2 = 0;
+      static int s_cap50 = 0;
+      static double s_sum_wait_ms = 0;
+      if (s_window_start.is_null())
+        s_window_start = TimeTicks::Now();
+      s_waits++;
+      s_sum_wait_ms += wait_ms;
+      if (qnx_cap_ms <= 2)
+        s_cap2++;
+      else
+        s_cap50++;
+      const TimeDelta elapsed = TimeTicks::Now() - s_window_start;
+      if (elapsed >= Seconds(1)) {
+        char line[160];
+        const int n = snprintf(
+            line, sizeof(line),
+            "QNX:PUMP waits=%d cap2=%d cap50=%d wait avg=%.1fms\n",
+            s_waits, s_cap2, s_cap50, s_sum_wait_ms / s_waits);
+        if (n > 0)
+          ::write(2, line, n);
+        s_window_start = TimeTicks::Now();
+        s_waits = 0;
+        s_cap2 = 0;
+        s_cap50 = 0;
+        s_sum_wait_ms = 0;
+      }
+    }
 #endif
 
     // We previously setup a timer to break out the event loop to look for more
@@ -563,5 +649,13 @@ MessagePumpLibevent::EpollInterest::EpollInterest(
     : controller_(controller), params_(params) {}
 
 MessagePumpLibevent::EpollInterest::~EpollInterest() = default;
+
+#if defined(__QNX__) || defined(__QNXNTO__)
+void MarkQnxProcessPumpActive() {
+  g_qnx_last_active_us.store(
+      TimeTicks::Now().since_origin().InMicroseconds(),
+      std::memory_order_relaxed);
+}
+#endif
 
 }  // namespace base

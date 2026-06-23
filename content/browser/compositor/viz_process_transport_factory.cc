@@ -418,8 +418,12 @@ void VizProcessTransportFactory::OnEstablishedGpuChannel(
   root_params->renderer_settings.display_id = compositor->display_id();
 #endif
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+#if BUILDFLAG(IS_QNX)
+  root_params->disable_frame_rate_limit = true;
+#else
   if (command_line->HasSwitch(switches::kDisableFrameRateLimit))
     root_params->disable_frame_rate_limit = true;
+#endif
 
 #if BUILDFLAG(IS_WIN)
   root_params->set_present_duration_allowed =

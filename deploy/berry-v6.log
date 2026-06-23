@@ -1,0 +1,102 @@
+BerryShell: app dir = /accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/app/native
+BerryShell: work dir (cwd) = /accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/data
+QNX: writable_dir=/accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/data TMPDIR=/accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/data/tmp
+[77734102:1:0619/055235.048560:WARNING:icu_util.cc(308)] QNX: Loading ICU data from: /accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/app/native/icudtl.dat
+[77734102:1:0619/055235.049560:WARNING:icu_util.cc(323)] QNX: ICU data file size: 10717392
+[77734102:1:0619/055235.264560:WARNING:icu_util.cc(337)] QNX: ICU data loaded, passing to udata_setCommonData
+[77734102:1:0619/055235.265560:WARNING:v8_initializer.cc(158)] QNX: V8 file path: /accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/app/native/snapshot_blob.bin
+[77734102:1:0619/055235.266560:WARNING:v8_initializer.cc(621)] QNX: V8 snapshot size: 285644
+[77734102:1:0619/055235.272560:WARNING:v8_initializer.cc(650)] QNX: V8 snapshot loaded OK (285644 bytes)
+[77734102:1:0619/055235.273560:WARNING:shell_main_delegate.cc(358)] QNX: Loading resource bundle from: /accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/app/native/content_shell.pak
+QNX GL TRACE: OzonePlatform::InitializeUI
+QNX GL TRACE: EnsureSurfaceFactory creating factory
+KBD:bps registered ok
+QNX GL TRACE: OzonePlatform::InitializeGPU
+QNX GL TRACE: ozone GetAllowedGLImplementations factory=6052638
+QNX GL: GetAllowedGLImplementations -> EGLGLES2
+QNX GL TRACE: ozone allowed size=1
+KBD:focus claimed OK
+
+DevTools listening on ws://127.0.0.1:57057/devtools/browser/fdb1539c-69b0-4dba-816d-c7ea580cc76a
+[77734102:10:0619/055235.369560:WARNING:qnx_screen_gl_ozone_egl.cc(143)] QNX GL: native EGL/GLES2 bindings loaded
+QNX GL TRACE: ozone GetAllowedGLImplementations factory=6052638
+QNX GL: GetAllowedGLImplementations -> EGLGLES2
+QNX GL TRACE: ozone allowed size=1
+QNX GL TRACE: CreateOffscreenGLSurface 0x0
+[77734102:10:0619/055235.443560:ERROR:gpu_init.cc(192)] Vulkan not supported with in process gpu
+KBD:evt type=2
+KBD:evt type=2
+KBD:nav code=27
+KBD:nav code=0
+KBD:nav code=3
+KBD:nav code=3
+KBD:nav code=26
+KBD:evt type=12
+QNX GL TRACE: CreateGLContext (forced ES2)
+QNX GL TRACE: CreateGLContext -> ok
+QNX:Stub:ORR:0
+QNX:Stub:ORR:1 preHeadQNX:RH:0
+QNX:RH:1 reqTime
+QNX:RH:2 respTime
+QNX:RH:3 headers
+QNX:RH:3b mime
+QNX:RH:4 charset
+QNX:RH:5 ctpolicy
+QNX:RH:6 loadtiming
+QNX:RH:7 conninfo
+QNX:RH:8 alpn
+QNX:RH:9 proxy
+QNX:RH:10 ssl
+QNX:RH:11 cors
+QNX:RH:12 respstart
+QNX:RH:13 parsedheaders
+QNX:RH:14 prefetchtoken
+QNX:RH:15 dnsaliases
+QNX:RH:16 webbundle
+QNX:RH:17 triggerverif
+QNX:RH:18 pnapreflight
+QNX:RH:19 done-premove
+QNX:RH:20 done-postmove
+QNX:Stub:ORR:2 postHeadQNX:Stub:ORR:2b preBody
+QNX:Stub:ORR:2c postBodyTake
+QNX:Stub:ORR:3 postBodyQNX:Stub:ORR:4 postMetaQNX:Stub:ORR:5 preImplQNX:Stub:ORR:6 postImplQNX GL TRACE: CreateGLContext (forced ES2)
+QNX GL TRACE: CreateGLContext -> ok
+QNX GL TRACE: CreateViewGLSurface widget=1 win=60e20d8
+[77734102:10:0619/055254.175560:ERROR:gl_surface_egl.cc(449)] eglCreateWindowSurface failed with error EGL_BAD_ALLOC
+QNX GL TRACE: CreateViewGLSurface -> NULL (eglCreateWindowSurface failed)
+[77734102:1:0619/055254.212560:WARNING:shell.cc(777)] renderer unresponsive
+QNX:RH:0
+QNX:RH:1 reqTime
+QNX:RH:2 respTime
+QNX:RH:3 headers
+QNX:RH:3b mime
+QNX:RH:4 charset
+QNX:RH:5 ctpolicy
+QNX:RH:6 loadtiming
+QNX:RH:7 conninfo
+QNX:RH:8 alpn
+QNX:RH:9 proxy
+QNX:RH:10 ssl
+QNX:RH:11 cors
+QNX:RH:12 respstart
+QNX:RH:13 parsedheaders
+QNX:RH:14 prefetchtoken
+QNX:RH:15 dnsaliases
+QNX:RH:16 webbundle
+QNX:RH:17 triggerverif
+QNX:RH:18 pnapreflight
+QNX:RH:19 done-premove
+QNX:RH:20 done-postmove
+KBD:nav code=26
+
+QNX:CRASH tid=15 sig=SIGSEGV(11) code=1 fault=0xffffffff pc=0x7842adfc lr=0xeb309d sp=0x7fc39b88
+QNX:PC /base/usr/lib/libscreen.so.1:screen_get_buffer_property_pv+0x3
+QNX:LR /accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/app/native/content_shell:_ZStplIcSt11char_traitsIcESaIcEESbIT_T0_T1_EPKS3_RKS6_+0x295a70
+QNX:EXEBASE 0x10000 /accounts/1000/appdata/com.sw7ft.BerryShell.testDev__BerryShellf5089f54/app/native/content_shell
+QNX:R0-3 0xffffffff 0x22 0x7fc39bc4 0x6c008580
+QNX:R4-7 0x0 0x62d9320 0x0 0x0
+QNX:R8-11 0xffffffff 0x63f9184 0x63f7440 0x7fc3a420
+QNX:R12-15 0x7842adf9 0x7fc39b88 0xeb309d 0x7842adfc
+QNX:STACKABS: eb309c 51fce44 29a3d82 51fc3f4 51fafdc 7e9fd8 2010e00 520379e 51fbbd2 495d6 2231b8 2010e00 2010e00 2010e00 2010e00 2010e00 2010e00 2010e00 29a2152 29f6100 51db194 5207b1c 29f61de 5208292 29c5f10 52075ce 29caf88 6d3c6 f3c04 520759c 5209324 29e0086 29ba68a 5208f0e 2be76d2 36be3fc 2bd1bee 2bd1bee 29c91b0 21e500 29f61de 29e6eb6 29f4dde 29c8c7e 29b857c 29c9578 29927cc 29a8de8 29c6798 29a8d98 29c6e8e 29c6da8
+Received signal 11 SEGV_MAPERR 0000ffffffff
+[end of stack trace]

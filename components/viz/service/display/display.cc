@@ -904,8 +904,21 @@ bool Display::DrawAndSwap(const DrawAndSwapParams& params) {
   }
   surface_size = last_render_pass.output_rect.size();
   have_damage = !last_render_pass.damage_rect.size().IsEmpty();
-
   bool size_matches = surface_size == current_surface_size;
+
+#if BUILDFLAG(IS_QNX)
+  // Software BB10 path: renderer often submits empty damage_rect on "idle"
+  // frames while animations still run. DisplayScheduler keeps needs_draw set,
+  // but we skip swap without damage — capping presents at ~12fps. Force full
+  // damage so every scheduled draw reaches screen_post_window.
+  if (size_matches && !have_damage) {
+    last_render_pass.damage_rect = last_render_pass.output_rect;
+    frame.surface_damage_rect_list_.clear();
+    frame.surface_damage_rect_list_.push_back(last_render_pass.damage_rect);
+    have_damage = true;
+  }
+#endif
+
   if (!size_matches)
     TRACE_EVENT_INSTANT0("viz", "Size mismatch.", TRACE_EVENT_SCOPE_THREAD);
 

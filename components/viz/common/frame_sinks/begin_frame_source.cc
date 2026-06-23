@@ -21,6 +21,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/traced_value.h"
+#include "build/build_config.h"
 #include "components/viz/common/frame_sinks/delay_based_time_source.h"
 #include "third_party/perfetto/protos/perfetto/trace/track_event/chrome_compositor_scheduler_state.pbzero.h"
 
@@ -455,9 +456,13 @@ void DelayBasedBeginFrameSource::IssueBeginFrameToObserver(
     BeginFrameObserver* obs,
     const BeginFrameArgs& args) {
   BeginFrameArgs last_args = obs->LastUsedBeginFrameArgs();
+#if BUILDFLAG(IS_QNX)
+  const base::TimeDelta double_tick_margin = base::TimeDelta();
+#else
   const base::TimeDelta double_tick_margin =
       max_vrr_interval_.has_value() ? base::TimeDelta()
                                     : args.interval / kDoubleTickDivisor;
+#endif
   if (!last_args.IsValid() ||
       (args.frame_time > last_args.frame_time + double_tick_margin)) {
     if (args.type == BeginFrameArgs::MISSED) {

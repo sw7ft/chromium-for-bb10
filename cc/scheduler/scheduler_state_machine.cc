@@ -10,12 +10,19 @@
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/traced_value.h"
 #include "base/values.h"
+#include "build/build_config.h"
 
 namespace cc {
 
 namespace {
+#if BUILDFLAG(IS_QNX)
+// BB10 software path: allow pipelined submits so display can present while the
+// next frame rasterizes (single pending frame capped us at ~12fps).
+const int kMaxPendingSubmitFrames = 3;
+#else
 // Surfaces and CompositorTimingHistory don't support more than 1 pending swap.
 const int kMaxPendingSubmitFrames = 1;
+#endif
 
 }  // namespace
 
@@ -1154,6 +1161,14 @@ bool SchedulerStateMachine::ShouldSubscribeToBeginFrames() const {
   if (!HasInitializedLayerTreeFrameSink())
     return false;
 
+#if BUILDFLAG(IS_QNX)
+  // BB10 software path: the default idle heuristics unsubscribe from BeginFrame
+  // while the page still animates (captcha spinner, etc.), capping submits at
+  // ~12fps. Keep the tap open whenever the tab is visible.
+  if (visible_)
+    return true;
+#endif
+
   // The propagation of the needsBeginFrame signal to viz is inherently racy
   // with issuing the next BeginFrame. In full-pipe mode, it is important we
   // don't miss a BeginFrame because our needsBeginFrames signal propagated to
@@ -1365,6 +1380,11 @@ bool SchedulerStateMachine::ShouldTriggerBeginImplFrameDeadlineImmediately()
 
   if (active_tree_needs_first_draw_)
     return true;
+
+#if BUILDFLAG(IS_QNX)
+  if (needs_redraw_ && can_draw_)
+    return true;
+#endif
 
   if (!needs_redraw_)
     return false;

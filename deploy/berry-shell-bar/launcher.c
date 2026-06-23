@@ -24,10 +24,10 @@ static const char* kDefaultUrl = "https://www.google.com/";
 /* Display tuning — easy to change without rebuilding content_shell.
  * kRotation: Navigator composites the app window rotated; "90" is the first
  *   guess to undo the observed 90-deg-clockwise tilt. Try 0/90/180/270.
- * kScaleFactor: 1440x1440 is very high DPI (~453ppi); scale up so text/UI are
- *   legible. Passed to content_shell as --force-device-scale-factor. */
+ * kScaleFactor: render at 720px (QNX_SCREEN_*); scale 1 ≈ 720 CSS px, panel
+ *   upscales 2× to 1440 physical so text stays readable without 1440² paint. */
 static const char* kRotation = "90";
-static const char* kScaleFactor = "--force-device-scale-factor=2";
+static const char* kScaleFactor = "--force-device-scale-factor=1";
 
 /* Stability: these networking/IPC features are documented (HARDENING.md) as
  * unstable on QNX — they deadlock or race the resource loader (the ~20-60s
@@ -126,6 +126,25 @@ int main(int argc, char** argv) {
     use_multi_process = 1;
   const int use_single_process = !use_multi_process;
 
+  /* Software rendering is the default on Passport (A/B: faster steady-state than
+   * EGL full-frame swap). Opt in to GPU: berry-gpu.enable or QNX_ENABLE_GPU=1.
+   * berry-gpu.disable / QNX_DISABLE_GPU=1 still force software. */
+  int use_gpu = 0;
+  if (access("/accounts/1000/shared/misc/berry-gpu.enable", F_OK) == 0)
+    use_gpu = 1;
+  {
+    const char* gpu_env = getenv("QNX_ENABLE_GPU");
+    if (gpu_env && gpu_env[0] == '1')
+      use_gpu = 1;
+  }
+  if (access("/accounts/1000/shared/misc/berry-gpu.disable", F_OK) == 0)
+    use_gpu = 0;
+  {
+    const char* gpu_env = getenv("QNX_DISABLE_GPU");
+    if (gpu_env && gpu_env[0] == '1')
+      use_gpu = 0;
+  }
+
   /* DIAGNOSTIC: the .bar runs sandboxed under a per-app uid, so its own data
    * dir and slog2 buffer are not readable over SSH as devuser. Redirect
    * content_shell's stdout+stderr to the SHARED folder (group-readable by
@@ -147,6 +166,8 @@ int main(int argc, char** argv) {
       setenv("QNX_KBD_DEBUG", "1", 1);
       setenv("QNX_NAV_DEBUG", "1", 1);
     }
+    if (access("/accounts/1000/shared/misc/berry-nav.debug", F_OK) == 0)
+      setenv("QNX_NAV_DEBUG", "1", 1);
     /* Probe already confirmed Adreno 330 / EGL 1.4 / GLES2 works in-app; the
      * real GLOzone path now drives GL, so leave the standalone probe off to
      * avoid leaving a stray EGL context current before content GL init. */
@@ -157,6 +178,8 @@ int main(int argc, char** argv) {
   fprintf(stderr, "BerryShell: work dir (cwd) = %s\n", work);
   fprintf(stderr, "BerryShell: %s\n",
           use_single_process ? "single-process mode" : "multi-process mode");
+  fprintf(stderr, "BerryShell: %s (opt-in GPU: berry-gpu.enable in shared/misc)\n",
+          use_gpu ? "GPU/EGL mode" : "software mode (--disable-gpu, default)");
 
   /* Bundled shared libs sit next to content_shell. */
   {
@@ -177,17 +200,21 @@ int main(int argc, char** argv) {
 
   /* Orientation correction for the Navigator-composited window (overridable). */
   setenv("QNX_SCREEN_ROTATION", kRotation, 0);
+  /* Render/composit at 720² (~4× fewer pixels than native 1440²); panel upscale
+   * to full screen via QNX Screen SIZE/SOURCE_SIZE in qnx_screen_window.cc. */
+  setenv("QNX_SCREEN_WIDTH", "720", 0);
+  setenv("QNX_SCREEN_HEIGHT", "720", 0);
+  setenv("QNX_SCREEN_OUTPUT_WIDTH", "1440", 0);
+  setenv("QNX_SCREEN_OUTPUT_HEIGHT", "1440", 0);
 
+  /* Exec the real binary directly. content_shell.bin is a legacy log wrapper that
+   * only re-execs content_shell.exe; skipping it avoids an extra hop and ensures
+   * deploy updates to content_shell.exe are what actually run. */
   char shell[2100];
-  snprintf(shell, sizeof(shell), "%s/content_shell.bin", dir);
+  snprintf(shell, sizeof(shell), "%s/content_shell.exe", dir);
 
-  /* Default to the bundled start page (omnibox + bookmarks) so the user can
-   * navigate anywhere. Built from our own dir for a valid in-sandbox file://
-   * path. A URL arg overrides. */
-  char home[2300];
-  snprintf(home, sizeof(home), "file://%s/home.html", dir);
-  const char* url = (argc > 1 && argv[1] && argv[1][0]) ? argv[1] : home;
-  (void)kDefaultUrl;
+  /* Default start URL: native toolbar handles navigation; skip home.html. */
+  const char* url = (argc > 1 && argv[1] && argv[1][0]) ? argv[1] : kDefaultUrl;
 
   char subprocess_path[2300];
   snprintf(subprocess_path, sizeof(subprocess_path),
@@ -222,6 +249,9 @@ int main(int argc, char** argv) {
   }
   /* Startup / load-speed flags (safe on QNX; see deploy/HARDENING.md). */
   argv_buf[n++] = (char*)"--disable-background-networking";
+  argv_buf[n++] = (char*)"--disable-background-timer-throttling";
+  argv_buf[n++] = (char*)"--disable-renderer-backgrounding";
+  argv_buf[n++] = (char*)"--disable-backgrounding-occluded-windows";
   argv_buf[n++] = (char*)"--disable-client-side-phishing-detection";
   argv_buf[n++] = (char*)"--disable-default-apps";
   argv_buf[n++] = (char*)"--disable-domain-reliability";
@@ -232,10 +262,23 @@ int main(int argc, char** argv) {
   argv_buf[n++] = (char*)"--no-first-run";
   argv_buf[n++] = (char*)"--no-default-browser-check";
   argv_buf[n++] = (char*)"--disable-component-update";
-  argv_buf[n++] = (char*)"--use-gl=egl";
+  /* Skip CertVerifierService Mojo round-trip on every HTTPS load (QNX has no
+   * system trust store; full verify is slow and race-prone). TLS still encrypts;
+   * only certificate validation is bypassed. See deploy/HARDENING.md. */
+  argv_buf[n++] = (char*)"--ignore-certificate-errors";
+  argv_buf[n++] = (char*)"--remote-debugging-port=0";
+  argv_buf[n++] = (char*)"--disable-quic";
+  argv_buf[n++] = (char*)"--disable-frame-rate-limit";
   argv_buf[n++] = (char*)"--ozone-platform=qnx_screen";
-  argv_buf[n++] = (char*)"--ignore-gpu-blocklist";
-  argv_buf[n++] = (char*)"--enable-gpu-rasterization";
+  if (use_gpu) {
+    argv_buf[n++] = (char*)"--use-gl=egl";
+    argv_buf[n++] = (char*)"--ignore-gpu-blocklist";
+    argv_buf[n++] = (char*)"--num-raster-threads=4";
+  } else {
+    argv_buf[n++] = (char*)"--disable-gpu";
+    /* Software Skia raster: use all 4 cores on Passport (was implicit 1). */
+    argv_buf[n++] = (char*)"--num-raster-threads=4";
+  }
   argv_buf[n++] = (char*)kScaleFactor;
   argv_buf[n++] = (char*)kDisableFeatures;
   argv_buf[n++] = (char*)url;

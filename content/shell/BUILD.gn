@@ -415,6 +415,7 @@ static_library("content_shell_lib") {
       "//ui/aura",
       "//ui/aura:test_support",
       "//ui/events",
+      "//ui/ozone/platform/qnx_screen:qnx_screen",
       "//ui/wm",
     ]
   } else if (use_aura) {

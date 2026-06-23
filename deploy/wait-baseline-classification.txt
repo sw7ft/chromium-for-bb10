@@ -1,0 +1,53 @@
+# Wait-budget classification (Phase 1 baseline, Jun 22 2026)
+
+## Measurement context
+- Device: BB10 Passport, 4 cores @ 2.2 GHz
+- berry-fps.enable: ON
+- berry-gpu.enable: ON (Navigator default path uses GPU unless disabled)
+- berry-kbd.debug: removed for cleaner runs
+
+## Thread states (pidin during qnx_screen run)
+- RUNNING: 0-1 threads typical
+- CONDVAR: 15-18 (thread pools idle, waiting for work)
+- SIGWAITINFO: 6-7 (signal waiters / message pumps blocked)
+- REPLY: 0-1 (synchronous Screen service IPC during present)
+
+Interpretation: **wait-bound, not compute-bound**. Device Monitor ~3% CPU is expected
+when almost no thread is RUNNING.
+
+## Frame timing (software PresentCanvas, latest binary)
+| Metric | Value | Meaning |
+|--------|-------|---------|
+| post avg | 8-22 ms | screen_post_window cost — NOT the bottleneck |
+| gap avg | 33-40 ms at ~20 fps scroll (prior Navigator) | upstream scheduling wait |
+| gap avg | 860-1900 ms at ~1 fps (SSH launch, page throttled) | visibility / idle scheduling |
+
+Prior Navigator scroll (pump fix deployed): **present=20-22/s, gap~37ms, post~10ms**.
+
+Decision: **Dominant bucket = high gap, low post** → fix message-pump active window
+and tie activity to user input + present.
+
+## Other buckets ruled out for steady-state scroll
+- QNX:SYNC:wait — launch-only, not scroll limiter
+- needs_draw=0 between frames — normal after each draw completes
+- post/REPLY blocking — post ~10ms, acceptable
+
+## Fix applied (Phase 3)
+1. Extend adaptive pump active window 500ms → 2500ms
+2. MarkQnxProcessPumpActive() on touch, key, and PresentCanvas
+3. QNX:PUMP stats line when berry-fps.enable (cap2 vs cap50 counts)
+
+## Re-test (post-fix, SSH qnx_screen software mode)
+```
+QNX:PUMP waits=920 cap2=920 cap50=0 wait avg=3.1ms   (entire 25s run)
+QNX:FPS present=2 ... post avg=18.5ms | gap avg=754ms  (SSH throttled ~1fps)
+```
+
+Pump layer: **fixed** — zero fallbacks to 50ms cap (cap50=0). Waits avg ~3ms.
+
+Frame layer via SSH: still ~1fps (page visibility throttling without Navigator focus).
+Navigator scroll should match prior ~20fps baseline with lower gap during gestures
+due to 2500ms active window + input/present activity marks.
+
+To verify on device: relaunch Berry from Navigator, scroll 6s, check berry-kbd.log for
+QNX:FPS and QNX:PUMP lines (cap50 should stay 0 during scroll).

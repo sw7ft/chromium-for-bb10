@@ -151,6 +151,18 @@ RootCompositorFrameSinkImpl::Create(
     external_begin_frame_source =
         std::make_unique<ExternalBeginFrameSourceIOS>(restart_id);
 #else
+#if BUILDFLAG(IS_QNX)
+    // BB10: use a free-running 60Hz begin-frame timer (aligned to vsync params
+    // from the Screen present path). BackToBack capped the whole pipeline at
+    // ~12fps because each observer only got the next BF after DidFinishFrame.
+    {
+      auto time_source = std::make_unique<DelayBasedTimeSource>(
+          base::SingleThreadTaskRunner::GetCurrentDefault().get());
+      synthetic_begin_frame_source =
+          std::make_unique<DelayBasedBeginFrameSource>(std::move(time_source),
+                                                         restart_id);
+    }
+#else
     if (params->disable_frame_rate_limit) {
       synthetic_begin_frame_source =
           std::make_unique<BackToBackBeginFrameSource>(
@@ -188,8 +200,9 @@ RootCompositorFrameSinkImpl::Create(
       synthetic_begin_frame_source =
           std::make_unique<DelayBasedBeginFrameSource>(std::move(time_source),
                                                        restart_id);
-#endif
+#endif  // BUILDFLAG(IS_MAC)
     }
+#endif  // BUILDFLAG(IS_QNX)
 #endif  // BUILDFLAG(IS_ANDROID)
   }
 

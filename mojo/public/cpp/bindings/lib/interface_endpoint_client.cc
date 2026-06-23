@@ -677,11 +677,9 @@ bool InterfaceEndpointClient::SendMessageWithResponder(
   base::WeakPtr<InterfaceEndpointClient> weak_self =
       weak_ptr_factory_.GetWeakPtr();
 #if defined(__QNX__)
-  // ALWAYS-ON (not gated by g_qnx_trace_enabled): sync calls are low-volume, so
-  // this won't induce the boot-time slowdown that full tracing does, and it lets
-  // us catch a sync call that hangs during startup/commit (before any runtime
-  // SIGUSR1 trace gate could be flipped).
-  {
+  // Gated by QNX_GL_DEBUG / berry-kbd.debug — Google loads fire many sync cookie
+  // IPCs; always-on tracing was measurable load-time cost.
+  if (g_qnx_trace_enabled) {
     char _qb[256];
     int _qn = snprintf(_qb, sizeof(_qb),
                        "QNX:SYNC:wait tid=%x name=%u excl=%d iface=%s\n",
@@ -696,7 +694,7 @@ bool InterfaceEndpointClient::SendMessageWithResponder(
   else
     controller_->SyncWatch(response_received);
 #if defined(__QNX__)
-  {
+  if (g_qnx_trace_enabled) {
     char _qb[256];
     int _qn = snprintf(_qb, sizeof(_qb),
                        "QNX:SYNC:done tid=%x name=%u recv=%d iface=%s\n",

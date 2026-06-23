@@ -35,17 +35,41 @@ void BerryBrowserChrome::SetLoading(bool loading) { loading_ = loading; }
 void BerryBrowserChrome::SetCanGoBack(bool c) { can_go_back_ = c; }
 void BerryBrowserChrome::SetCanGoForward(bool c) { can_go_forward_ = c; }
 
+void BerryBrowserChrome::StartEditing() {
+  editing_ = true;
+  edit_text_.clear();
+  replace_all_on_next_input_ = false;
+}
+
+void BerryBrowserChrome::CancelEditing() {
+  editing_ = false;
+  edit_text_ = url_;
+  replace_all_on_next_input_ = false;
+}
+
 void BerryBrowserChrome::OnChar(char c) {
   editing_ = true;
+  if (replace_all_on_next_input_) {
+    edit_text_.clear();
+    replace_all_on_next_input_ = false;
+  }
   edit_text_ += c;
 }
 
 void BerryBrowserChrome::OnBackspace() {
   editing_ = true;
-  if (!edit_text_.empty()) edit_text_.pop_back();
+  replace_all_on_next_input_ = false;
+  if (!edit_text_.empty())
+    edit_text_.pop_back();
 }
 
 void BerryBrowserChrome::OnEnter() {
+  if (edit_text_.empty()) {
+    url_committed_ = false;
+    editing_ = false;
+    edit_text_ = url_;
+    return;
+  }
   committed_url_ = edit_text_;
   url_committed_ = true;
   editing_ = false;
@@ -104,14 +128,21 @@ void BerryBrowserChrome::Paint(SkCanvas* canvas) {
   SkPaint text_paint;
   text_paint.setColor(SkColorSetRGB(220, 220, 220));
   const std::string& display = editing_ ? edit_text_ : url_;
-  canvas->drawString(display.c_str(),
+  const char* draw_text = display.c_str();
+  if (editing_ && edit_text_.empty()) {
+    text_paint.setColor(SkColorSetRGB(140, 140, 140));
+    draw_text = "Search or enter address";
+  }
+  canvas->drawString(draw_text,
                      url_rect_.x() + 8, url_rect_.y() + 28,
                      font, text_paint);
 
   if (editing_) {
     // Cursor
-    float tw = font.measureText(display.c_str(), display.size(),
-                                 SkTextEncoding::kUTF8);
+    float tw = editing_ && !edit_text_.empty()
+                   ? font.measureText(display.c_str(), display.size(),
+                                      SkTextEncoding::kUTF8)
+                   : 0.f;
     SkPaint cursor_paint;
     cursor_paint.setColor(SkColorSetRGB(100, 160, 255));
     canvas->drawRect(SkRect::MakeXYWH(url_rect_.x() + 8 + tw,
