@@ -159,21 +159,28 @@ select_dispatch(struct event_base *base, void *arg, struct timeval *tv)
 	/* QNX: select() historically had two issues:
 	   1) timeout {0,0} doesn't reliably report socket readiness
 	   2) NULL timeout (infinite block) could miss message-pump wakeups
-	   Issue (2) is now fixed by using a socketpair (instead of pipe) for the
+	   Issue (2) is fixed by using a socketpair (instead of pipe) for the
 	   message-pump wakeup FD: QNX select() reliably reports readability on
 	   socket FDs, so a blocked wait wakes correctly on ScheduleWork(). The
-	   blocking/idle wait can therefore sleep on a long backstop instead of
-	   busy-polling at 50ms. Only the genuine non-blocking {0,0} case still
-	   gets a small floor for the (1) socket-readiness bug. */
+	   blocking/idle wait therefore sleeps on a long backstop instead of
+	   busy-polling. */
 	struct timeval qnx_tv;
 	if (!tv) {
 		qnx_tv.tv_sec = 0;
 		qnx_tv.tv_usec = 250000; /* 250ms backstop: socketpair wakeup handles work */
 		tv = &qnx_tv;
 	} else if (tv->tv_sec == 0 && tv->tv_usec == 0) {
-		qnx_tv.tv_sec = 0;
-		qnx_tv.tv_usec = 50000; /* 50ms for the {0,0} readiness bug */
-		tv = &qnx_tv;
+		/* Genuine non-blocking poll (EVLOOP_NONBLOCK): must return immediately.
+		   This path previously forced a 50ms wait to paper over the {0,0}
+		   socket-readiness quirk (1), but MessagePumpLibevent::Run() calls this
+		   poll on EVERY loop iteration that still has immediate task work
+		   pending. With a backlog of a few hundred tasks at cold start (first
+		   navigation), the 50ms-per-iteration tax serialized into a ~17s stall:
+		   the queued CreateLoaderAndStart and all delayed tasks waited behind a
+		   "non-blocking" poll that was actually sleeping. Keep it truly
+		   non-blocking ({0,0}); watched-FD readiness is serviced by the blocking
+		   wait, which uses a non-zero (capped) timeout where QNX select()
+		   reports readiness reliably. */
 	} else if (tv->tv_sec > 0 || tv->tv_usec > 250000) {
 		qnx_tv.tv_sec = 0;
 		qnx_tv.tv_usec = 250000; /* 250ms cap for long idle waits */

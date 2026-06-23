@@ -316,6 +316,42 @@ void MessagePumpLibevent::Run(Delegate* delegate) {
     if (run_state.should_quit)
       break;
 
+#if defined(__QNX__) || defined(__QNXNTO__)
+    // Cheap per-second task-delivery counter (only one log line/sec/thread, and
+    // only while nav logging is on). Distinguishes IO-thread cold-start stalls
+    // caused by an immediate-task flood (imm high) from ones where the sequence
+    // manager delivers no work at all despite due tasks (imm/iters both ~0 while
+    // a known delayed task is overdue). |maxq_ms| is how far in the future the
+    // pump thinks the next delayed task is, exposing a queue that withholds an
+    // already-due task.
+    if (base::QnxNavLogEnabled()) {
+      static thread_local TimeTicks s_io_win;
+      static thread_local int s_io_iters = 0;
+      static thread_local int s_io_imm = 0;
+      if (s_io_win.is_null())
+        s_io_win = TimeTicks::Now();
+      s_io_iters++;
+      if (immediate_work_available)
+        s_io_imm++;
+      const TimeTicks now_io = TimeTicks::Now();
+      if (now_io - s_io_win >= Seconds(1)) {
+        long long maxq_ms = -1;
+        if (!next_work_info.delayed_run_time.is_null() &&
+            !next_work_info.delayed_run_time.is_max()) {
+          maxq_ms =
+              (next_work_info.delayed_run_time - now_io).InMilliseconds();
+        }
+        QNX_NAV_LOG_FMT(
+            "BerryNav: IORate tid=%x iters=%d imm=%d nextq_ms=%lld abs=%lld\n",
+            (unsigned)pthread_self(), s_io_iters, s_io_imm, maxq_ms,
+            base::QnxNowMs());
+        s_io_win = now_io;
+        s_io_iters = 0;
+        s_io_imm = 0;
+      }
+    }
+#endif
+
     // Process native events if any are ready. Do not block waiting for more. Do
     // not instantiate a ScopedDoWorkItem for this call as:
     //  - This most often ends up calling OnLibeventNotification() below which
@@ -445,6 +481,21 @@ void MessagePumpLibevent::Run(Delegate* delegate) {
     QNX_TRACE_FMT("QNX:MPL:Woke tid=%x p=%p io=%d\n",
                   (unsigned)pthread_self(), (void*)this,
                   (int)processed_io_events_);
+    // Near-zero-cost strand detector: a wait capped to a few ms that actually
+    // slept far longer means the pump missed its wake. Only logs the
+    // pathological case, so it is safe to leave enabled.
+    {
+      const double qnx_act_ms =
+          (TimeTicks::Now() - qnx_wait_enter).InMicrosecondsF() / 1000.0;
+      if (qnx_act_ms > 150.0 && qnx_cap_ms > 0 && qnx_cap_ms <= 50 &&
+          base::QnxNavLogEnabled()) {
+        QNX_NAV_LOG_FMT(
+            "BerryNav: PumpLongWait tid=%x p=%p cap_ms=%d act_ms=%d io=%d "
+            "abs=%lld\n",
+            (unsigned)pthread_self(), (void*)this, qnx_cap_ms, (int)qnx_act_ms,
+            (int)processed_io_events_, base::QnxNowMs());
+      }
+    }
     if (base::QnxFpsLogEnabled()) {
       const double wait_ms =
           (TimeTicks::Now() - qnx_wait_enter).InMicrosecondsF() / 1000.0;

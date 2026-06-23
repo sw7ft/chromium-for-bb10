@@ -19,13 +19,6 @@
 #include <string.h>
 #include <unistd.h>
 
-static const char* kDefaultUrl = "https://www.google.com/";
-
-/* Display tuning — easy to change without rebuilding content_shell.
- * kRotation: Navigator composites the app window rotated; "90" is the first
- *   guess to undo the observed 90-deg-clockwise tilt. Try 0/90/180/270.
- * kScaleFactor: render at 720px (QNX_SCREEN_*); scale 1 ≈ 720 CSS px, panel
- *   upscales 2× to 1440 physical so text stays readable without 1440² paint. */
 static const char* kRotation = "90";
 static const char* kScaleFactor = "--force-device-scale-factor=1";
 
@@ -213,8 +206,11 @@ int main(int argc, char** argv) {
   char shell[2100];
   snprintf(shell, sizeof(shell), "%s/content_shell.exe", dir);
 
-  /* Default start URL: native toolbar handles navigation; skip home.html. */
-  const char* url = (argc > 1 && argv[1] && argv[1][0]) ? argv[1] : kDefaultUrl;
+  /* Default start URL: bundled home.html in the native asset dir (omnibox +
+   * quick links). Override with the first launcher argument. */
+  char default_url[2300];
+  snprintf(default_url, sizeof(default_url), "file://%s/home.html", dir);
+  const char* url = (argc > 1 && argv[1] && argv[1][0]) ? argv[1] : default_url;
 
   char subprocess_path[2300];
   snprintf(subprocess_path, sizeof(subprocess_path),
