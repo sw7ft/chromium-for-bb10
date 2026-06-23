@@ -53,6 +53,25 @@
 #include "evsignal.h"
 #include "log.h"
 
+/*
+ * random() is NOT thread-safe (process-global state, no locking). Chromium runs
+ * an event_base per thread, so concurrent poll_dispatch() calls race on it and
+ * corrupt its state pointer -- a SIGSEGV in random()/setstate on QNX under heavy
+ * browsing. This only chooses a fair fd-activation offset, so a per-thread
+ * xorshift PRNG (no shared mutable state) is sufficient. See select.c.
+ */
+static unsigned
+event_fair_rand(void)
+{
+	static __thread unsigned s;
+	if (s == 0)
+		s = (unsigned)(unsigned long)(&s) | 1u;
+	s ^= s << 13;
+	s ^= s >> 17;
+	s ^= s << 5;
+	return s;
+}
+
 struct pollop {
 	int event_count;		/* Highest number alloc */
 	int nfds;                       /* Size of event_* */
@@ -163,7 +182,7 @@ poll_dispatch(struct event_base *base, void *arg, struct timeval *tv)
 	if (res == 0 || nfds == 0)
 		return (0);
 
-	i = random() % nfds;
+	i = event_fair_rand() % nfds;
 	for (j = 0; j < nfds; j++) {
 		struct event *r_ev = NULL, *w_ev = NULL;
 		int what;

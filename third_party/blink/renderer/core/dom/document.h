@@ -2110,6 +2110,8 @@ class CORE_EXPORT Document : public ContainerNode,
 
   // ImplicitClose() actually does the work of closing the input stream.
   void ImplicitClose();
+  // Completes load/onload after DocumentWasClosed (sync on non-QNX, posted on QNX).
+  void FinishImplicitClose();
   bool ShouldComplete();
 
   // Returns |true| if both document and its owning frame are still attached.

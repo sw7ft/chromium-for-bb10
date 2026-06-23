@@ -9,6 +9,7 @@
 #include "base/qnx_trace.h"
 #include "base/strings/escape.h"
 #include "base/synchronization/lock.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
@@ -37,6 +38,7 @@ std::string g_last_chrome_url;
 bool g_last_loading = false;
 bool g_last_can_back = false;
 bool g_last_can_forward = false;
+base::TimeTicks g_last_chrome_url_repaint;
 
 void RepaintChrome() {
   ui::RequestQnxScreenRepaint();
@@ -105,7 +107,10 @@ void CommitUrlBarNavigation() {
   QNX_NAV_LOG_FMT("BerryNav: commit raw=\"%s\" url=\"%s\" valid=%d\n",
                   raw.c_str(), url.spec().c_str(), url.is_valid() ? 1 : 0);
   if (url.is_valid()) {
-    g_last_chrome_url = url.spec();
+    {
+      base::AutoLock lock(g_chrome_lock);
+      g_last_chrome_url = url.spec();
+    }
     shell->LoadURL(url);
     RepaintChromeFull();
   } else {
@@ -114,10 +119,15 @@ void CommitUrlBarNavigation() {
 }
 
 void EnsureWebContentsFocus() {
-  if (g_url_bar_editing)
-    return;
-  if (g_active_shell && g_active_shell->web_contents())
-    g_active_shell->web_contents()->Focus();
+  Shell* shell = nullptr;
+  {
+    base::AutoLock lock(g_chrome_lock);
+    if (g_url_bar_editing)
+      return;
+    shell = g_active_shell;
+  }
+  if (shell && shell->web_contents())
+    shell->web_contents()->Focus();
 }
 
 void PaintChromeOverlay(SkCanvas* canvas) {
@@ -366,6 +376,16 @@ void ShellPlatformDelegate::SetAddressBarURL(Shell* shell, const GURL& url) {
     return;
   g_last_chrome_url = spec;
   g_chrome->SetUrl(spec);
+  // While subresources load, DDG updates the visible URL frequently; repainting
+  // the chrome overlay on every update contends with PresentCanvas at ~60fps.
+  if (g_last_loading) {
+    const base::TimeTicks now = base::TimeTicks::Now();
+    if (!g_last_chrome_url_repaint.is_null() &&
+        (now - g_last_chrome_url_repaint) < base::Milliseconds(250)) {
+      return;
+    }
+    g_last_chrome_url_repaint = now;
+  }
   RepaintChrome();
 }
 

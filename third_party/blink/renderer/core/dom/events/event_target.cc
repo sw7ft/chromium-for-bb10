@@ -887,6 +887,8 @@ bool EventTarget::FireEventListeners(Event& event,
   bool fired_listener = false;
 
   for (auto& registered_listener : entry) {
+    if (!registered_listener)
+      continue;
     if (UNLIKELY(registered_listener->Removed())) {
       continue;
     }
@@ -902,6 +904,12 @@ bool EventTarget::FireEventListeners(Event& event,
     }
 
     EventListener* listener = registered_listener->Callback();
+    if (!listener)
+      continue;
+#if defined(__QNX__) || defined(__QNXNTO__)
+    if (context->IsContextDestroyed())
+      continue;
+#endif
     // The listener will be retained by Member<EventListener> in the
     // registeredListener, i and size are updated with the firing event iterator
     // in case the listener is removed from the listener vector below.

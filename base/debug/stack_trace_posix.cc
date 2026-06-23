@@ -460,6 +460,40 @@ void StackDumpSignalHandler(int signal, siginfo_t* info, void* void_context) {
       sp = uc->uc_mcontext.cpu.gpr[13];
     }
     unsigned fault = info ? (unsigned)(uintptr_t)info->si_addr : 0;
+
+    // Emit the essentials IMMEDIATELY with a dladdr-free write(). The buffered
+    // report below only write()s at the very end, after many dladdr() calls --
+    // but dladdr() is not async-signal-safe and FAULTS on a corrupted heap, so a
+    // heap-corruption crash produced ZERO output (the observed silent SIGSEGV
+    // with only a kernel "terminated SIGSEGV ip=..." line). pc/lr + the stack
+    // scan are enough to symbolize offline (non-PIE: runtime addr == ELF vaddr).
+    {
+      static char hb[256];
+      int ho = snprintf(hb, sizeof(hb),
+                        "\nQNX:CRASH tid=%x sig=%d code=%d fault=0x%x pc=0x%x "
+                        "lr=0x%x sp=0x%x\n",
+                        (unsigned)pthread_self(), signal, si_code, fault, pc, lr,
+                        sp);
+      write(STDERR_FILENO, hb, ho);
+    }
+    // Stack scan filtered to the content_shell EXEC text by a FIXED vaddr range
+    // (non-PIE), so this needs no dladdr either. Reading up from sp stays within
+    // the live stack. These are candidate return addresses -> symbolize with
+    //   arm-blackberry-qnx8eabi-addr2line -e out/qnx-arm/content_shell <abs>
+    if (sp > 0x10000) {
+      static char sb2[8192];
+      int s2 = snprintf(sb2, sizeof(sb2), "QNX:STACKABS2:");
+      unsigned* sptr = (unsigned*)sp;
+      for (int i = 0; i < 4096 && (unsigned)(sptr + i) < 0x7fffffff; i++) {
+        unsigned code = sptr[i] & ~1u;  // clear thumb bit
+        if (code >= 0x828000u && code < 0x5828000u &&
+            s2 < (int)sizeof(sb2) - 16)
+          s2 += snprintf(sb2 + s2, sizeof(sb2) - s2, " %x", code);
+      }
+      s2 += snprintf(sb2 + s2, sizeof(sb2) - s2, "\n");
+      write(STDERR_FILENO, sb2, s2);
+    }
+
     CB_APP("\nQNX:CRASH tid=%x sig=%s(%d) code=%d fault=0x%x pc=0x%x lr=0x%x "
            "sp=0x%x\n",
            (unsigned)pthread_self(), signame, signal, si_code, fault, pc, lr,

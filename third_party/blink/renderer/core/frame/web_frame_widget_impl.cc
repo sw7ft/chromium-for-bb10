@@ -353,6 +353,12 @@ WebFrameWidgetImpl::~WebFrameWidgetImpl() {
 void WebFrameWidgetImpl::BindLocalRoot(WebLocalFrame& local_root) {
   local_root_ = To<WebLocalFrameImpl>(local_root);
   CHECK(local_root_ && local_root_->GetFrame());
+#if !defined(__QNX__) && !defined(__QNXNTO__)
+  // QNX: the Long Animation Frame (LoAF) timing monitor crashed in
+  // CaptureScriptSourceLocation -> v8::Function::GetScriptOrigin (null v8
+  // object) when DOM timer callbacks fire on heavy SPAs. LoAF is a pure
+  // performance-reporting API; disabling it only drops 'long-animation-frame'
+  // PerformanceObserver entries and removes per-callback probe overhead.
   if (RuntimeEnabledFeatures::LongAnimationFrameMonitoringEnabled(
           local_root_->GetFrame()->DomWindow()) &&
       !IsHidden()) {
@@ -360,6 +366,7 @@ void WebFrameWidgetImpl::BindLocalRoot(WebLocalFrame& local_root) {
         MakeGarbageCollected<AnimationFrameTimingMonitor>(
             *this, local_root_->GetFrame()->GetProbeSink());
   }
+#endif
 }
 
 bool WebFrameWidgetImpl::ForTopMostMainFrame() const {
@@ -4565,6 +4572,9 @@ void WebFrameWidgetImpl::WasShown(bool was_evicted) {
   }
 
   CHECK(local_root_ && local_root_->GetFrame());
+#if !defined(__QNX__) && !defined(__QNXNTO__)
+  // QNX: LoAF monitor disabled (see BindLocalRoot) -- crashed capturing script
+  // source locations for timer/callback probes on heavy SPAs.
   if (!animation_frame_timing_monitor_ &&
       RuntimeEnabledFeatures::LongAnimationFrameMonitoringEnabled(
           local_root_->GetFrame()->DomWindow())) {
@@ -4572,6 +4582,7 @@ void WebFrameWidgetImpl::WasShown(bool was_evicted) {
         MakeGarbageCollected<AnimationFrameTimingMonitor>(
             *this, local_root_->GetFrame()->GetProbeSink());
   }
+#endif
 }
 
 void WebFrameWidgetImpl::RunPaintBenchmark(int repeat_count,

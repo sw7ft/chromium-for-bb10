@@ -6,6 +6,7 @@
 #include <screen/screen.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -80,6 +81,35 @@ base::TimeDelta QueryDisplayInterval(screen_window_t win) {
   return base::Hertz(mode.refresh);
 }
 
+// Cap the begin-frame rate on this SoC. The panel is 60Hz, but full-screen
+// software raster + full-frame present cannot sustain 60fps on heavy/animated
+// pages, so Viz keeps scheduling ~60 begin-frames/sec (which also drive the
+// page's requestAnimationFrame and CSS animations) whose work mostly gets
+// dropped -- wasted CPU at ~99% on a single core. Pacing begin-frames at a lower
+// rate throttles the page's animation work and the compositor together, roughly
+// halving CPU on animated pages, while idle pages still go fully idle (the
+// display-scheduler keep-alive handles that). Returned as the *minimum*
+// begin-frame interval. Tunable via QNX_MAX_FPS (default 30); set 60 to
+// effectively disable the cap on a 60Hz panel.
+base::TimeDelta ApplyMaxFpsCap(base::TimeDelta panel_interval) {
+  static const int kMaxFps = []() {
+    const char* e = getenv("QNX_MAX_FPS");
+    const int v = e ? atoi(e) : 60;  // default 60 == no cap on a 60Hz panel
+    return (v >= 5 && v <= 120) ? v : 60;
+  }();
+  const base::TimeDelta kMinInterval = base::Hertz(kMaxFps);
+#if BUILDFLAG(IS_QNX)
+  if (base::QnxFpsLogEnabled()) {
+    char line[64];
+    int n = snprintf(line, sizeof(line), "QNX:MAXFPS cap=%dfps\n", kMaxFps);
+    if (n > 0)
+      ::write(2, line, n);
+  }
+#endif
+  // Larger interval == lower fps, so the cap is a floor on the interval.
+  return std::max(panel_interval, kMinInterval);
+}
+
 // Shared, thread-safe vsync parameters written by the present path (the actual
 // post time becomes the timebase) and read by the VSyncProvider that Viz polls.
 class QnxVSyncState : public base::RefCountedThreadSafe<QnxVSyncState> {
@@ -139,8 +169,8 @@ class QnxScreenCanvas : public SurfaceOzoneCanvas {
  public:
   explicit QnxScreenCanvas(QnxScreenWindow* window)
       : window_(window),
-        vsync_state_(base::MakeRefCounted<QnxVSyncState>(
-            QueryDisplayInterval(window ? window->screen_window() : nullptr))) {
+        vsync_state_(base::MakeRefCounted<QnxVSyncState>(ApplyMaxFpsCap(
+            QueryDisplayInterval(window ? window->screen_window() : nullptr)))) {
     ResizeCanvasInternal(gfx::Size(window->GetBoundsInPixels().width(),
                                    window->GetBoundsInPixels().height()));
   }
@@ -201,12 +231,23 @@ class QnxScreenCanvas : public SurfaceOzoneCanvas {
 
       if (!copy_rect.IsEmpty()) {
         const int bytes_per_pixel = 4;
+        int buf_size[2] = {0, 0};
+        screen_get_buffer_property_iv(buf[0], SCREEN_PROPERTY_BUFFER_SIZE,
+                                      buf_size);
+        const int copy_h =
+            buf_size[1] > 0
+                ? std::min(copy_rect.height(), buf_size[1] - copy_rect.y())
+                : copy_rect.height();
+        const int copy_w =
+            buf_size[0] > 0
+                ? std::min(copy_rect.width(), buf_size[0] - copy_rect.x())
+                : copy_rect.width();
         const int row_bytes =
-            std::min(copy_rect.width() * bytes_per_pixel, stride);
+            std::min(copy_w * bytes_per_pixel, stride);
         const uint8_t* base_src =
             static_cast<const uint8_t*>(pixmap.addr());
         uint8_t* base_dst = static_cast<uint8_t*>(ptr);
-        for (int y = copy_rect.y(); y < copy_rect.bottom(); ++y) {
+        for (int y = copy_rect.y(); y < copy_rect.y() + copy_h; ++y) {
           const uint8_t* src_row =
               base_src + y * pixmap.rowBytes() +
               copy_rect.x() * bytes_per_pixel;

@@ -35,6 +35,18 @@ bool DrawImmediatelyWhenInteractive() {
   return features::ShouldDrawImmediatelyWhenInteractive();
 }
 
+#if BUILDFLAG(IS_QNX)
+// After real surface damage, QNX keeps drawing every BeginFrame for this long so
+// the (slow) Screen present path paces a continuous gesture/animation smoothly
+// instead of stuttering at the sparse-damage cap (~12fps). Continuous scroll and
+// CSS/JS animation submit fresh damage every vsync (~16.7ms), which keeps
+// refreshing this window, so it only needs to span a couple of frame intervals.
+// Kept short so an isolated, low-rate repaint -- e.g. a blinking text caret on a
+// focused <input> -- settles in a few frames instead of triggering a quarter
+// second of full-screen software rasters and pinning a CPU core.
+constexpr base::TimeDelta kQnxDrawKeepAlive = base::Milliseconds(48);
+#endif
+
 }  // namespace
 
 class DisplayScheduler::BeginFrameObserver : public BeginFrameObserverBase {
@@ -117,8 +129,12 @@ void DisplayScheduler::SetVisible(bool visible) {
 
   visible_ = visible;
 #if BUILDFLAG(IS_QNX)
-  if (visible_)
+  if (visible_) {
     needs_draw_ = true;
+    // Seed the keep-alive so the freshly-shown content fully repaints over the
+    // next window before the compositor is allowed to idle.
+    last_real_damage_time_ = base::TimeTicks::Now();
+  }
 #endif
   // If going invisible, we'll stop observing begin frames once we try
   // to draw and fail.
@@ -138,6 +154,9 @@ void DisplayScheduler::OnDisplayDamaged(SurfaceId surface_id) {
   base::AutoReset<bool> auto_reset(&inside_surface_damaged_, true);
 
   needs_draw_ = true;
+#if BUILDFLAG(IS_QNX)
+  last_real_damage_time_ = base::TimeTicks::Now();
+#endif
   MaybeStartObservingBeginFrames();
   UpdateHasPendingSurfaces();
   ScheduleBeginFrameDeadline();
@@ -234,8 +253,13 @@ bool DisplayScheduler::DrawAndSwap() {
 
 #if BUILDFLAG(IS_QNX)
   // Sparse-damage mode capped BB10 at ~12 presents/sec while BeginFrame ran
-  // ~50/sec. Keep drawing while visible so the Screen path can pace to refresh.
-  if (!visible_)
+  // ~50/sec, so we keep drawing every frame -- but only for a short keep-alive
+  // window after real damage. That preserves smooth scroll/animation pacing on
+  // the Screen present path while letting the compositor go idle on a static
+  // page instead of pinning a CPU core at a constant 60fps.
+  if (!visible_ ||
+      last_real_damage_time_.is_null() ||
+      (base::TimeTicks::Now() - last_real_damage_time_) > kQnxDrawKeepAlive)
 #endif
   needs_draw_ = false;
   return true;
@@ -345,8 +369,13 @@ bool DisplayScheduler::OnBeginFrame(const BeginFrameArgs& args) {
   current_begin_frame_args_.deadline -= delta;
 
 #if BUILDFLAG(IS_QNX)
+  // Re-arm a draw for this BeginFrame only while we're within the keep-alive
+  // window after real damage (see DrawAndSwap); otherwise let needs_draw_ stay
+  // false so an idle/static page stops drawing and the core can sleep.
   if (visible_ && !output_surface_lost_ &&
-      !damage_tracker_->root_frame_missing()) {
+      !damage_tracker_->root_frame_missing() &&
+      !last_real_damage_time_.is_null() &&
+      (base::TimeTicks::Now() - last_real_damage_time_) <= kQnxDrawKeepAlive) {
     needs_draw_ = true;
   }
 #endif
@@ -604,9 +633,12 @@ bool DisplayScheduler::AttemptDrawAndSwap() {
     // |expecting_root_surface_damage_because_of_resize_| is true?
     damage_tracker_->reset_expecting_root_surface_damage_because_of_resize();
 
-#if !BUILDFLAG(IS_QNX)
+    // On QNX too: once we're past the post-damage keep-alive window (needs_draw_
+    // is false here), stop observing BeginFrames so the 60Hz source goes quiet
+    // and the CPU can idle on a static page. OnDisplayDamaged() re-arms
+    // observation via MaybeStartObservingBeginFrames() on the next real damage,
+    // so scroll/animation/new content resume within a frame.
     StopObservingBeginFrames();
-#endif
   }
   return false;
 }

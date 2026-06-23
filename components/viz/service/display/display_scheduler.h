@@ -12,6 +12,7 @@
 #include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "build/build_config.h"
 #include "components/viz/common/display/renderer_settings.h"
 #include "components/viz/common/frame_sinks/begin_frame_source.h"
 #include "components/viz/common/surfaces/surface_id.h"
@@ -140,6 +141,13 @@ class VIZ_SERVICE_EXPORT DisplayScheduler
 
   bool inside_begin_frame_deadline_interval_;
   bool needs_draw_;
+#if BUILDFLAG(IS_QNX)
+  // Last time real surface damage arrived. On QNX we keep drawing every frame
+  // for a short keep-alive window after damage (smooth scroll/animation on the
+  // Screen present path) but let the compositor go idle when nothing changes, so
+  // a static page does not pin a CPU core at 60fps. See OnDisplayDamaged().
+  base::TimeTicks last_real_damage_time_;
+#endif
   bool has_pending_surfaces_;
 
   int next_swap_id_;

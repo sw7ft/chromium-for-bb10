@@ -67,6 +67,28 @@
 typedef unsigned long fd_mask;
 #endif
 
+/*
+ * random() is NOT thread-safe: it mutates a process-global state buffer with no
+ * locking. Chromium runs an event_base per thread, so concurrent dispatch calls
+ * race on random()'s internal state and eventually dereference a corrupted state
+ * pointer -- observed as a SIGSEGV in random()/setstate on QNX during heavy
+ * browsing (many fds across several IO threads). The value here only picks a
+ * fair starting offset for fd activation, so it needs no cryptographic quality:
+ * use a per-thread xorshift PRNG seeded from the (per-thread) address of its own
+ * TLS slot. No shared mutable state -> no race.
+ */
+static unsigned
+event_fair_rand(void)
+{
+	static __thread unsigned s;
+	if (s == 0)
+		s = (unsigned)(unsigned long)(&s) | 1u;
+	s ^= s << 13;
+	s ^= s >> 17;
+	s ^= s << 5;
+	return s;
+}
+
 struct selectop {
 	int event_fds;		/* Highest fd in fd set */
 	int event_fdsz;
@@ -208,7 +230,7 @@ select_dispatch(struct event_base *base, void *arg, struct timeval *tv)
 	event_debug(("%s: select reports %d", __func__, res));
 
 	check_selectop(sop);
-	i = random() % (sop->event_fds+1);
+	i = event_fair_rand() % (sop->event_fds+1);
 	for (j = 0; j <= sop->event_fds; ++j) {
 		struct event *r_ev = NULL, *w_ev = NULL;
 		if (++i >= sop->event_fds+1)

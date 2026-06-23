@@ -124,6 +124,8 @@ void AgentGroupSchedulerImpl::PerformMicrotaskCheckpoint() {
     agents.push_back(agent);
   }
   for (Agent* agent : agents) {
+    if (!agent)
+      continue;
     DCHECK(agents_.Contains(agent));
     agent->PerformMicrotaskCheckpoint();
   }

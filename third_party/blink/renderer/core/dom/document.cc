@@ -3837,24 +3837,45 @@ void Document::ImplicitClose() {
     domWindow()->DocumentWasClosed();
   QNX_TRACE_MSG("QNX:ImCl:3 postDocClosed\n");
 
+#if defined(__QNX__) || defined(__QNXNTO__)
+  // Do not fire load/onload or mark load completed synchronously: parser
+  // teardown is still in progress and re-entering JS here SIGSEGV'd on DDG.
+  GetTaskRunner(TaskType::kDOMManipulation)
+      ->PostTask(FROM_HERE,
+                 WTF::BindOnce(&Document::FinishImplicitClose,
+                               WrapPersistent(this)));
+  return;
+#endif
+
+  FinishImplicitClose();
+}
+
+void Document::FinishImplicitClose() {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  QNX_TRACE_MSG("QNX:ImCl:4 preLoad\n");
+  if (domWindow())
+    domWindow()->DispatchWindowLoadEvent();
+  QNX_TRACE_MSG("QNX:ImCl:4b postLoad\n");
+#endif
+
   if (GetFrame() && GetFrame()->IsMainFrame())
     GetFrame()->GetLocalFrameHostRemote().DocumentOnLoadCompleted();
 
-  QNX_TRACE_MSG("QNX:ImCl:4 preOnload\n");
+  QNX_TRACE_MSG("QNX:ImCl:5 preOnload\n");
   if (GetFrame()) {
     GetFrame()->Client()->DispatchDidHandleOnloadEvents();
   }
-  QNX_TRACE_MSG("QNX:ImCl:5 postOnload\n");
+  QNX_TRACE_MSG("QNX:ImCl:6 postOnload\n");
 
   if (!GetFrame()) {
-    QNX_TRACE_MSG("QNX:ImCl:6 noFrame\n");
+    QNX_TRACE_MSG("QNX:ImCl:7 noFrame\n");
     load_event_progress_ = kLoadEventCompleted;
     return;
   }
 
   if (GetFrame()->Loader().HasProvisionalNavigation() &&
       start_time_.Elapsed() < kCLayoutScheduleThreshold) {
-    QNX_TRACE_MSG("QNX:ImCl:7 prov bail\n");
+    QNX_TRACE_MSG("QNX:ImCl:8 prov bail\n");
     load_event_progress_ = kLoadEventCompleted;
     return;
   }
@@ -3864,10 +3885,15 @@ void Document::ImplicitClose() {
     UpdateStyleAndLayout(DocumentUpdateReason::kUnknown);
 #endif
 
+#if defined(__QNX__) || defined(__QNXNTO__)
+  if (form_controller_ && form_controller_->HasControlStates())
+    form_controller_->RestoreImmediately();
+#endif
+
   load_event_progress_ = kLoadEventCompleted;
 #if defined(__QNX__)
   QNX_TRACE_FMT("QNX:ImCl:9 lv=%d\n",
-                      (GetFrame() && GetLayoutView()) ? 1 : 0);
+                (GetFrame() && GetLayoutView()) ? 1 : 0);
 #endif
 
   if (GetFrame() && GetLayoutView()) {

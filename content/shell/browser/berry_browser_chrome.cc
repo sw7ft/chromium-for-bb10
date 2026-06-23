@@ -122,12 +122,14 @@ void BerryBrowserChrome::Paint(SkCanvas* canvas) {
                         url_rect_.width(), url_rect_.height()),
       4, 4, url_border);
 
-  // URL text
+  // URL text — snapshot members so concurrent SetUrl (UI thread) cannot
+  // invalidate c_str() while drawString runs during PresentCanvas (Navigator
+  // path repaints at ~60fps while DDG same-doc navigations update the bar).
   SkFont font;
   font.setSize(16);
   SkPaint text_paint;
   text_paint.setColor(SkColorSetRGB(220, 220, 220));
-  const std::string& display = editing_ ? edit_text_ : url_;
+  const std::string display = editing_ ? edit_text_ : url_;
   const char* draw_text = display.c_str();
   if (editing_ && edit_text_.empty()) {
     text_paint.setColor(SkColorSetRGB(140, 140, 140));

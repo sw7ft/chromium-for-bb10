@@ -145,8 +145,10 @@ int main(int argc, char** argv) {
    * from the actual app. Requires <access_shared> (declared in the descriptor).
    * Harmless if the open fails (e.g. permission) - the app still runs. */
   {
+    /* Append, don't truncate: Navigator respawns the app on crash and was
+     * wiping the only copy of the crash backtrace (O_TRUNC). */
     int lfd = open("/accounts/1000/shared/misc/berry-kbd.log",
-                   O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                   O_WRONLY | O_CREAT | O_APPEND, 0644);
     if (lfd >= 0) {
       dup2(lfd, 1);
       dup2(lfd, 2);

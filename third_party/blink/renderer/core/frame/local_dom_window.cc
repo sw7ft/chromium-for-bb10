@@ -853,6 +853,18 @@ void LocalDOMWindow::DispatchWindowLoadEvent() {
 }
 
 void LocalDOMWindow::DocumentWasClosed() {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  // ImplicitClose runs while the HTML parser is still tearing down. Firing
+  // load/pageshow synchronously re-enters JS during that window and was
+  // observed to SIGSEGV in EventTarget::FireEventListeners (fault=0x4) on heavy
+  // SPAs like DuckDuckGo. Use the same deferred paths as when
+  // ScopedEventQueue is active: PostTask for load, EnqueueWindowEvent for
+  // pageshow (see EnqueueNonPersistedPageshowEvent).
+  // Load/onload and form restore run from Document::FinishImplicitClose()
+  // (posted at the end of ImplicitClose). Only queue pageshow here.
+  EnqueueNonPersistedPageshowEvent();
+  return;
+#endif
   DispatchWindowLoadEvent();
 
   // An extension to step 4.5. or a part of step 4.6.3. of
@@ -869,6 +881,14 @@ void LocalDOMWindow::DocumentWasClosed() {
 }
 
 void LocalDOMWindow::EnqueueNonPersistedPageshowEvent() {
+#if defined(__QNX__) || defined(__QNXNTO__)
+  if (!document_)
+    return;
+  EnqueueWindowEvent(*PageTransitionEvent::Create(event_type_names::kPageshow,
+                                                  false /* persisted */),
+                     TaskType::kMiscPlatformAPI);
+  return;
+#endif
   // FIXME: https://bugs.webkit.org/show_bug.cgi?id=36334 Pageshow event needs
   // to fire asynchronously.  As per spec pageshow must be triggered
   // asynchronously.  However to be compatible with other browsers blink fires

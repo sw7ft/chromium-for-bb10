@@ -1169,6 +1169,8 @@ void MainThreadSchedulerImpl::PerformMicrotaskCheckpoint() {
     schedulers.push_back(scheduler);
   }
   for (AgentGroupSchedulerImpl* agent_group_scheduler : schedulers) {
+    if (!agent_group_scheduler)
+      continue;
     DCHECK(main_thread_only().agent_group_schedulers->Contains(
         agent_group_scheduler));
     agent_group_scheduler->PerformMicrotaskCheckpoint();
