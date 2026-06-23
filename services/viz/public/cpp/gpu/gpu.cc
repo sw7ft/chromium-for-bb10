@@ -12,6 +12,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/qnx_trace.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_checker.h"
@@ -130,6 +131,10 @@ class Gpu::EstablishRequest
         return;
     }
 
+#if defined(__QNX__) || defined(__QNXNTO__)
+    QNX_NAV_LOG_FMT("BerryNav: GpuChReqSend tid=%x abs=%lld\n",
+                    (unsigned)pthread_self(), base::QnxNowMs());
+#endif
     gpu->EstablishGpuChannel(this);
   }
 
@@ -186,6 +191,11 @@ class Gpu::EstablishRequest
       const gpu::GpuFeatureInfo& gpu_feature_info,
       const gpu::SharedImageCapabilities& shared_image_capabilities) {
     DCHECK(!main_task_runner_->BelongsToCurrentThread());
+#if defined(__QNX__) || defined(__QNXNTO__)
+    QNX_NAV_LOG_FMT("BerryNav: GpuChReply tid=%x valid=%d abs=%lld\n",
+                    (unsigned)pthread_self(), channel_handle.is_valid() ? 1 : 0,
+                    base::QnxNowMs());
+#endif
     base::AutoLock lock(lock_);
 
     // Do nothing if Cancel() was called.

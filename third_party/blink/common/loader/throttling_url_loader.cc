@@ -546,6 +546,8 @@ void ThrottlingURLLoader::Start(
 #if defined(__QNX__) || defined(__QNXNTO__)
   QNX_TRACE_FMT("QNX:TUL:Start deferred=%d throttles=%zu\n",
                      deferred, throttles_.size());
+  QNX_NAV_LOG_FMT("BerryNav: TULStart deferred=%d throttles=%zu abs=%lld\n",
+                  deferred ? 1 : 0, throttles_.size(), base::QnxNowMs());
 #endif
   if (deferred)
     deferred_stage_ = DEFERRED_START;
@@ -615,6 +617,11 @@ void ThrottlingURLLoader::StartNow() {
   }
   DCHECK(start_info_->url_loader_factory);
   QNX_TRACE_MSG("QNX:TUL:preCreateLoader\n");
+#if defined(__QNX__) || defined(__QNXNTO__)
+  QNX_NAV_LOG_FMT("BerryNav: TULSend url=\"%s\" abs=%lld\n",
+                  start_info_->url_request.url.spec().substr(0, 80).c_str(),
+                  base::QnxNowMs());
+#endif
   start_info_->url_loader_factory->CreateLoaderAndStart(
       url_loader_.BindNewPipeAndPassReceiver(start_info_->task_runner),
       start_info_->request_id, start_info_->options, start_info_->url_request,

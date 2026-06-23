@@ -166,10 +166,27 @@ network::NetworkService* g_in_process_instance = nullptr;
 
 static NetworkServiceClient* g_client = nullptr;
 
+#if defined(__QNX__) || defined(__QNXNTO__)
+// Diagnostic: self-reposting heartbeat on the IO thread (which hosts the
+// in-process network service). If these logs stop during the first-nav stall,
+// the IO thread is blocked; if they keep ticking, the CreateLoaderAndStart Mojo
+// message is delayed/queued rather than the thread being dead.
+void QnxIoHeartbeat(int seq) {
+  QNX_NAV_LOG_FMT("BerryNav: IObeat seq=%d tid=%x abs=%lld\n", seq,
+                  (unsigned)pthread_self(), base::QnxNowMs());
+  if (seq < 200) {
+    GetIOThreadTaskRunner({})->PostDelayedTask(
+        FROM_HERE, base::BindOnce(&QnxIoHeartbeat, seq + 1),
+        base::Milliseconds(200));
+  }
+}
+#endif
+
 void CreateInProcessNetworkServiceOnThread(
     mojo::PendingReceiver<network::mojom::NetworkService> receiver) {
 #if defined(__QNX__) || defined(__QNXNTO__)
   QNX_TRACE_FMT("QNX:CIPNST:enter tid=%lu\n", (unsigned long)pthread_self());
+  QnxIoHeartbeat(0);
 #endif
   g_in_process_instance = new network::NetworkService(
       nullptr /* registry */, std::move(receiver),

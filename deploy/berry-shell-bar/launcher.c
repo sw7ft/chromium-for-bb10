@@ -276,6 +276,15 @@ int main(int argc, char** argv) {
     argv_buf[n++] = (char*)"--num-raster-threads=4";
   } else {
     argv_buf[n++] = (char*)"--disable-gpu";
+    /* CRITICAL cold-start fix: --disable-gpu alone does NOT tell the renderer
+     * that compositing is software-only (render_thread_impl.cc only sets
+     * is_gpu_compositing_disabled_ for --disable-gpu-compositing). Without this,
+     * the renderer's first LayerTreeFrameSink request still calls
+     * EstablishGpuChannelSync, which blocks the main thread ~14s waiting for a
+     * GPU channel that can never succeed (valid=0), serializing the first
+     * navigation behind it. With this flag the renderer takes the software
+     * frame-sink path immediately and skips the doomed GPU handshake. */
+    argv_buf[n++] = (char*)"--disable-gpu-compositing";
     /* Software Skia raster: use all 4 cores on Passport (was implicit 1). */
     argv_buf[n++] = (char*)"--num-raster-threads=4";
   }

@@ -188,6 +188,12 @@ void URLLoaderFactory::CreateLoaderAndStartWithSyncClient(
     base::WeakPtr<mojom::URLLoaderClient> sync_client,
     const net::MutableNetworkTrafficAnnotationTag& traffic_annotation) {
   QNX_TRACE_FMT("QNX:ULF:CLASWSC url=%s\n", resource_request.url.spec().c_str());
+#if defined(__QNX__) || defined(__QNXNTO__)
+  QNX_NAV_LOG_FMT("BerryNav: FactoryRecv url=\"%s\" omf=%d abs=%lld\n",
+                  resource_request.url.spec().substr(0, 80).c_str(),
+                  resource_request.is_outermost_main_frame ? 1 : 0,
+                  base::QnxNowMs());
+#endif
   // Requests with |trusted_params| when params_->is_trusted is not set should
   // have been rejected at the CorsURLLoader layer.
   DCHECK(!resource_request.trusted_params || params_->is_trusted);
