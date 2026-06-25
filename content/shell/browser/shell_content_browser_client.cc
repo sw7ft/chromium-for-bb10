@@ -366,7 +366,32 @@ class ShellTtsPlatform : public TtsPlatform {
 constexpr char kBerryChromeMajorVersion[] = "120";
 constexpr char kBerryChromeFullVersion[] = "120.0.6099.224";
 
-blink::UserAgentMetadata GetQnxChromeUserAgentMetadata() {
+// The launcher passes --use-mobile-user-agent for everything except a handful
+// of desktop-gated sites (e.g. WhatsApp Web). When set, we present as Android
+// Chrome so sites serve their (far lighter) mobile bundles -- the single
+// biggest lever for load-time JS on this 32-bit Krait class hardware.
+bool BerryUseMobileUserAgent() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kUseMobileUserAgent);
+}
+
+// content::GetReducedUserAgent(mobile=true) only emits the Android/"Mobile
+// Safari" tokens on an IS_ANDROID build; on this QNX (Linux-family) build it
+// would still produce a desktop-shaped string. So build the mobile UA string
+// explicitly to match Chrome's frozen reduced mobile UA ("Android 10; K"),
+// keeping it consistent with the Sec-CH-UA-Mobile/platform=Android hints.
+std::string GetBerryUserAgent(bool mobile) {
+  if (mobile) {
+    return std::string(
+               "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, "
+               "like Gecko) Chrome/") +
+           kBerryChromeMajorVersion + ".0.0.0 Mobile Safari/537.36";
+  }
+  return content::GetReducedUserAgent(/*mobile=*/false,
+                                      kBerryChromeMajorVersion);
+}
+
+blink::UserAgentMetadata GetQnxChromeUserAgentMetadata(bool mobile) {
   blink::UserAgentMetadata metadata;
   metadata.brand_version_list = {
       blink::UserAgentBrandVersion("Google Chrome", kBerryChromeMajorVersion),
@@ -379,13 +404,16 @@ blink::UserAgentMetadata GetQnxChromeUserAgentMetadata() {
       blink::UserAgentBrandVersion("Not-A.Brand", "99.0.0.0"),
   };
   metadata.full_version = kBerryChromeFullVersion;
-  metadata.platform = "Linux";
-  metadata.architecture = "arm";
-  metadata.model = content::BuildModelInfo();
-  metadata.bitness = content::GetCpuBitness();
-  metadata.wow64 = content::IsWoW64();
+  // Match what real Chrome reports per form factor. Mobile Chrome sends an
+  // Android platform, empty architecture/bitness, and Sec-CH-UA-Mobile: ?1.
+  metadata.platform = mobile ? "Android" : "Linux";
+  metadata.platform_version = mobile ? "14.0.0" : "";
+  metadata.architecture = mobile ? "" : "arm";
+  metadata.model = mobile ? "" : content::BuildModelInfo();
+  metadata.bitness = mobile ? "" : content::GetCpuBitness();
+  metadata.wow64 = mobile ? false : content::IsWoW64();
   metadata.form_factor = "";
-  metadata.mobile = false;
+  metadata.mobile = mobile;
   return metadata;
 }
 
@@ -395,9 +423,9 @@ void LogBerryShellUserAgentOnce() {
     return;
   logged = true;
 
-  const std::string ua =
-      content::GetReducedUserAgent(/*mobile=*/false, kBerryChromeMajorVersion);
-  const blink::UserAgentMetadata meta = GetQnxChromeUserAgentMetadata();
+  const bool mobile = BerryUseMobileUserAgent();
+  const std::string ua = GetBerryUserAgent(mobile);
+  const blink::UserAgentMetadata meta = GetQnxChromeUserAgentMetadata(mobile);
   std::string brands;
   for (size_t i = 0; i < meta.brand_version_list.size(); ++i) {
     if (i)
@@ -406,8 +434,9 @@ void LogBerryShellUserAgentOnce() {
     brands += "/";
     brands += meta.brand_version_list[i].version;
   }
-  QNX_NAV_LOG_FMT("BerryShell: UA=\"%s\" platform=%s brands=[%s]\n",
-                  ua.c_str(), meta.platform.c_str(), brands.c_str());
+  QNX_NAV_LOG_FMT("BerryShell: UA=\"%s\" platform=%s mobile=%d brands=[%s]\n",
+                  ua.c_str(), meta.platform.c_str(), meta.mobile ? 1 : 0,
+                  brands.c_str());
 }
 #endif  // BUILDFLAG(IS_QNX)
 
@@ -417,9 +446,20 @@ std::string GetShellLanguage() {
   return "en-us,en";
 }
 
+#if BUILDFLAG(IS_QNX)
+// Per-navigation UA override (see Shell::DidStartNavigation). The network
+// context default UA is mobile; desktop-gated hosts (WhatsApp Web) need these.
+std::string GetBerryDesktopUserAgent() {
+  return GetBerryUserAgent(/*mobile=*/false);
+}
+blink::UserAgentMetadata GetBerryDesktopUserAgentMetadata() {
+  return GetQnxChromeUserAgentMetadata(/*mobile=*/false);
+}
+#endif
+
 blink::UserAgentMetadata GetShellUserAgentMetadata() {
 #if BUILDFLAG(IS_QNX)
-  return GetQnxChromeUserAgentMetadata();
+  return GetQnxChromeUserAgentMetadata(BerryUseMobileUserAgent());
 #else
   blink::UserAgentMetadata metadata;
 
@@ -709,6 +749,23 @@ void ShellContentBrowserClient::OverrideWebkitPrefs(
     prefs->preferred_contrast = blink::mojom::PreferredContrast::kNoPreference;
   }
 
+#if BUILDFLAG(IS_QNX)
+  // content_shell ships desktop WebPreferences (viewport meta off, no
+  // shrink-to-fit), so even with a mobile UA the page lays out at desktop
+  // width. When we present as mobile, turn on the same viewport behavior real
+  // Android Chrome uses so responsive sites lay out narrow -- less layout,
+  // paint and (for many SPAs) less JS.
+  if (BerryUseMobileUserAgent()) {
+    prefs->viewport_enabled = true;
+    prefs->viewport_meta_enabled = true;
+    prefs->shrinks_viewport_contents_to_fit = true;
+    prefs->viewport_style = blink::mojom::ViewportStyle::kMobile;
+    prefs->main_frame_resizes_are_orientation_changes = true;
+    prefs->default_minimum_page_scale_factor = 0.25f;
+    prefs->default_maximum_page_scale_factor = 5.f;
+  }
+#endif
+
   if (override_web_preferences_callback_)
     override_web_preferences_callback_.Run(prefs);
 }
@@ -821,8 +878,7 @@ ShellContentBrowserClient::GetLocalTracesDirectory() {
 std::string ShellContentBrowserClient::GetUserAgent() {
 #if BUILDFLAG(IS_QNX)
   LogBerryShellUserAgentOnce();
-  return content::GetReducedUserAgent(/*mobile=*/false,
-                                      kBerryChromeMajorVersion);
+  return GetBerryUserAgent(BerryUseMobileUserAgent());
 #else
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   return content::GetReducedUserAgent(

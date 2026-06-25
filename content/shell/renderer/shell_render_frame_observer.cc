@@ -135,11 +135,18 @@ const char kBerryChromeShimJs[] = R"JS(
   } catch (e) {}
 
   try {
-    // The spoofed User-Agent claims "X11; Linux x86_64" desktop Chrome, but the
-    // QNX device reports navigator.platform === "Linux armv7l". That mismatch is
-    // a fingerprint inconsistency Google cross-checks; align platform with UA.
-    Object.defineProperty(window.navigator, 'platform',
-        { get: function() { return 'Linux x86_64'; }, configurable: true });
+    // navigator.platform must agree with the User-Agent or it's a fingerprint
+    // inconsistency. The UA is chosen per-navigation in the browser (mobile by
+    // default, desktop for hosts like WhatsApp), so derive platform from the
+    // effective UA: Android => "Linux armv8l", otherwise "Linux x86_64". The raw
+    // QNX value ("Linux armv7l") never leaks either way.
+    Object.defineProperty(window.navigator, 'platform', {
+      get: function() {
+        return (window.navigator.userAgent.indexOf('Android') !== -1)
+            ? 'Linux armv8l' : 'Linux x86_64';
+      },
+      configurable: true
+    });
   } catch (e) {}
 })();
 )JS";

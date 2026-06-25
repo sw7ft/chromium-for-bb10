@@ -52,6 +52,7 @@
 #include "content/public/common/content_switches.h"
 #include "content/shell/app/resource.h"
 #include "content/shell/browser/shell_content_browser_client.h"
+#include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
 #include "content/shell/browser/shell_devtools_frontend.h"
 #include "content/shell/browser/shell_javascript_dialog_manager.h"
 #include "content/shell/common/shell_switches.h"
@@ -731,6 +732,20 @@ void Shell::OnTimeout() {
     DumpDomAndExit(rfh);
 }
 
+#if BUILDFLAG(IS_QNX)
+namespace {
+// Hosts that refuse a mobile UA and must be served the desktop UA. WhatsApp Web
+// is the canonical case: on mobile it shows "use WhatsApp by opening a browser
+// on your computer" instead of the chat UI.
+bool BerryHostPrefersDesktopUA(const GURL& url) {
+  const std::string host = url.host();
+  return host == "whatsapp.com" ||
+         base::EndsWith(host, ".whatsapp.com",
+                        base::CompareCase::INSENSITIVE_ASCII);
+}
+}  // namespace
+#endif
+
 void Shell::DidStartNavigation(NavigationHandle* navigation_handle) {
 #if BUILDFLAG(IS_QNX)
   if (!navigation_handle->IsInPrimaryMainFrame())
@@ -742,6 +757,24 @@ void Shell::DidStartNavigation(NavigationHandle* navigation_handle) {
   QNX_NAV_LOG_FMT(
       "BerryNav: DidStartNavigation url=\"%s\" same_doc=%d\n", spec.c_str(),
       navigation_handle->IsSameDocument() ? 1 : 0);
+  // Per-host User-Agent. The network-context default UA is mobile (Android),
+  // which makes sites serve their lighter mobile bundles. A few hosts gate on a
+  // desktop UA, so override just those on a per-navigation basis -- this works
+  // for any navigation type (omnibox, link, redirect), unlike the launcher's
+  // launch-URL check which only sees the very first URL.
+  // NavigationHandle::SetIsOverridingUserAgent is documented to be called here.
+  if (!navigation_handle->IsSameDocument() && url.SchemeIsHTTPOrHTTPS()) {
+    const bool want_desktop = BerryHostPrefersDesktopUA(url);
+    if (want_desktop) {
+      blink::UserAgentOverride ov;
+      ov.ua_string_override = GetBerryDesktopUserAgent();
+      ov.ua_metadata_override = GetBerryDesktopUserAgentMetadata();
+      web_contents_->SetUserAgentOverride(ov, /*override_in_new_tabs=*/false);
+    }
+    navigation_handle->SetIsOverridingUserAgent(want_desktop);
+    QNX_NAV_LOG_FMT("BerryNav: UA = %s for host=\"%s\"\n",
+                    want_desktop ? "desktop" : "mobile", url.host().c_str());
+  }
   // Update the toolbar as soon as navigation starts so the user sees the
   // destination URL while the network fetch runs (commit can take 20+ s).
   if (!navigation_handle->IsSameDocument()) {

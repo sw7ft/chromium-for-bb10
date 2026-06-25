@@ -32,6 +32,10 @@ std::string GetShellLanguage();
 blink::UserAgentMetadata GetShellUserAgentMetadata();
 #if BUILDFLAG(IS_QNX)
 void LogBerryShellUserAgentForStartup();
+// Desktop UA + client-hints, used by Shell to override the (mobile) default for
+// desktop-gated hosts on a per-navigation basis.
+std::string GetBerryDesktopUserAgent();
+blink::UserAgentMetadata GetBerryDesktopUserAgentMetadata();
 #endif
 
 class ShellContentBrowserClient : public ContentBrowserClient {
