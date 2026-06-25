@@ -107,3 +107,101 @@ The durable, real improvements remain: persistent HTTP cache (~81% fewer warm
 re-downloads), re-enabled JS code cache (no re-parse each launch), and the
 optional 540²/raster/fps profiles for perceived responsiveness during the
 unavoidable stall.
+
+## 8. "Desktop-class -> mobile-class" engine reconfiguration (Snapdragon 801)
+
+The "silicon ceiling" in section 7 was measured against the DESKTOP WhatsApp
+bundle in a Chromium configured as desktop Linux. That is the heaviest mode. The
+Passport SoC (Snapdragon 801, quad Krait 400 @ 2265 MHz, Adreno 330, 3 GB) is
+the class Chrome's mobile path targets. Reconfiguring toward mobile moves the
+ceiling by reducing the amount of work, not by speeding the CPU.
+
+Changes (all on QNX):
+- Mobile-first identity. Network-context default UA = Android Chrome
+  ("Mozilla/5.0 (Linux; Android 10; K) ... Chrome/120 Mobile Safari/537.36"),
+  Sec-CH-UA-Mobile ?1, platform=Android. Sites serve their lighter mobile
+  bundles => less bootstrap JS. See shell_content_browser_client.cc
+  GetBerryUserAgent()/GetQnxChromeUserAgentMetadata(mobile).
+  NOTE: content::GetReducedUserAgent(mobile=true) does NOT emit the Android/
+  "Mobile Safari" tokens on a non-IS_ANDROID build, so the mobile string is
+  built explicitly.
+- Per-navigation desktop override for desktop-gated hosts. WhatsApp Web refuses
+  a mobile UA ("open WhatsApp on your phone"). The UA can't be a process-global
+  launch decision because the app opens home.html first and the user navigates
+  in-session. Fix: Shell::DidStartNavigation (shell.cc) calls
+  NavigationHandle::SetIsOverridingUserAgent(host is *.whatsapp.com) +
+  WebContents::SetUserAgentOverride(desktop). Works for omnibox/link/redirect.
+  navigator.platform shim now derives from the effective UA (Android => armv8l).
+  berry-desktop.enable still forces desktop globally.
+- Mobile viewport/layout WebPreferences (OverrideWebkitPrefs): viewport_meta,
+  shrink-to-fit, mobile viewport style => narrow layout, less paint.
+- GPU rasterization: launcher adds --enable-gpu-rasterization in GPU mode so
+  tiles raster on the otherwise-idle Adreno 330 instead of stealing Krait cores
+  from the single-threaded bootstrap JS.
+- --disable-renderer-accessibility (always): no screen reader on BB10, so skip
+  building/maintaining the a11y tree on every DOM mutation. Pure CPU back.
+- ServiceWorker re-enable behind berry-sw.enable. WhatsApp/PWAs use a SW as
+  their primary (Cache Storage) cache. It was lumped into the unstable IPC
+  disable-list; re-enabled it tests stability + warm-load caching.
+  berry-lowend.enable adds --enable-low-end-device-mode (phone memory/GC/tile
+  heuristics) for A/B.
+
+On-device results so far:
+- Per-host UA verified: example.com => mobile, web.whatsapp.com => desktop, via
+  in-session navigation. WhatsApp shows the real UI (no "use a computer" gate).
+- ServiceWorker: stable across 2 tapped launches, 0 SIGSEGV/signals. The old
+  20-60s instability attributed to the disable-list did not reproduce for SW.
+- WhatsApp worst main-thread stall 12.6s (desktop bundle, GPU raster + a11y off,
+  warm caches) vs the 15.3s section-7 baseline (~18% better), but not yet
+  isolated per-lever. SW warm-load delta still unquantified (a warm run was
+  contaminated by Wi-Fi/DNS flakiness: a 180s idle "stall" + ERR_NAME_NOT_RESOLVED
+  / ERR_ADDRESS_UNREACHABLE, not compute).
+- The mobile-bundle win applies to GENERAL browsing, not WhatsApp (which stays
+  desktop by necessity); WhatsApp's gain is only GPU-raster freeing cores.
+
+## 9. Low-end device mode is a real WhatsApp win (--enable-low-end-device-mode)
+
+A/B on tapped WhatsApp loads (desktop UA, GPU raster, a11y off, SW on, warm),
+toggling only berry-lowend.enable:
+
+  rank   low-end OFF   low-end ON
+  worst    12.6 s        7.8 s
+  2nd       9.5 s        3.9 s
+  3rd       9.4 s        3.4 s
+  4th       9.2 s        2.6 s
+  5th       7.4 s        2.6 s
+
+Worst stall -38%, and the WHOLE distribution collapses (not just the peak), so
+this is a real effect, not the 8-51s run-to-run variance. No crash, no net
+errors. Interpretation: the desktop WhatsApp bundle creates memory pressure on
+the 3 GB device; low-end mode's smaller V8 heap + leaner image/tile caches cut
+GC/eviction churn and hand CPU back to the single-threaded bootstrap JS. This is
+the largest single WhatsApp load improvement measured so far. Recommend keeping
+it on (berry-lowend.enable, or bake as default).
+
+Note this partially revises section 7: the stall is still single-threaded JS,
+but it was NOT purely at the silicon ceiling -- memory-pressure side effects were
+inflating it, and trimming them (low-end mode) recovers meaningful time.
+
+## 10. "Bad internet" on WhatsApp is flaky QNX DNS, not a stall
+
+WhatsApp intermittently flashed "bad internet" before loading even on strong
+Wi-Fi. The ChunkDone probe (logs failures only) showed the main page connected
+in ~42 ms (dns=42 connect=88 ssl=58 ttfb=91) -- healthy -- while a few SECONDARY
+hosts failed: crashlogs.whatsapp.net (-105 NAME_NOT_RESOLVED), webtp.whatsapp.net
+(-2), web.whatsapp.com/status.json (-109 ADDRESS_UNREACHABLE), analytics /ajax/bz
+(-2). The failures cluster on *.whatsapp.net (where WhatsApp's realtime/health
+checks live), so its watchdog flashes "bad internet" then recovers on retry.
+Root cause: the QNX system resolver (getaddrinfo) intermittently drops names even
+on a good link, and the device ships NO /etc/resolv.conf (so Chromium's built-in
+resolver had no nameservers and fell back to getaddrinfo).
+
+FIX (implemented, services/network/network_service.cc, IS_QNX): right after the
+HostResolverManager is created, enable the built-in insecure DNS client and set
+DnsConfigOverrides = CreateOverridingEverythingWithDefaults() with explicit
+public nameservers (1.1.1.1, 8.8.8.8, 1.0.0.1, 8.8.4.4), secure_dns_mode=off.
+This does plain DNS over UDP straight to public resolvers (no DoH bootstrap
+needed since they're IPs), bypassing QNX getaddrinfo. enable_built_in_dns is
+already on (=use_blink), so no gn change. System resolver remains as fallback.
+Verified on-device: "built-in DNS client ON" marker, dns=53ms real resolution,
+zero -105/-109 over the run, WhatsApp committed error=0.
