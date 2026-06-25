@@ -85,3 +85,25 @@ responsiveness DURING stalls - but it does not shrink the JS compute itself.
 Same for fps caps (berry-x-slow10/12/15) and raster-thread count
 (berry-x-1thread/2thread): contention relief, not a cure for the synchronous-JS
 ceiling.
+
+## 7. JS-execution levers exhausted - confirmed silicon ceiling
+
+Pushed every remaining "make the JS faster" angle on tapped WhatsApp loads:
+- Hardware: `pidin info` shows all 4 QCT Krait cores online at 2265 MHz (the
+  Snapdragon 800 rated max) - not downclocked, not core-gated.
+- JIT: Sparkplug is compiled in (`v8_enable_sparkplug = !v8_jitless`) and on by
+  default, so JS is JIT'd, not interpreted. `--always-sparkplug` (eager baseline)
+  left stalls unchanged (15.1 vs 15.3s) - no help.
+- Contention: 540² render + 2 raster threads + --no-memory-reducer left the
+  worst stall at ~15s (vs ~15-16s) - within run-to-run variance (8-51s).
+
+Verdict: the multi-second load stall is genuine single-threaded JavaScript
+compute (WhatsApp's bootstrap/message-processing) at the silicon ceiling of the
+32-bit Krait. No V8 flag, process model (multi-process won't parallelize one
+synchronous task), or headless mode changes it - headless still runs the same JS
+and only skips on-screen present, which is already not the bottleneck.
+
+The durable, real improvements remain: persistent HTTP cache (~81% fewer warm
+re-downloads), re-enabled JS code cache (no re-parse each launch), and the
+optional 540²/raster/fps profiles for perceived responsiveness during the
+unavoidable stall.
