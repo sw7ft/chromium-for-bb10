@@ -64,6 +64,11 @@
 #include "net/dns/host_resolver_manager.h"
 #include "net/dns/host_resolver_proc.h"
 #include "net/dns/public/dns_config_overrides.h"
+#if BUILDFLAG(IS_QNX)
+#include "net/base/ip_address.h"
+#include "net/base/ip_endpoint.h"
+#include "net/dns/public/secure_dns_mode.h"
+#endif
 #include "net/dns/public/dns_over_https_config.h"
 #include "net/dns/public/doh_provider_entry.h"
 #include "net/dns/system_dns_config_change_notifier.h"
@@ -479,6 +484,40 @@ void NetworkService::Initialize(mojom::NetworkServiceParamsPtr params,
       net::HostResolver::ManagerOptions(),
       net::NetworkChangeNotifier::GetSystemDnsConfigNotifier(), net_log_);
   host_resolver_factory_ = std::make_unique<net::HostResolver::Factory>();
+
+#if BUILDFLAG(IS_QNX)
+  // QNX/BB10 ships no /etc/resolv.conf, and its system resolver (getaddrinfo)
+  // intermittently fails to resolve names even on a healthy link -- observed as
+  // ERR_NAME_NOT_RESOLVED / ERR_ADDRESS_UNREACHABLE bursts on secondary hosts
+  // (e.g. *.whatsapp.net) that surface in apps as a spurious "bad internet"
+  // banner. Drive Chromium's built-in DNS client straight at public resolvers so
+  // name resolution bypasses the flaky QNX path entirely. The system resolver
+  // stays as a fallback if the UDP queries fail.
+  //
+  // CreateOverridingEverythingWithDefaults() produces a self-contained, valid
+  // DnsConfig without needing any system configuration; we only swap in
+  // reliable nameservers (Cloudflare + Google, v4) and force the insecure
+  // (plain-UDP) path since these are IPs, not DoH hostnames needing bootstrap.
+  {
+    net::DnsConfigOverrides overrides =
+        net::DnsConfigOverrides::CreateOverridingEverythingWithDefaults();
+    overrides.nameservers = std::vector<net::IPEndPoint>{
+        net::IPEndPoint(net::IPAddress(1, 1, 1, 1), 53),
+        net::IPEndPoint(net::IPAddress(8, 8, 8, 8), 53),
+        net::IPEndPoint(net::IPAddress(1, 0, 0, 1), 53),
+        net::IPEndPoint(net::IPAddress(8, 8, 4, 4), 53),
+    };
+    overrides.search = std::vector<std::string>();
+    overrides.secure_dns_mode = net::SecureDnsMode::kOff;
+    overrides.attempts = 2;
+    host_resolver_manager_->SetInsecureDnsClientEnabled(
+        /*enabled=*/true, /*additional_dns_types_enabled=*/false);
+    host_resolver_manager_->SetDnsConfigOverrides(std::move(overrides));
+    fprintf(stderr,
+            "BerryShell: built-in DNS client ON (1.1.1.1/8.8.8.8) -- bypassing "
+            "QNX getaddrinfo\n");
+  }
+#endif  // BUILDFLAG(IS_QNX)
 
   http_auth_cache_copier_ = std::make_unique<HttpAuthCacheCopier>();
 
