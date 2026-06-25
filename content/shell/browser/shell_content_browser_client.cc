@@ -937,6 +937,24 @@ void ShellContentBrowserClient::ConfigureNetworkContextParamsForShell(
   // matches real Chrome 120 rather than flagging us as a non-Chrome client.
   context_params->enable_brotli = true;
   context_params->enable_zstd = true;
+
+  // Persist the HTTP cache to disk. content_shell otherwise leaves
+  // http_cache_directory null, which (per network_context.mojom) yields an
+  // in-memory cache that dies with the process -- so every launch re-downloads
+  // all JS/WASM/static assets. Heavy SPAs (e.g. WhatsApp Web re-fetches its
+  // multi-MB WASM on each start) pay full cold-start every time. The disk_cache
+  // backend is known-good on QNX (GPUCache/DawnCache already persist under this
+  // profile); only GeneratedCodeCache hit the FileEnumerator SIGSEGV, so it is
+  // left disabled in GetGeneratedCodeCacheSettings above.
+  if (!context->IsOffTheRecord() && !context->GetPath().empty()) {
+    context_params->http_cache_enabled = true;
+    if (!context_params->file_paths) {
+      context_params->file_paths =
+          network::mojom::NetworkContextFilePaths::New();
+    }
+    context_params->file_paths->http_cache_directory =
+        context->GetPath().Append(FILE_PATH_LITERAL("Cache"));
+  }
 #endif
   auto exempt_header =
       base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
