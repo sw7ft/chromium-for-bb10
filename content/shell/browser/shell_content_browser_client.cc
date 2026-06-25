@@ -64,6 +64,8 @@
 #include "content/public/common/content_switch_dependent_feature_overrides.h"
 #include "content/public/common/content_switches.h"
 #if BUILDFLAG(IS_QNX)
+#include "base/qnx_trace.h"
+#include "content/public/browser/tts_platform.h"
 #include "gpu/config/gpu_switches.h"
 #include "ui/display/display_switches.h"
 #include "ui/gl/gl_switches.h"
@@ -310,6 +312,105 @@ bool AreIsolatedWebAppsEnabled() {
   return base::FeatureList::IsEnabled(features::kIsolatedWebApps);
 }
 
+#if BUILDFLAG(IS_QNX)
+// QNX has no native text-to-speech backend, and content_shell does not link a
+// real content::TtsPlatformImpl on QNX (see
+// content/shell/app/qnx_platform_stubs.cc). Without an embedder-provided
+// platform, TtsPlatform::GetInstance() falls back to that stub and hands
+// TtsController a vtable-less object, crashing the browser (SIGSEGV fault=0x40)
+// the first time a page touches the Web Speech API (e.g.
+// speechSynthesis.getVoices()). Provide a real, correctly-typed no-op
+// TtsPlatform so GetInstance() short-circuits before reaching the stub.
+class ShellTtsPlatform : public TtsPlatform {
+ public:
+  static ShellTtsPlatform* GetInstance() {
+    static ShellTtsPlatform instance;
+    return &instance;
+  }
+
+  ShellTtsPlatform() = default;
+  ShellTtsPlatform(const ShellTtsPlatform&) = delete;
+  ShellTtsPlatform& operator=(const ShellTtsPlatform&) = delete;
+
+  // TtsPlatform:
+  bool PlatformImplSupported() override { return false; }
+  bool PlatformImplInitialized() override { return false; }
+  void LoadBuiltInTtsEngine(BrowserContext* browser_context) override {}
+  void Speak(int utterance_id,
+             const std::string& utterance,
+             const std::string& lang,
+             const VoiceData& voice,
+             const UtteranceContinuousParameters& params,
+             base::OnceCallback<void(bool)> did_start_speaking_callback)
+      override {
+    std::move(did_start_speaking_callback).Run(/*did_start_speaking=*/false);
+  }
+  bool StopSpeaking() override { return false; }
+  bool IsSpeaking() override { return false; }
+  void GetVoices(std::vector<VoiceData>* out_voices) override {}
+  void Pause() override {}
+  void Resume() override {}
+  void WillSpeakUtteranceWithVoice(TtsUtterance* utterance,
+                                   const VoiceData& voice_data) override {}
+  std::string GetError() override { return std::string(); }
+  void ClearError() override {}
+  void SetError(const std::string& error) override {}
+  void Shutdown() override {}
+  void FinalizeVoiceOrdering(std::vector<VoiceData>& voices) override {}
+  void RefreshVoices() override {}
+  ExternalPlatformDelegate* GetExternalPlatformDelegate() override {
+    return nullptr;
+  }
+};
+
+constexpr char kBerryChromeMajorVersion[] = "120";
+constexpr char kBerryChromeFullVersion[] = "120.0.6099.224";
+
+blink::UserAgentMetadata GetQnxChromeUserAgentMetadata() {
+  blink::UserAgentMetadata metadata;
+  metadata.brand_version_list = {
+      blink::UserAgentBrandVersion("Google Chrome", kBerryChromeMajorVersion),
+      blink::UserAgentBrandVersion("Chromium", kBerryChromeMajorVersion),
+      blink::UserAgentBrandVersion("Not-A.Brand", "99"),
+  };
+  metadata.brand_full_version_list = {
+      blink::UserAgentBrandVersion("Google Chrome", kBerryChromeFullVersion),
+      blink::UserAgentBrandVersion("Chromium", kBerryChromeFullVersion),
+      blink::UserAgentBrandVersion("Not-A.Brand", "99.0.0.0"),
+  };
+  metadata.full_version = kBerryChromeFullVersion;
+  metadata.platform = "Linux";
+  metadata.architecture = "arm";
+  metadata.model = content::BuildModelInfo();
+  metadata.bitness = content::GetCpuBitness();
+  metadata.wow64 = content::IsWoW64();
+  metadata.form_factor = "";
+  metadata.mobile = false;
+  return metadata;
+}
+
+void LogBerryShellUserAgentOnce() {
+  static bool logged = false;
+  if (logged)
+    return;
+  logged = true;
+
+  const std::string ua =
+      content::GetReducedUserAgent(/*mobile=*/false, kBerryChromeMajorVersion);
+  const blink::UserAgentMetadata meta = GetQnxChromeUserAgentMetadata();
+  std::string brands;
+  for (size_t i = 0; i < meta.brand_version_list.size(); ++i) {
+    if (i)
+      brands += ", ";
+    brands += meta.brand_version_list[i].brand;
+    brands += "/";
+    brands += meta.brand_version_list[i].version;
+  }
+  QNX_NAV_LOG_FMT("BerryShell: UA=\"%s\" platform=%s brands=[%s]\n",
+                  ua.c_str(), meta.platform.c_str(), brands.c_str());
+}
+#endif  // BUILDFLAG(IS_QNX)
+
 }  // namespace
 
 std::string GetShellLanguage() {
@@ -317,6 +418,9 @@ std::string GetShellLanguage() {
 }
 
 blink::UserAgentMetadata GetShellUserAgentMetadata() {
+#if BUILDFLAG(IS_QNX)
+  return GetQnxChromeUserAgentMetadata();
+#else
   blink::UserAgentMetadata metadata;
 
   metadata.brand_version_list.emplace_back("content_shell",
@@ -333,7 +437,14 @@ blink::UserAgentMetadata GetShellUserAgentMetadata() {
   metadata.form_factor = "";  // Empty value signifies desktop.
 
   return metadata;
+#endif
 }
+
+#if BUILDFLAG(IS_QNX)
+void LogBerryShellUserAgentForStartup() {
+  LogBerryShellUserAgentOnce();
+}
+#endif
 
 // static
 bool ShellContentBrowserClient::allow_any_cors_exempt_header_for_browser_ =
@@ -475,6 +586,13 @@ void ShellContentBrowserClient::AppendExtraCommandLineSwitches(
     command_line->AppendSwitch(switches::kEnableIsolatedWebAppsInRenderer);
   }
 }
+
+#if BUILDFLAG(IS_QNX)
+TtsPlatform* ShellContentBrowserClient::GetTtsPlatform() {
+  // Route all TTS through a safe no-op platform; see ShellTtsPlatform above.
+  return ShellTtsPlatform::GetInstance();
+}
+#endif  // BUILDFLAG(IS_QNX)
 
 device::GeolocationManager* ShellContentBrowserClient::GetGeolocationManager() {
 #if BUILDFLAG(IS_MAC)
@@ -700,10 +818,16 @@ ShellContentBrowserClient::GetLocalTracesDirectory() {
 }
 
 std::string ShellContentBrowserClient::GetUserAgent() {
+#if BUILDFLAG(IS_QNX)
+  LogBerryShellUserAgentOnce();
+  return content::GetReducedUserAgent(/*mobile=*/false,
+                                      kBerryChromeMajorVersion);
+#else
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   return content::GetReducedUserAgent(
       command_line->HasSwitch(switches::kUseMobileUserAgent),
       CONTENT_SHELL_MAJOR_VERSION);
+#endif
 }
 
 blink::UserAgentMetadata ShellContentBrowserClient::GetUserAgentMetadata() {
@@ -804,6 +928,16 @@ void ShellContentBrowserClient::ConfigureNetworkContextParamsForShell(
   context_params->user_agent = GetUserAgent();
   context_params->accept_language = GetAcceptLangs(context);
   context_params->enable_zstd = true;
+#if BUILDFLAG(IS_QNX)
+  // Earlier the reCAPTCHA garbled-JSON was blamed on compressed payloads, so
+  // brotli/zstd were disabled. On-device probing later proved decode is
+  // bit-correct (DecompressionStream/WebCrypto pass, every response decodes),
+  // and the garbled JSON was reCAPTCHA's own anti-bot logic, not transport.
+  // Keep brotli+zstd enabled so Accept-Encoding (gzip, deflate, br, zstd)
+  // matches real Chrome 120 rather than flagging us as a non-Chrome client.
+  context_params->enable_brotli = true;
+  context_params->enable_zstd = true;
+#endif
   auto exempt_header =
       base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           "cors_exempt_header_list");

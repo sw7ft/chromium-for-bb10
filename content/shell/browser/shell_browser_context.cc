@@ -35,6 +35,7 @@
 #include "content/shell/browser/shell_paths.h"
 #include "content/shell/browser/shell_permission_manager.h"
 #include "content/shell/common/shell_switches.h"
+#include "content/public/test/mock_client_hints_controller_delegate.h"
 #include "content/test/mock_background_sync_controller.h"
 #include "content/test/mock_reduce_accept_language_controller_delegate.h"
 #include "third_party/blink/public/common/origin_trials/trial_token_validator.h"
@@ -179,7 +180,24 @@ ShellBrowserContext::GetPermissionControllerDelegate() {
 
 ClientHintsControllerDelegate*
 ShellBrowserContext::GetClientHintsControllerDelegate() {
+#if BUILDFLAG(IS_QNX)
+  // content_shell normally returns a null delegate, which suppresses ALL
+  // Sec-CH-UA* request headers. A Chrome/120 UA with no client hints is an
+  // obvious bot signal to Google. Provide a delegate backed by our Chrome/120
+  // UA metadata so the low-entropy hints (sec-ch-ua, -mobile, -platform) are
+  // emitted like real Chrome. Reuses MockClientHintsControllerDelegate, which
+  // content_shell already links (see sibling Mock* delegates above).
+  if (client_hints_controller_delegate_)
+    return client_hints_controller_delegate_;
+  if (!owned_client_hints_controller_delegate_) {
+    owned_client_hints_controller_delegate_ =
+        std::make_unique<MockClientHintsControllerDelegate>(
+            GetShellUserAgentMetadata());
+  }
+  return owned_client_hints_controller_delegate_.get();
+#else
   return client_hints_controller_delegate_;
+#endif
 }
 
 BackgroundFetchDelegate* ShellBrowserContext::GetBackgroundFetchDelegate() {

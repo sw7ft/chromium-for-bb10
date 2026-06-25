@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>WASM/crypto probe</title></head>
+<body style="font:13px monospace;background:#111;color:#eee;padding:10px">
+<pre id="out">running...</pre>
+<script>
+function log(s){ console.error("WP: "+s); }
+var L=[];
+function P(k,v){ L.push("WP: "+k+"="+v); document.getElementById("out").textContent=L.join("\n"); console.error("WP: "+k+"="+v); }
+
+// 1. WebAssembly: minimal (module (func (export "add") (param i32 i32)(result i32) local.get 0 local.get 1 i32.add))
+(function(){
+  try {
+    if (typeof WebAssembly === "undefined") { P("wasm","UNDEFINED"); return; }
+    var bytes = new Uint8Array([
+      0,97,115,109, 1,0,0,0,
+      1,7,1,96,2,127,127,1,127,
+      3,2,1,0,
+      7,7,1,3,97,100,100,0,0,
+      10,9,1,7,0,32,0,32,1,106,11
+    ]);
+    WebAssembly.instantiate(bytes).then(function(res){
+      try {
+        var r = res.instance.exports.add(2,3);
+        P("wasm.add(2,3)", r + (r===5?" OK":" WRONG"));
+      } catch(e){ P("wasm.run.err", e); }
+    }).catch(function(e){ P("wasm.instantiate.err", e); });
+    // also try sync validate
+    try { P("wasm.validate", WebAssembly.validate(bytes)); } catch(e){ P("wasm.validate.err", e); }
+  } catch(e){ P("wasm.err", e); }
+})();
+
+// 2. TextDecoder / TextEncoder round-trip
+(function(){
+  try {
+    var enc = new TextEncoder();
+    var dec = new TextDecoder();
+    var b = enc.encode("Héllo-世界");
+    var s = dec.decode(b);
+    P("textcodec", (s==="Héllo-世界") ? "OK" : ("WRONG:"+s));
+  } catch(e){ P("textcodec.err", e); }
+})();
+
+// 3. atob/btoa + Uint8Array build (reCAPTCHA-style base64 -> bytes -> string)
+(function(){
+  try {
+    var b64 = btoa("hello-base64");
+    var dec = atob(b64);
+    P("base64", (dec==="hello-base64") ? "OK" : ("WRONG:"+dec));
+  } catch(e){ P("base64.err", e); }
+})();
+
+// 4. WebCrypto: SHA-256 + AES in GCM, CTR, CBC (encrypt->decrypt round trips)
+(function(){
+  function ab2hex(buf){ return Array.prototype.map.call(new Uint8Array(buf),function(x){return ('0'+x.toString(16)).slice(-2);}).join(''); }
+  if (!crypto || !crypto.subtle) { P("subtle","MISSING"); return; }
+  var data = new TextEncoder().encode("the quick brown fox jumps 0123456789");
+  crypto.subtle.digest("SHA-256", data).then(function(h){
+    P("sha256", ab2hex(h).slice(0,16)+"..");
+  }).catch(function(e){ P("sha256.err", e); });
+
+  function roundtrip(name, algoGen, algoOp){
+    crypto.subtle.generateKey(algoGen, true, ["encrypt","decrypt"]).then(function(key){
+      return crypto.subtle.encrypt(algoOp, key, data).then(function(ct){
+        return crypto.subtle.decrypt(algoOp, key, ct);
+      }).then(function(pt){
+        var s = new TextDecoder().decode(pt);
+        P(name, (s==="the quick brown fox jumps 0123456789") ? "OK" : ("WRONG:"+s.slice(0,20)));
+      });
+    }).catch(function(e){ P(name+".err", e); });
+  }
+  var iv12 = crypto.getRandomValues(new Uint8Array(12));
+  var iv16 = crypto.getRandomValues(new Uint8Array(16));
+  roundtrip("aes-gcm", {name:"AES-GCM",length:256}, {name:"AES-GCM",iv:iv12});
+  roundtrip("aes-ctr", {name:"AES-CTR",length:256}, {name:"AES-CTR",counter:iv16,length:64});
+  roundtrip("aes-cbc", {name:"AES-CBC",length:256}, {name:"AES-CBC",iv:iv16});
+})();
+
+setTimeout(function(){ console.error("WP: DONE"); }, 3000);
+</script>
+</body>
+</html>

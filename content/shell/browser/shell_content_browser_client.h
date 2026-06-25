@@ -30,6 +30,9 @@ class ShellBrowserMainParts;
 
 std::string GetShellLanguage();
 blink::UserAgentMetadata GetShellUserAgentMetadata();
+#if BUILDFLAG(IS_QNX)
+void LogBerryShellUserAgentForStartup();
+#endif
 
 class ShellContentBrowserClient : public ContentBrowserClient {
  public:
@@ -137,6 +140,12 @@ class ShellContentBrowserClient : public ContentBrowserClient {
       content::PosixFileDescriptorInfo* mappings) override;
 #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) ||
         // BUILDFLAG(IS_ANDROID)
+#if BUILDFLAG(IS_QNX)
+  // QNX lacks a native TTS backend; return a safe no-op TtsPlatform so the
+  // Web Speech API never reaches the vtable-less QNX linker stub. See
+  // shell_content_browser_client.cc (ShellTtsPlatform) for details.
+  TtsPlatform* GetTtsPlatform() override;
+#endif  // BUILDFLAG(IS_QNX)
   device::GeolocationManager* GetGeolocationManager() override;
   void ConfigureNetworkContextParams(
       BrowserContext* context,

@@ -502,6 +502,10 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) URLLoader
   bool qnx_response_delivery_pending_ = false;
   bool qnx_completion_pending_ = false;
   URLLoaderCompletionStatus qnx_pending_completion_status_;
+  // One-shot diagnostic: log Content-Encoding + first post-decode body bytes for
+  // reCAPTCHA/sorry XHRs to tell a browser decode bug from a reCAPTCHA-internal
+  // failure. See url_loader.cc DidRead.
+  bool qnx_captcha_probe_logged_ = false;
 #endif
   void CompletePendingWrite(bool success);
   void SetRawResponseHeaders(scoped_refptr<const net::HttpResponseHeaders>);

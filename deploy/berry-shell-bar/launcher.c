@@ -21,6 +21,71 @@
 
 static const char* kRotation = "90";
 static const char* kScaleFactor = "--force-device-scale-factor=1";
+static const char* kSharedMisc = "/accounts/1000/shared/misc/";
+
+static int marker_exists(const char* name) {
+  char path[512];
+  snprintf(path, sizeof(path), "%s%s", kSharedMisc, name);
+  return access(path, F_OK) == 0;
+}
+
+/* Load-reduction profiles for X.com crash triage (touch marker in shared/misc).
+ * Profiles stack: berry-x-lite.enable implies 420 + 12fps + 2 raster threads.
+ * Individual markers: berry-x-420.enable, berry-x-slow12.enable,
+ * berry-x-slow15.enable. Logged at startup as BerryShell: load profile = ...
+ * Remove all berry-x-* markers to restore default 720² / uncapped / 4 threads. */
+static void apply_x_load_profile(int* render_w,
+                                 int* render_h,
+                                 int* max_fps,
+                                 int* raster_threads,
+                                 int* use_fps_limit_flag,
+                                 char* profile_name,
+                                 size_t profile_name_len) {
+  strncpy(profile_name, "default", profile_name_len);
+
+  if (marker_exists("berry-x-lite.enable")) {
+    *render_w = 420;
+    *render_h = 420;
+    *max_fps = 12;
+    *raster_threads = 2;
+    *use_fps_limit_flag = 1;
+    strncpy(profile_name, "lite(420+12fps+2thr)", profile_name_len);
+    return;
+  }
+  if (marker_exists("berry-x-420.enable")) {
+    *render_w = 420;
+    *render_h = 420;
+    strncpy(profile_name, "420", profile_name_len);
+  }
+  if (marker_exists("berry-x-540.enable")) {
+    *render_w = 540;
+    *render_h = 540;
+    strncpy(profile_name, "540", profile_name_len);
+  }
+  if (marker_exists("berry-x-slow10.enable")) {
+    *max_fps = 10;
+    *use_fps_limit_flag = 1;
+    strncpy(profile_name, "slow10", profile_name_len);
+  }
+  if (marker_exists("berry-x-slow12.enable")) {
+    *max_fps = 12;
+    *use_fps_limit_flag = 1;
+    strncpy(profile_name, "slow12", profile_name_len);
+  }
+  if (marker_exists("berry-x-slow15.enable")) {
+    *max_fps = 15;
+    *use_fps_limit_flag = 1;
+    strncpy(profile_name, "slow15", profile_name_len);
+  }
+  if (marker_exists("berry-x-1thread.enable")) {
+    *raster_threads = 1;
+    strncat(profile_name, "+1thr", profile_name_len - strlen(profile_name) - 1);
+  }
+  if (marker_exists("berry-x-2thread.enable")) {
+    *raster_threads = 2;
+    strncat(profile_name, "+2thr", profile_name_len - strlen(profile_name) - 1);
+  }
+}
 
 /* Stability: these networking/IPC features are documented (HARDENING.md) as
  * unstable on QNX — they deadlock or race the resource loader (the ~20-60s
@@ -163,10 +228,15 @@ int main(int argc, char** argv) {
     }
     if (access("/accounts/1000/shared/misc/berry-nav.debug", F_OK) == 0)
       setenv("QNX_NAV_DEBUG", "1", 1);
-    /* Probe already confirmed Adreno 330 / EGL 1.4 / GLES2 works in-app; the
-     * real GLOzone path now drives GL, so leave the standalone probe off to
-     * avoid leaving a stray EGL context current before content GL init. */
-    setenv("QNX_GPU_PROBE", "0", 1);
+    /* Standalone GPU probe runs EGL init on the MAIN thread early in
+     * ContentMain. Off by default (it leaves a stray EGL context current that
+     * can confuse the real GLOzone GL init). Enable for diagnosis by creating
+     * the berry-gpu.probe marker: lets us compare main-thread EGL init vs the
+     * GPU/viz-thread GLOzone init in the same boot. */
+    if (access("/accounts/1000/shared/misc/berry-gpu.probe", F_OK) == 0)
+      setenv("QNX_GPU_PROBE", "1", 1);
+    else
+      setenv("QNX_GPU_PROBE", "0", 1);
   }
 
   fprintf(stderr, "BerryShell: app dir = %s\n", dir);
@@ -195,12 +265,41 @@ int main(int argc, char** argv) {
 
   /* Orientation correction for the Navigator-composited window (overridable). */
   setenv("QNX_SCREEN_ROTATION", kRotation, 0);
-  /* Render/composit at 720² (~4× fewer pixels than native 1440²); panel upscale
-   * to full screen via QNX Screen SIZE/SOURCE_SIZE in qnx_screen_window.cc. */
-  setenv("QNX_SCREEN_WIDTH", "720", 0);
-  setenv("QNX_SCREEN_HEIGHT", "720", 0);
+
+  int render_w = 720, render_h = 720;
+  int max_fps = 0; /* 0 = no QNX_MAX_FPS env (Viz default 60 = uncapped) */
+  int raster_threads = 4;
+  int use_fps_limit_flag = 0; /* 0 => --disable-frame-rate-limit (current default) */
+  char profile_name[64];
+  apply_x_load_profile(&render_w, &render_h, &max_fps, &raster_threads,
+                       &use_fps_limit_flag, profile_name, sizeof(profile_name));
+
+  {
+    char dim[16];
+    snprintf(dim, sizeof(dim), "%d", render_w);
+    setenv("QNX_SCREEN_WIDTH", dim, 1);
+    snprintf(dim, sizeof(dim), "%d", render_h);
+    setenv("QNX_SCREEN_HEIGHT", dim, 1);
+  }
+  /* Panel upscale stays 1440² so the window still fills the Passport display. */
   setenv("QNX_SCREEN_OUTPUT_WIDTH", "1440", 0);
   setenv("QNX_SCREEN_OUTPUT_HEIGHT", "1440", 0);
+  if (max_fps > 0) {
+    char fps[16];
+    snprintf(fps, sizeof(fps), "%d", max_fps);
+    setenv("QNX_MAX_FPS", fps, 1);
+  }
+  {
+    char fps_buf[16];
+    if (max_fps > 0)
+      snprintf(fps_buf, sizeof(fps_buf), "%d", max_fps);
+    fprintf(stderr,
+            "BerryShell: load profile = %s render=%dx%d raster_thr=%d max_fps=%s "
+            "fps_limit=%s\n",
+            profile_name, render_w, render_h, raster_threads,
+            max_fps > 0 ? fps_buf : "off",
+            use_fps_limit_flag ? "on" : "off");
+  }
 
   /* Exec the real binary directly. content_shell.bin is a legacy log wrapper that
    * only re-execs content_shell.exe; skipping it avoids an extra hop and ensures
@@ -264,27 +363,40 @@ int main(int argc, char** argv) {
    * system trust store; full verify is slow and race-prone). TLS still encrypts;
    * only certificate validation is bypassed. See deploy/HARDENING.md. */
   argv_buf[n++] = (char*)"--ignore-certificate-errors";
-  argv_buf[n++] = (char*)"--remote-debugging-port=0";
+  /* X.com probes camera/mic during module load; stub media to avoid crashing
+   * the default WebContentsDelegate path on QNX before permissions exist. */
+  argv_buf[n++] = (char*)"--use-fake-ui-for-media-stream";
+  argv_buf[n++] = (char*)"--use-fake-device-for-media-stream";
+  /* NOTE: do NOT enable --remote-debugging-port here. It puts Chromium into
+   * automation-controlled mode, which sets navigator.webdriver=true (a hard
+   * bot signal that trips Google's secure-browser / reCAPTCHA checks) and
+   * opens a CDP port. The renderer shim also forces navigator.webdriver=false,
+   * but keeping this flag off removes the underlying signal entirely. */
   argv_buf[n++] = (char*)"--disable-quic";
-  argv_buf[n++] = (char*)"--disable-frame-rate-limit";
+  if (!use_fps_limit_flag)
+    argv_buf[n++] = (char*)"--disable-frame-rate-limit";
   argv_buf[n++] = (char*)"--ozone-platform=qnx_screen";
-  if (use_gpu) {
-    argv_buf[n++] = (char*)"--use-gl=egl";
-    argv_buf[n++] = (char*)"--ignore-gpu-blocklist";
-    argv_buf[n++] = (char*)"--num-raster-threads=4";
-  } else {
-    argv_buf[n++] = (char*)"--disable-gpu";
-    /* CRITICAL cold-start fix: --disable-gpu alone does NOT tell the renderer
-     * that compositing is software-only (render_thread_impl.cc only sets
-     * is_gpu_compositing_disabled_ for --disable-gpu-compositing). Without this,
-     * the renderer's first LayerTreeFrameSink request still calls
-     * EstablishGpuChannelSync, which blocks the main thread ~14s waiting for a
-     * GPU channel that can never succeed (valid=0), serializing the first
-     * navigation behind it. With this flag the renderer takes the software
-     * frame-sink path immediately and skips the doomed GPU handshake. */
-    argv_buf[n++] = (char*)"--disable-gpu-compositing";
-    /* Software Skia raster: use all 4 cores on Passport (was implicit 1). */
-    argv_buf[n++] = (char*)"--num-raster-threads=4";
+  {
+    static char raster_flag[40];
+    snprintf(raster_flag, sizeof(raster_flag), "--num-raster-threads=%d",
+             raster_threads);
+    if (use_gpu) {
+      argv_buf[n++] = (char*)"--use-gl=egl";
+      argv_buf[n++] = (char*)"--ignore-gpu-blocklist";
+      argv_buf[n++] = raster_flag;
+    } else {
+      argv_buf[n++] = (char*)"--disable-gpu";
+      /* CRITICAL cold-start fix: --disable-gpu alone does NOT tell the renderer
+       * that compositing is software-only (render_thread_impl.cc only sets
+       * is_gpu_compositing_disabled_ for --disable-gpu-compositing). Without this,
+       * the renderer's first LayerTreeFrameSink request still calls
+       * EstablishGpuChannelSync, which blocks the main thread ~14s waiting for a
+       * GPU channel that can never succeed (valid=0), serializing the first
+       * navigation behind it. With this flag the renderer takes the software
+       * frame-sink path immediately and skips the doomed GPU handshake. */
+      argv_buf[n++] = (char*)"--disable-gpu-compositing";
+      argv_buf[n++] = raster_flag;
+    }
   }
   argv_buf[n++] = (char*)kScaleFactor;
   argv_buf[n++] = (char*)kDisableFeatures;

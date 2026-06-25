@@ -141,6 +141,48 @@ gl::EGLDisplayPlatform QnxScreenGLOzoneEGL::GetNativeDisplay() {
   fprintf(stderr, "QNX GL: GetNativeDisplay using EGL_DEFAULT_DISPLAY "
                     "(screen_context=%p)\n",
           g_screen_ctx);
+  // NOTE: EGL only initializes when the app is launched by TAPPING the icon
+  // (a real Navigator graphics session). Over SSH, eglGetDisplay returns
+  // EGL_NO_DISPLAY / EGL_NOT_INITIALIZED (0x3001) and the GPU process exits.
+  // This is expected, not a bug. See deploy/GPU_EGL_NOTES.md.
+  //
+  // Diagnostic: the gl stack logs only "Initialization of all EGL display types
+  // failed" without the EGL error code. Probe eglGetDisplay/eglInitialize
+  // directly here and surface eglGetError so we know the real cause.
+  {
+    void* egl = dlopen("libEGL.so", RTLD_NOW | RTLD_GLOBAL);
+    if (egl) {
+      using PFN_gd = void* (*)(void*);
+      using PFN_init = unsigned int (*)(void*, int*, int*);
+      using PFN_err = int (*)(void);
+      using PFN_bind = unsigned int (*)(unsigned int);
+      auto egl_get_display = reinterpret_cast<PFN_gd>(dlsym(egl, "eglGetDisplay"));
+      auto egl_initialize = reinterpret_cast<PFN_init>(dlsym(egl, "eglInitialize"));
+      auto egl_get_error = reinterpret_cast<PFN_err>(dlsym(egl, "eglGetError"));
+      auto egl_bind_api = reinterpret_cast<PFN_bind>(dlsym(egl, "eglBindAPI"));
+      if (egl_get_display && egl_initialize && egl_get_error) {
+        unsigned int bound =
+            egl_bind_api ? egl_bind_api(0x30A0u /*EGL_OPENGL_ES_API*/) : 2u;
+        void* dpy = egl_get_display(nullptr /*EGL_DEFAULT_DISPLAY*/);
+        int err_get = egl_get_error();
+        int major = 0, minor = 0;
+        unsigned int ok = dpy ? egl_initialize(dpy, &major, &minor) : 0u;
+        int err_init = egl_get_error();
+        fprintf(stderr,
+                "QNX GL PROBE: bindAPI=%u getDisplay=%p (err=0x%x) "
+                "initialize=%u v%d.%d (err=0x%x)\n",
+                bound, dpy, err_get, ok, major, minor, err_init);
+      } else {
+        fprintf(stderr,
+                "QNX GL PROBE: missing EGL symbols gd=%p init=%p err=%p\n",
+                reinterpret_cast<void*>(egl_get_display),
+                reinterpret_cast<void*>(egl_initialize),
+                reinterpret_cast<void*>(egl_get_error));
+      }
+    } else {
+      fprintf(stderr, "QNX GL PROBE: dlopen libEGL.so failed: %s\n", dlerror());
+    }
+  }
   return gl::EGLDisplayPlatform(EGL_DEFAULT_DISPLAY);
 }
 

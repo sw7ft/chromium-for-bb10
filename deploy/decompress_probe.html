@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>QNX DecompressionStream probe</title>
+<style>
+  body { font: 16px monospace; background: #111; color: #eee; padding: 12px; }
+  .pass { color: #4caf50; }
+  .fail { color: #ff5252; }
+  pre { white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h2>QNX/BB10 Compression Streams probe</h2>
+<pre id="out">running...</pre>
+<script>
+// Known test vectors for the ASCII string "hello" (68 65 6c 6c 6f).
+// zlib-wrapped deflate ("deflate"): 78 9c + fixed-huffman block + adler32.
+const ZLIB_HELLO = [0x78,0x9c,0xcb,0x48,0xcd,0xc9,0xc9,0x07,0x00,0x06,0x2c,0x02,0x15];
+// raw deflate, no zlib wrapper/trailer ("deflate-raw").
+const RAW_HELLO  = [0xcb,0x48,0xcd,0xc9,0xc9,0x07,0x00];
+
+const outEl = document.getElementById('out');
+const lines = [];
+function emit(s) {
+  lines.push(s);
+  outEl.textContent = lines.join('\n');
+  // Use console.error: only error-level console messages reach stderr /
+  // berry-kbd.log in content_shell on this build.
+  console.error(s);
+}
+
+async function streamToText(bytes, format) {
+  const ds = new DecompressionStream(format);
+  const writer = ds.writable.getWriter();
+  writer.write(new Uint8Array(bytes));
+  writer.close();
+  const ab = await new Response(ds.readable).arrayBuffer();
+  return new TextDecoder().decode(ab);
+}
+
+async function compress(text, format) {
+  const cs = new CompressionStream(format);
+  const writer = cs.writable.getWriter();
+  writer.write(new TextEncoder().encode(text));
+  writer.close();
+  const ab = await new Response(cs.readable).arrayBuffer();
+  return new Uint8Array(ab);
+}
+
+function report(name, ok, detail) {
+  const tag = ok ? 'PASS' : 'FAIL';
+  emit(`PROBE: ${name}=${tag} ${detail || ''}`);
+}
+
+async function run() {
+  emit('PROBE: DecompressionStream defined=' + (typeof DecompressionStream !== 'undefined'));
+  emit('PROBE: CompressionStream defined=' + (typeof CompressionStream !== 'undefined'));
+
+  // Test A: decompress a hardcoded zlib 'deflate' stream -> "hello".
+  try {
+    const t = await streamToText(ZLIB_HELLO, 'deflate');
+    report('deflate', t === 'hello', `got="${t}"`);
+  } catch (e) {
+    report('deflate', false, 'threw: ' + e);
+  }
+
+  // Test B: decompress a hardcoded raw deflate stream -> "hello".
+  try {
+    const t = await streamToText(RAW_HELLO, 'deflate-raw');
+    report('deflate-raw', t === 'hello', `got="${t}"`);
+  } catch (e) {
+    report('deflate-raw', false, 'threw: ' + e);
+  }
+
+  // Test C: full gzip round-trip (compress then decompress).
+  try {
+    const comp = await compress('hello world', 'gzip');
+    const t = await streamToText(Array.from(comp), 'gzip');
+    report('gzip', t === 'hello world', `got="${t}" complen=${comp.length}`);
+  } catch (e) {
+    report('gzip', false, 'threw: ' + e);
+  }
+
+  // Test D: full deflate round-trip (isolates CompressionStream from the
+  // hardcoded vector in case the device emits a different window/level).
+  try {
+    const comp = await compress('hello world', 'deflate');
+    const t = await streamToText(Array.from(comp), 'deflate');
+    report('deflate-roundtrip', t === 'hello world',
+           `got="${t}" complen=${comp.length}`);
+  } catch (e) {
+    report('deflate-roundtrip', false, 'threw: ' + e);
+  }
+
+  await runCrypto();
+
+  emit('PROBE: DONE');
+}
+
+function hex(buf) {
+  return Array.from(new Uint8Array(buf))
+      .map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// reCAPTCHA Enterprise decrypts its challenge/token payloads client-side with
+// WebCrypto (AES-GCM + SHA-256). If crypto.subtle is wrong on ARM32/QNX, the
+// decrypted bytes are garbage and reCAPTCHA's JSON.parse throws exactly the
+// errors we see -- while ordinary sites keep working. Verify it here.
+async function runCrypto() {
+  emit('PROBE: crypto.subtle defined=' +
+       (typeof crypto !== 'undefined' && !!crypto.subtle));
+  if (typeof crypto === 'undefined' || !crypto.subtle) {
+    report('webcrypto', false, 'crypto.subtle missing');
+    return;
+  }
+
+  // SHA-256("abc") must equal the published NIST vector.
+  try {
+    const d = await crypto.subtle.digest(
+        'SHA-256', new TextEncoder().encode('abc'));
+    const want =
+        'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
+    report('sha256', hex(d) === want, `got=${hex(d).slice(0, 16)}..`);
+  } catch (e) {
+    report('sha256', false, 'threw: ' + e);
+  }
+
+  // AES-GCM encrypt -> decrypt round-trip (the exact primitive reCAPTCHA uses).
+  try {
+    const key = await crypto.subtle.generateKey(
+        {name: 'AES-GCM', length: 256}, true, ['encrypt', 'decrypt']);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const pt = new TextEncoder().encode('{"recaptcha":"ok"}');
+    const ct = await crypto.subtle.encrypt({name: 'AES-GCM', iv}, key, pt);
+    const back = await crypto.subtle.decrypt({name: 'AES-GCM', iv}, key, ct);
+    const txt = new TextDecoder().decode(back);
+    report('aes-gcm', txt === '{"recaptcha":"ok"}', `got="${txt}"`);
+  } catch (e) {
+    report('aes-gcm', false, 'threw: ' + e);
+  }
+
+  // AES-GCM decrypt of a HARDCODED known vector (isolates decrypt from encrypt
+  // and from generateKey). Key=32x 0x00, IV=12x 0x00, plaintext empty -> the
+  // tag below is the standard all-zero AES-256-GCM test vector.
+  try {
+    const key = await crypto.subtle.importKey(
+        'raw', new Uint8Array(32), {name: 'AES-GCM'}, false, ['decrypt']);
+    const iv = new Uint8Array(12);
+    // Ciphertext = empty; auth tag for empty msg, zero key/iv (AES-256-GCM).
+    const tag = [0x53, 0x0f, 0x8a, 0xfb, 0xc7, 0x45, 0x36, 0xb9,
+                 0xa9, 0x63, 0xb4, 0xf1, 0xc4, 0xcb, 0x73, 0x8b];
+    const back = await crypto.subtle.decrypt(
+        {name: 'AES-GCM', iv}, key, new Uint8Array(tag));
+    report('aes-gcm-vector', back.byteLength === 0, `len=${back.byteLength}`);
+  } catch (e) {
+    report('aes-gcm-vector', false, 'threw: ' + e);
+  }
+}
+
+run();
+</script>
+</body>
+</html>

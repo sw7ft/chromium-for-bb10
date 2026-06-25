@@ -9,6 +9,7 @@
 
 #include "base/files/file_path.h"
 #include "base/memory/raw_ptr.h"
+#include "build/build_config.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/resource_context.h"
 
@@ -113,6 +114,13 @@ class ShellBrowserContext : public BrowserContext {
   std::unique_ptr<SimpleFactoryKey> key_;
   raw_ptr<ClientHintsControllerDelegate> client_hints_controller_delegate_ =
       nullptr;
+#if BUILDFLAG(IS_QNX)
+  // Owns the fallback delegate created in GetClientHintsControllerDelegate()
+  // so content_shell emits Sec-CH-UA* headers on QNX. Destroyed with the
+  // context (~ShellBrowserContext() is defined where the type is complete).
+  std::unique_ptr<ClientHintsControllerDelegate>
+      owned_client_hints_controller_delegate_;
+#endif
 };
 
 }  // namespace content

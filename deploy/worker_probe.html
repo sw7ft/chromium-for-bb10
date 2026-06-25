@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Worker probe</title></head>
+<body style="font:13px monospace;background:#111;color:#eee;padding:10px">
+<pre id="out">running...</pre>
+<script>
+var L=[];
+function P(k,v){ L.push("KP: "+k+"="+v); document.getElementById("out").textContent=L.join("\n"); console.error("KP: "+k+"="+v); }
+
+var workerSrc = [
+"self.onmessage = async function(e){",
+"  var out = {};",
+"  try {",
+"    out.scope = (typeof WorkerGlobalScope!=='undefined')?'worker':'?';",
+"  } catch(err){ out.scopeErr = ''+err; }",
+"  try {",
+"    var bytes = new Uint8Array([0,97,115,109,1,0,0,0,1,7,1,96,2,127,127,1,127,3,2,1,0,7,7,1,3,97,100,100,0,0,10,9,1,7,0,32,0,32,1,106,11]);",
+"    var m = await WebAssembly.instantiate(bytes);",
+"    out.wasm = m.instance.exports.add(2,3);",
+"  } catch(err){ out.wasmErr = ''+err; }",
+"  try {",
+"    if (self.crypto && self.crypto.subtle){",
+"      var data = new TextEncoder().encode('worker-crypto-test');",
+"      var h = await self.crypto.subtle.digest('SHA-256', data);",
+"      out.sha = Array.prototype.map.call(new Uint8Array(h),function(x){return ('0'+x.toString(16)).slice(-2);}).join('').slice(0,12);",
+"      var key = await self.crypto.subtle.generateKey({name:'AES-GCM',length:256},true,['encrypt','decrypt']);",
+"      var iv = self.crypto.getRandomValues(new Uint8Array(12));",
+"      var ct = await self.crypto.subtle.encrypt({name:'AES-GCM',iv:iv},key,data);",
+"      var pt = await self.crypto.subtle.decrypt({name:'AES-GCM',iv:iv},key,ct);",
+"      out.aes = (new TextDecoder().decode(pt)==='worker-crypto-test')?'OK':'WRONG';",
+"    } else { out.subtle='MISSING'; }",
+"  } catch(err){ out.cryptoErr = ''+err; }",
+"  try {",
+"    var r = await fetch('data:application/json,' + encodeURIComponent('{\"ok\":42}'));",
+"    var j = await r.json();",
+"    out.fetch = (j.ok===42)?'OK':('WRONG:'+JSON.stringify(j));",
+"  } catch(err){ out.fetchErr = ''+err; }",
+"  self.postMessage(out);",
+"};"
+].join("\n");
+
+try {
+  var blob = new Blob([workerSrc], {type:"text/javascript"});
+  var w = new Worker(URL.createObjectURL(blob));
+  var got = false;
+  w.onmessage = function(e){
+    got = true;
+    var o = e.data;
+    for (var k in o){ P("worker."+k, o[k]); }
+    console.error("KP: DONE");
+  };
+  w.onerror = function(e){ P("worker.onerror", (e && e.message) ? e.message : e); console.error("KP: DONE"); };
+  w.postMessage("go");
+  setTimeout(function(){ if(!got){ P("worker","SILENT/TIMEOUT — no message back in 6s"); console.error("KP: DONE"); } }, 6000);
+} catch(err){
+  P("worker.create.err", ''+err);
+  console.error("KP: DONE");
+}
+</script>
+</body>
+</html>

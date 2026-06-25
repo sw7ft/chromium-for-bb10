@@ -5,6 +5,7 @@
 #ifndef CONTENT_SHELL_RENDERER_SHELL_RENDER_FRAME_OBSERVER_H_
 #define CONTENT_SHELL_RENDERER_SHELL_RENDER_FRAME_OBSERVER_H_
 
+#include "build/build_config.h"
 #include "content/public/renderer/render_frame_observer.h"
 
 namespace content {
@@ -21,6 +22,12 @@ class ShellRenderFrameObserver : public RenderFrameObserver {
   // RenderFrameObserver implementation.
   void OnDestruct() override;
   void DidClearWindowObject() override;
+#if BUILDFLAG(IS_QNX)
+  // Installs a minimal real-Chrome JS surface (window.chrome, plugins,
+  // pdfViewerEnabled) so sites that gate on "is this really Chrome" (e.g.
+  // Google sign-in's secure-browser check) don't immediately reject us.
+  void InjectBerryChromeShim();
+#endif
   void OnInterfaceRequestForFrame(
       const std::string& interface_name,
       mojo::ScopedMessagePipeHandle* interface_pipe) override;

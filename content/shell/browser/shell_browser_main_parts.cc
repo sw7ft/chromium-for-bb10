@@ -39,6 +39,7 @@
 #include "content/shell/browser/qnx_berry_daemon_host.h"
 #include "base/qnx_berry_daemon.h"
 #include "content/shell/browser/shell_browser_context.h"
+#include "content/shell/browser/shell_content_browser_client.h"
 #include "content/shell/browser/shell_devtools_manager_delegate.h"
 #include "content/shell/browser/shell.h"
 #include "content/shell/browser/shell_platform_delegate.h"
@@ -248,6 +249,9 @@ int ShellBrowserMainParts::PreMainMessageLoopRun() {
 
   InitializeBrowserContexts();
   QNX_TRACE_MSG("QNX:PMLR:2 BrowserCtx\n");
+#if BUILDFLAG(IS_QNX)
+  LogBerryShellUserAgentForStartup();
+#endif
   Shell::Initialize(CreateShellPlatformDelegate());
   QNX_TRACE_MSG("QNX:PMLR:3 ShellInit\n");
   net::NetModule::SetResourceProvider(PlatformResourceProvider);

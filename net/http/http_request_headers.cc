@@ -254,11 +254,6 @@ void HttpRequestHeaders::SetAcceptEncodingIfMissing(
   if (HasHeader(kAcceptEncoding))
     return;
 
-#if defined(__QNX__) || defined(__QNXNTO__)
-  SetHeader(kAcceptEncoding, "identity");
-  return;
-#endif
-
   // If a range is specifically requested, set the "Accepted Encoding" header to
   // "identity".
   if (HasHeader(kRange)) {

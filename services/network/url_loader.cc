@@ -1892,6 +1892,33 @@ void URLLoader::DidRead(int num_bytes, bool completed_synchronously) {
     }
   }
 
+#if defined(__QNX__)
+  if (!qnx_captcha_probe_logged_ && num_bytes > 0 && pending_write_) {
+    const std::string spec = url_request_->url().spec();
+    if (spec.find("/recaptcha/") != std::string::npos ||
+        spec.find("/sorry") != std::string::npos) {
+      qnx_captcha_probe_logged_ = true;
+      std::string enc("(none)");
+      std::string ctype("(none)");
+      if (response_ && response_->headers) {
+        response_->headers->GetNormalizedHeader("Content-Encoding", &enc);
+        response_->headers->GetNormalizedHeader("Content-Type", &ctype);
+      }
+      const char* body = pending_write_->buffer() + new_data_offset;
+      int n = num_bytes < 24 ? num_bytes : 24;
+      char hex[80];
+      int o = 0;
+      for (int i = 0; i < n && o < static_cast<int>(sizeof(hex)) - 3; ++i) {
+        o += snprintf(hex + o, sizeof(hex) - o, "%02x",
+                      static_cast<unsigned char>(body[i]));
+      }
+      QNX_NAV_LOG_FMT(
+          "BerryNav: CaptchaBody enc=%s ctype=%s n=%d hex=%s url=\"%.90s\"\n",
+          enc.c_str(), ctype.c_str(), num_bytes, hex, spec.c_str());
+    }
+  }
+#endif
+
   bool complete_read = true;
   if (consumer_handle_.is_valid()) {
     // |pending_write_| may be null if the job self-aborts due to a suspend;

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>FP probe</title></head>
+<body style="font:14px monospace;background:#111;color:#eee;padding:10px">
+<pre id="out">running...</pre>
+<script>
+function e(s){console.error(s);}
+function run(){
+  var L=[];
+  function p(k,v){L.push("FP: "+k+"="+v); }
+  p("webdriver", navigator.webdriver);
+  p("window.chrome", typeof window.chrome);
+  p("chrome.runtime", (window.chrome && typeof window.chrome.runtime));
+  p("chrome.loadTimes", (window.chrome && typeof window.chrome.loadTimes));
+  p("chrome.csi", (window.chrome && typeof window.chrome.csi));
+  p("plugins.length", navigator.plugins.length);
+  p("mimeTypes.length", navigator.mimeTypes.length);
+  p("languages", JSON.stringify(navigator.languages));
+  p("language", navigator.language);
+  p("platform", navigator.platform);
+  p("hardwareConcurrency", navigator.hardwareConcurrency);
+  p("deviceMemory", navigator.deviceMemory);
+  p("maxTouchPoints", navigator.maxTouchPoints);
+  p("pdfViewerEnabled", navigator.pdfViewerEnabled);
+  p("uaData", (navigator.userAgentData ? "present" : "missing"));
+  p("permissions", (navigator.permissions ? "present" : "missing"));
+  p("cookieEnabled", navigator.cookieEnabled);
+  p("vendor", navigator.vendor);
+  document.getElementById("out").textContent = L.join("\n");
+  L.forEach(e);
+  e("FP: DONE");
+}
+run();
+</script>
+</body>
+</html>
