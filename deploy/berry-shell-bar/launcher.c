@@ -116,6 +116,16 @@ static const char* kDisableFeatures =
     "--disable-features=ServiceWorker,NetworkServiceDedicatedThread,MojoIpcz,"
     "Translate,OptimizationHints,MediaRouter,PreconnectToSearch";
 
+/* Same list but with ServiceWorker LEFT ENABLED. WhatsApp Web (and most PWAs)
+ * use a Service Worker as their primary cache: it stores the app shell + JS +
+ * WASM in Cache Storage so warm loads serve locally and bootstrap without
+ * re-fetching. ServiceWorker was originally lumped in with the unstable
+ * networking/IPC features above; re-enable it via the berry-sw.enable marker to
+ * test whether it's stable here and how much it speeds repeat loads. */
+static const char* kDisableFeaturesSW =
+    "--disable-features=NetworkServiceDedicatedThread,MojoIpcz,"
+    "Translate,OptimizationHints,MediaRouter,PreconnectToSearch";
+
 /* Resolve the directory that holds this executable (the app's native asset
  * dir). The Navigator launches the app with cwd=/accounts/devuser (NOT the
  * asset dir), and argv[0] is not guaranteed to be an absolute path, so the
@@ -333,6 +343,17 @@ int main(int argc, char** argv) {
   snprintf(default_url, sizeof(default_url), "file://%s/home.html", dir);
   const char* url = (argc > 1 && argv[1] && argv[1][0]) ? argv[1] : default_url;
 
+  /* Mobile-first identity. We present as Android Chrome by default so sites
+   * serve their (much lighter) mobile bundles -- the biggest load-time lever on
+   * this Snapdragon 801 class hardware. This only sets the *default* UA; the
+   * browser flips specific desktop-gated hosts (WhatsApp Web) to the desktop UA
+   * per-navigation (see Shell::DidStartNavigation), which works no matter how
+   * the user reaches them (omnibox, link, redirect). berry-desktop.enable forces
+   * the desktop UA globally as an escape hatch. */
+  int use_mobile_ua = !marker_exists("berry-desktop.enable");
+  fprintf(stderr, "BerryShell: default ua = %s\n",
+          use_mobile_ua ? "mobile" : "desktop");
+
   char subprocess_path[2300];
   snprintf(subprocess_path, sizeof(subprocess_path),
            "--browser-subprocess-path=%s/content_shell.exe", dir);
@@ -353,7 +374,7 @@ int main(int argc, char** argv) {
    * binary) rather than the content_shell.bin log-and-exec wrapper: the wrapper
    * does no env setup and only adds an extra execv hop that silently failed for
    * children (they spawned but never reached main()). */
-  char* argv_buf[40];
+  char* argv_buf[48];
   int n = 0;
   argv_buf[n++] = shell;
   argv_buf[n++] = (char*)"--no-sandbox";
@@ -393,6 +414,10 @@ int main(int argc, char** argv) {
    * opens a CDP port. The renderer shim also forces navigator.webdriver=false,
    * but keeping this flag off removes the underlying signal entirely. */
   argv_buf[n++] = (char*)"--disable-quic";
+  /* No screen reader exists on BB10, so skip building and maintaining the
+   * renderer accessibility tree. On heavy SPAs that tree is rebuilt on every
+   * DOM mutation -- pure CPU we can hand back to the bootstrap JS. */
+  argv_buf[n++] = (char*)"--disable-renderer-accessibility";
   if (!use_fps_limit_flag)
     argv_buf[n++] = (char*)"--disable-frame-rate-limit";
   argv_buf[n++] = (char*)"--ozone-platform=qnx_screen";
@@ -403,6 +428,11 @@ int main(int argc, char** argv) {
     if (use_gpu) {
       argv_buf[n++] = (char*)"--use-gl=egl";
       argv_buf[n++] = (char*)"--ignore-gpu-blocklist";
+      /* Rasterize tiles on the Adreno 330 instead of CPU raster threads. The
+       * GPU is otherwise idle during the JS-heavy load, and moving raster off
+       * the Krait cores frees them for the single-threaded bootstrap JS that is
+       * the real load bottleneck. */
+      argv_buf[n++] = (char*)"--enable-gpu-rasterization";
       argv_buf[n++] = raster_flag;
     } else {
       argv_buf[n++] = (char*)"--disable-gpu";
@@ -419,7 +449,27 @@ int main(int argc, char** argv) {
     }
   }
   argv_buf[n++] = (char*)kScaleFactor;
-  argv_buf[n++] = (char*)kDisableFeatures;
+  /* ServiceWorker A/B: berry-sw.enable keeps SW on (PWA app-shell caching);
+   * default leaves it disabled for stability. */
+  if (marker_exists("berry-sw.enable")) {
+    argv_buf[n++] = (char*)kDisableFeaturesSW;
+    fprintf(stderr, "BerryShell: ServiceWorker = ENABLED (berry-sw.enable)\n");
+  } else {
+    argv_buf[n++] = (char*)kDisableFeatures;
+    fprintf(stderr, "BerryShell: ServiceWorker = disabled (default)\n");
+  }
+  /* Low-end device mode A/B: forces Chromium's phone memory/GC/tile heuristics
+   * (smaller V8 heap, leaner image/tile caches). berry-lowend.enable to try. */
+  if (marker_exists("berry-lowend.enable")) {
+    argv_buf[n++] = (char*)"--enable-low-end-device-mode";
+    fprintf(stderr, "BerryShell: low-end device mode = ON (berry-lowend.enable)\n");
+  }
+  /* Present as Android Chrome unless a desktop-gated host forced desktop above.
+   * content_shell's GetUserAgent()/GetUserAgentMetadata() and OverrideWebkitPrefs
+   * key off this switch to emit a mobile UA, Sec-CH-UA-Mobile: ?1, and mobile
+   * viewport layout. */
+  if (use_mobile_ua)
+    argv_buf[n++] = (char*)"--use-mobile-user-agent";
   /* Optional V8 flag passthrough for tuning experiments (e.g. WASM compile
    * levers). Write the flag string into shared/misc/berry-jsflags and relaunch;
    * no content_shell rebuild needed. Example contents:
