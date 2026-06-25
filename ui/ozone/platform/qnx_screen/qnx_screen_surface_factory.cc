@@ -25,6 +25,7 @@
 #include "ui/gfx/vsync_provider.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_gl_ozone_egl.h"
+#include "ui/ozone/platform/qnx_screen/qnx_screen_vsync.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_window.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_window_manager.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_overlay_callback.h"
@@ -35,142 +36,13 @@ namespace ui {
 
 namespace {
 
-// Query the physical display's refresh interval for the given window. Without
-// this, Viz falls back to a guessed 60Hz begin-frame timer that is never aligned
-// to the panel, so frames are scheduled with up to a full interval of extra
-// latency. Falls back to 60Hz if the mode can't be read or looks implausible.
-base::TimeDelta QueryDisplayInterval(screen_window_t win) {
-  const base::TimeDelta kFallback = base::Hertz(60);
-  if (!win)
-    return kFallback;
-  screen_display_t display = nullptr;
-  if (screen_get_window_property_pv(win, SCREEN_PROPERTY_DISPLAY,
-                                    reinterpret_cast<void**>(&display)) != 0 ||
-      !display) {
-    return kFallback;
-  }
-  screen_display_mode_t mode;
-  if (screen_get_display_property_cv(display, SCREEN_PROPERTY_MODE,
-                                     sizeof(mode),
-                                     reinterpret_cast<char*>(&mode)) != 0) {
-    return kFallback;
-  }
-  // Clamp to a sane panel range; BB10 Passport is 60Hz.
-  if (mode.refresh < 30 || mode.refresh > 120) {
-#if BUILDFLAG(IS_QNX)
-    if (base::QnxFpsLogEnabled()) {
-      char line[96];
-      int n = snprintf(line, sizeof(line),
-                       "QNX:VSYNC refresh=%d out of range, using 60Hz fallback\n",
-                       mode.refresh);
-      if (n > 0)
-        ::write(2, line, n);
-    }
-#endif
-    return kFallback;
-  }
-#if BUILDFLAG(IS_QNX)
-  if (base::QnxFpsLogEnabled()) {
-    char line[64];
-    int n = snprintf(line, sizeof(line), "QNX:VSYNC refresh=%dHz\n",
-                     mode.refresh);
-    if (n > 0)
-      ::write(2, line, n);
-  }
-#endif
-  return base::Hertz(mode.refresh);
-}
-
-// Cap the begin-frame rate on this SoC. The panel is 60Hz, but full-screen
-// software raster + full-frame present cannot sustain 60fps on heavy/animated
-// pages, so Viz keeps scheduling ~60 begin-frames/sec (which also drive the
-// page's requestAnimationFrame and CSS animations) whose work mostly gets
-// dropped -- wasted CPU at ~99% on a single core. Pacing begin-frames at a lower
-// rate throttles the page's animation work and the compositor together, roughly
-// halving CPU on animated pages, while idle pages still go fully idle (the
-// display-scheduler keep-alive handles that). Returned as the *minimum*
-// begin-frame interval. Tunable via QNX_MAX_FPS (default 30); set 60 to
-// effectively disable the cap on a 60Hz panel.
-base::TimeDelta ApplyMaxFpsCap(base::TimeDelta panel_interval) {
-  static const int kMaxFps = []() {
-    const char* e = getenv("QNX_MAX_FPS");
-    const int v = e ? atoi(e) : 60;  // default 60 == no cap on a 60Hz panel
-    return (v >= 5 && v <= 120) ? v : 60;
-  }();
-  const base::TimeDelta kMinInterval = base::Hertz(kMaxFps);
-#if BUILDFLAG(IS_QNX)
-  if (base::QnxFpsLogEnabled()) {
-    char line[64];
-    int n = snprintf(line, sizeof(line), "QNX:MAXFPS cap=%dfps\n", kMaxFps);
-    if (n > 0)
-      ::write(2, line, n);
-  }
-#endif
-  // Larger interval == lower fps, so the cap is a floor on the interval.
-  return std::max(panel_interval, kMinInterval);
-}
-
-// Shared, thread-safe vsync parameters written by the present path (the actual
-// post time becomes the timebase) and read by the VSyncProvider that Viz polls.
-class QnxVSyncState : public base::RefCountedThreadSafe<QnxVSyncState> {
- public:
-  explicit QnxVSyncState(base::TimeDelta interval)
-      : interval_(interval), timebase_(base::TimeTicks::Now()) {}
-
-  void OnPresent(base::TimeTicks present_time) {
-    base::AutoLock lock(lock_);
-    timebase_ = present_time;
-  }
-
-  void Get(base::TimeTicks* timebase, base::TimeDelta* interval) {
-    base::AutoLock lock(lock_);
-    *timebase = timebase_;
-    *interval = interval_;
-  }
-
- private:
-  friend class base::RefCountedThreadSafe<QnxVSyncState>;
-  ~QnxVSyncState() = default;
-
-  base::Lock lock_;
-  base::TimeDelta interval_;
-  base::TimeTicks timebase_;
-};
-
-// Reports vsync timing to Viz so the begin-frame source paces to the real panel
-// refresh and aligns its phase to the last present instead of free-running.
-class QnxScreenVSyncProvider : public gfx::VSyncProvider {
- public:
-  explicit QnxScreenVSyncProvider(scoped_refptr<QnxVSyncState> state)
-      : state_(std::move(state)) {}
-  ~QnxScreenVSyncProvider() override = default;
-
-  void GetVSyncParameters(UpdateVSyncCallback callback) override {
-    base::TimeTicks timebase;
-    base::TimeDelta interval;
-    state_->Get(&timebase, &interval);
-    std::move(callback).Run(timebase, interval);
-  }
-
-  bool GetVSyncParametersIfAvailable(base::TimeTicks* timebase,
-                                     base::TimeDelta* interval) override {
-    state_->Get(timebase, interval);
-    return true;
-  }
-
-  bool SupportGetVSyncParametersIfAvailable() const override { return true; }
-  bool IsHWClock() const override { return false; }
-
- private:
-  scoped_refptr<QnxVSyncState> state_;
-};
-
 class QnxScreenCanvas : public SurfaceOzoneCanvas {
  public:
   explicit QnxScreenCanvas(QnxScreenWindow* window)
       : window_(window),
-        vsync_state_(base::MakeRefCounted<QnxVSyncState>(ApplyMaxFpsCap(
-            QueryDisplayInterval(window ? window->screen_window() : nullptr)))) {
+        vsync_state_(base::MakeRefCounted<QnxVSyncState>(QnxApplyMaxFpsCap(
+            QnxQueryDisplayInterval(window ? window->screen_window()
+                                           : nullptr)))) {
     ResizeCanvasInternal(gfx::Size(window->GetBoundsInPixels().width(),
                                    window->GetBoundsInPixels().height()));
   }
@@ -186,6 +58,10 @@ class QnxScreenCanvas : public SurfaceOzoneCanvas {
   }
 
   void PresentCanvas(const gfx::Rect& damage) override {
+    QNX_NAV_LOG_FMT("QNX:PC:present win=%p sw=%p damage=%dx%d\n",
+                    (void*)window_,
+                    (void*)(window_ ? window_->screen_window() : nullptr),
+                    damage.width(), damage.height());
     if (!window_ || !window_->screen_window())
       return;
     RequestQnxScreenFullInvalidate();
@@ -398,6 +274,9 @@ std::unique_ptr<SurfaceOzoneCanvas>
 QnxScreenSurfaceFactory::CreateCanvasForWidget(
     gfx::AcceleratedWidget widget) {
   QnxScreenWindow* window = window_manager_->GetWindow(widget);
+  QNX_NAV_LOG_FMT("QNX:CCFW widget=%d window=%p sw=%p\n", (int)widget,
+                  (void*)window,
+                  (void*)(window ? window->screen_window() : nullptr));
   if (!window)
     return nullptr;
   return std::make_unique<QnxScreenCanvas>(window);

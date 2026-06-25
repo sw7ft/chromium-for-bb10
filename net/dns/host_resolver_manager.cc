@@ -3894,6 +3894,23 @@ int HostResolverManager::StartIPv6ReachabilityCheck(
     const NetLogWithSource& net_log,
     ClientSocketFactory* client_socket_factory,
     CompletionOnceCallback callback) {
+#if BUILDFLAG(IS_QNX)
+  // BB10 devices egress through an IPv4 USB tether and expose only link-local /
+  // ULA IPv6 with no global route. The stock probe UDP-connects to a public
+  // IPv6 address; with a ULA route present that connect() succeeds at the
+  // syscall level, so the probe wrongly reports IPv6 reachable. Chromium then
+  // resolves AAAA and the real connect fails with ERR_ADDRESS_UNREACHABLE
+  // (-109) -- the cause of intermittent webpack ChunkLoadError on JS-heavy SPAs
+  // (e.g. x.com fires ~6 parallel chunk loads; the AAAA attempts fail). Force
+  // IPv4-only here (mirrors the check_ipv6_on_wifi_ early-out below).
+  (void)net_log;
+  (void)client_socket_factory;
+  (void)callback;
+  probing_ipv6_ = false;
+  last_ipv6_probe_result_ = false;
+  last_ipv6_probe_time_ = base::TimeTicks();
+  return OK;
+#else
   // Don't bother checking if the request will use WiFi and IPv6 is assumed to
   // not work on WiFi.
   if (!check_ipv6_on_wifi_ && RequestWillUseWiFi(target_network_)) {
@@ -3930,6 +3947,7 @@ int HostResolverManager::StartIPv6ReachabilityCheck(
         return NetLogIPv6AvailableParams(last_ipv6_probe_result_, cached);
       });
   return rv;
+#endif  // BUILDFLAG(IS_QNX)
 }
 
 void HostResolverManager::SetLastIPv6ProbeResult(bool last_ipv6_probe_result) {

@@ -3,17 +3,24 @@
 #include "ui/ozone/platform/qnx_screen/qnx_screen_gl_ozone_egl.h"
 
 #include <dlfcn.h>
+#include <unistd.h>
+
+#include <algorithm>
+#include <cstdio>
+#include <utility>
 
 #include "base/logging.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/native_library.h"
 #include "base/qnx_trace.h"
+#include "base/time/time.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_context_egl.h"
 #include "ui/gl/gl_display.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface.h"
 #include "ui/gl/gl_surface_egl.h"
+#include "ui/ozone/platform/qnx_screen/qnx_screen_vsync.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_window.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_window_manager.h"
 
@@ -37,16 +44,94 @@ ScreenContext g_screen_ctx = nullptr;
 // to false makes the compositor always swap full frames (the upstream
 // disable_post_sub_buffers_for_onscreen_surfaces workaround does the same, but
 // that path needs GPU-info-based bug-list matching which we don't have here).
+//
+// VSync: BB10 lacks EGL_CHROMIUM_sync_control, so the stock NativeViewGLSurfaceEGL
+// hands Viz a null VSyncProvider in GPU mode -- the begin-frame source then
+// free-runs with no panel alignment, producing multi-second QNX:BF gaps. We feed
+// it a QnxScreenVSyncProvider (same mechanism the software canvas uses) and push
+// the real eglSwapBuffers completion time as the timebase on every frame.
 class QnxNativeViewGLSurfaceEGL : public gl::NativeViewGLSurfaceEGL {
  public:
   QnxNativeViewGLSurfaceEGL(gl::GLDisplayEGL* display,
-                            EGLNativeWindowType window)
-      : gl::NativeViewGLSurfaceEGL(display, window, nullptr) {}
+                            EGLNativeWindowType window,
+                            scoped_refptr<QnxVSyncState> vsync_state)
+      : gl::NativeViewGLSurfaceEGL(
+            display,
+            window,
+            std::make_unique<QnxScreenVSyncProvider>(vsync_state)),
+        vsync_state_(std::move(vsync_state)) {}
 
   bool SupportsPostSubBuffer() override { return false; }
 
+  gfx::SwapResult SwapBuffers(gl::GLSurface::PresentationCallback callback,
+                              gfx::FrameData data) override {
+    const base::TimeTicks t_enter = base::TimeTicks::Now();
+    gfx::SwapResult result = gl::NativeViewGLSurfaceEGL::SwapBuffers(
+        std::move(callback), std::move(data));
+    const base::TimeTicks t_exit = base::TimeTicks::Now();
+
+    // Align Viz's begin-frame phase to real GL presents (mirrors the software
+    // path's QnxScreenCanvas::PresentCanvas). eglSwapBuffers returns once the
+    // submit completes; close enough to a vblank to fix the free-running phase.
+    if (vsync_state_)
+      vsync_state_->OnPresent(t_exit);
+
+    MaybeLogGlSwap(t_enter, t_exit);
+    return result;
+  }
+
  protected:
   ~QnxNativeViewGLSurfaceEGL() override = default;
+
+ private:
+  // Per-second eglSwapBuffers timing, gated on berry-fps.enable / QNX_FPS=1.
+  // Splits the budget so we can tell whether GPU is slow because it is never
+  // told when to draw (high gap, low swap) or because the driver's full-frame
+  // present blocks (high swap). Mirrors the QNX:FPS line shape.
+  void MaybeLogGlSwap(base::TimeTicks t_enter, base::TimeTicks t_exit) {
+    if (!base::QnxFpsLogEnabled())
+      return;
+    static base::TimeTicks s_window_start;
+    static base::TimeTicks s_last_exit;
+    static int s_frames = 0;
+    static double s_sum_swap_ms = 0;
+    static double s_sum_gap_ms = 0;
+    static double s_max_swap_ms = 0;
+    static double s_max_gap_ms = 0;
+    if (s_window_start.is_null())
+      s_window_start = t_enter;
+    const double swap_ms = (t_exit - t_enter).InMicrosecondsF() / 1000.0;
+    const double gap_ms =
+        s_last_exit.is_null()
+            ? 0.0
+            : (t_enter - s_last_exit).InMicrosecondsF() / 1000.0;
+    s_frames++;
+    s_sum_swap_ms += swap_ms;
+    s_sum_gap_ms += gap_ms;
+    s_max_swap_ms = std::max(s_max_swap_ms, swap_ms);
+    s_max_gap_ms = std::max(s_max_gap_ms, gap_ms);
+    const base::TimeDelta elapsed = t_exit - s_window_start;
+    if (elapsed >= base::Seconds(1)) {
+      char line[160];
+      int n = snprintf(
+          line, sizeof(line),
+          "QNX:GLSWAP present=%d in %dms | swap avg=%.1f max=%.1fms | "
+          "gap avg=%.1f max=%.1fms\n",
+          s_frames, (int)elapsed.InMilliseconds(), s_sum_swap_ms / s_frames,
+          s_max_swap_ms, s_sum_gap_ms / s_frames, s_max_gap_ms);
+      if (n > 0)
+        ::write(2, line, n);
+      s_window_start = t_exit;
+      s_frames = 0;
+      s_sum_swap_ms = 0;
+      s_sum_gap_ms = 0;
+      s_max_swap_ms = 0;
+      s_max_gap_ms = 0;
+    }
+    s_last_exit = base::TimeTicks::Now();
+  }
+
+  scoped_refptr<QnxVSyncState> vsync_state_;
 };
 
 void EnsureScreenContext() {
@@ -111,9 +196,13 @@ scoped_refptr<gl::GLSurface> QnxScreenGLOzoneEGL::CreateViewGLSurface(
       reinterpret_cast<EGLNativeWindowType>(window->screen_window());
   QNX_GL_LOG("QNX GL TRACE: CreateViewGLSurface widget=%u win=%p\n", widget,
              window->screen_window());
+  // Pace Viz to the panel: feed the begin-frame source a real VSyncProvider
+  // whose timebase the surface updates on every eglSwapBuffers.
+  auto vsync_state = base::MakeRefCounted<QnxVSyncState>(
+      QnxApplyMaxFpsCap(QnxQueryDisplayInterval(window->screen_window())));
   scoped_refptr<gl::GLSurface> surface = gl::InitializeGLSurface(
       base::MakeRefCounted<QnxNativeViewGLSurfaceEGL>(
-          display->GetAs<gl::GLDisplayEGL>(), native));
+          display->GetAs<gl::GLDisplayEGL>(), native, std::move(vsync_state)));
   if (surface) {
     gfx::Size sz = surface->GetSize();
     QNX_GL_LOG(

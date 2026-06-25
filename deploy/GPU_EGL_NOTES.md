@@ -44,8 +44,10 @@ in-process GPU; it falls back to GLES2/EGL, which is what we force anyway).
   needs `screen_post_window` (a plain Screen buffer post) — no GPU display.
   Look for `QNX:FPS present=N` (software-path present counter).
 - **GPU/EGL** needs a full GPU display from the graphics service → requires the
-  tapped app session. There is NO `QNX:FPS present` log in GPU mode; presentation
-  goes through `eglSwapBuffers`, so don't use that counter to judge GPU.
+  tapped app session. There is NO `QNX:FPS present` log in GPU mode (that is the
+  software-canvas counter); GPU presentation goes through `eglSwapBuffers`, so
+  judge it by the **`QNX:GLSWAP`** counter instead (added in the GL surface) plus
+  `QNX:BF`.
 
 ## Enable / disable GPU (no rebuild — launcher marker files)
 
@@ -74,6 +76,13 @@ ssh passport 'rm -f /accounts/1000/shared/misc/berry-gpu.enable'
   `GetNativeDisplay()` — calls `eglGetDisplay`/`eglInitialize` directly and prints
   `eglGetError` so we always see the real EGL error code (the stock gl stack only
   logs the generic "Initialization of all EGL display types failed").
+- **`QNX:GLSWAP` log line** (gated on `berry-fps.enable` / `QNX_FPS=1`) in the
+  `QnxNativeViewGLSurfaceEGL::SwapBuffers` override. Per-second:
+  `swap avg/max` = time inside `eglSwapBuffers`; `gap avg/max` = time waiting
+  upstream of the swap (begin-frame + raster + composite). High `swap` would mean
+  the driver's full-frame present is the ceiling; high `gap` means the page /
+  scheduler is upstream-bound. Measured on-device: `swap ≈ 14 ms` (one 60Hz
+  interval) — present is NOT the bottleneck.
 
 ## Environment facts (device, verified)
 
@@ -87,7 +96,15 @@ ssh passport 'rm -f /accounts/1000/shared/misc/berry-gpu.enable'
   driver advertises ES2 but exports null ES3 entry points that crash if probed.
 - `SupportsPostSubBuffer()` is forced **false**: BB10 EGL advertises
   `EGL_NV_post_sub_buffer` but partial GL present corrupts the window, so the
-  compositor must full-frame swap every frame.
+  compositor must full-frame swap every frame. (This is fine: measured swap is
+  ~14 ms, so a damage-aware partial present would buy little and risk the same
+  corruption — not worth doing.)
+- The GL surface feeds Viz a real **`QnxScreenVSyncProvider`** (the same one the
+  software canvas uses, in `qnx_screen_vsync.h`), updated from the
+  `eglSwapBuffers` completion time on every frame. BB10 lacks
+  `EGL_CHROMIUM_sync_control`, so without this the stock surface hands Viz a NULL
+  vsync provider and the begin-frame source free-runs — the cause of the old
+  multi-second `QNX:BF` gaps in GPU mode.
 
 ## Testing checklist (so we don't repeat the SSH mistake)
 
@@ -99,10 +116,37 @@ ssh passport 'rm -f /accounts/1000/shared/misc/berry-gpu.enable'
    needs_draw=1`), NOT by `QNX:FPS present` (software-only counter).
 5. To revert: `rm -f berry-gpu.enable` and relaunch (software).
 
-## Why software is still the DEFAULT
+## VSync fix — GPU went from unusable to parity (2026-06-24)
 
-Performance, not capability. Steady-state UI is faster in software on this SoC
-because the GPU path pays full-frame `eglSwapBuffers` every frame (PostSubBuffer
-disabled for correctness) plus Viz/GL-thread overhead. See
-`gpu_vs_software_analysis` plan. GPU mode is real and now confirmed to initialize
-on a tapped launch; keep it opt-in.
+GPU mode used to be sluggish because the GL surface handed Viz a NULL
+VSyncProvider (no `EGL_CHROMIUM_sync_control` on BB10), so the begin-frame source
+free-ran and stalled for **1.5–9 seconds** between frames. Feeding it a
+`QnxScreenVSyncProvider` (timebase = real `eglSwapBuffers` completion) fixed it.
+
+Head-to-head, scrolling `en.wikipedia.org/wiki/BlackBerry_Passport`, same build,
+`berry-fps.enable`, tapped launch:
+
+| Metric (steady-state scroll) | GPU (vsync fix) | Software (default) |
+|---|---|---|
+| Frames/sec (best window) | 60 (`present=60/1006ms`) | 58 (`present=58/1006ms`) |
+| Frames/sec (typical) | ~50–60 | ~48–57 |
+| Present cost | `swap ≈ 10–14 ms` (eglSwapBuffers) | `post ≈ 6–10 ms` (screen_post) |
+| Upstream `gap` (good window) | ~2–6 ms | ~6–14 ms |
+| `QNX:BF` delta (steady) | ~16–18 ms | ~17–22 ms |
+| Heavy-burst spikes | occasional 0.5–3 s | occasional 0.7–1.8 s |
+
+Before the fix, GPU `QNX:BF delta avg ≈ 1508 ms, max ≈ 8966 ms`. After:
+`≈ 16 ms` in steady windows, hitting 60 begin-frames/sec.
+
+### Conclusion / default choice
+- Both modes now reach ~55–60 fps in steady-state scroll and are **upstream/JS-
+  bound** during heavy bursts, not present-bound (`swap`/`post` stay ~10–14 ms
+  right through the spikes). Neither is dramatically faster for this UI workload.
+- **Software stays the DEFAULT** for now — not because GPU is slow (it is no
+  longer), but because software (a) works over SSH without a tapped session,
+  (b) has a marginally cheaper present (`post` ~7 ms vs `swap` ~14 ms) and
+  slightly steadier pacing, and (c) is the most-tested path.
+- **GPU is now a first-class opt-in**: stable, 60 fps capable, and it offloads
+  raster/composite from the CPU (useful for image/canvas-heavy or animated pages
+  and battery). Enable with `berry-gpu.enable` + tapped launch. The vsync provider
+  is what makes it usable — do not remove it.

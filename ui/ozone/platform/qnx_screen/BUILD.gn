@@ -19,6 +19,7 @@ source_set("qnx_screen") {
     "qnx_screen_gl_ozone_egl.h",
     "qnx_screen_surface_factory.cc",
     "qnx_screen_surface_factory.h",
+    "qnx_screen_vsync.h",
     "qnx_screen_window.cc",
     "qnx_screen_window.h",
     "qnx_screen_window_manager.cc",

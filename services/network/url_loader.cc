@@ -2234,6 +2234,36 @@ void URLLoader::NotifyCompleted(int error_code) {
       status.trust_token_operation_status = *trust_token_status_;
     status.cors_error_status = cors_error_status_;
 
+#if defined(__QNX__)
+    // Diagnose webpack ChunkLoadError on JS-heavy SPAs (e.g. x.com): log the
+    // completion of script subresources so we can tell a network/HTTP failure
+    // (error_code != 0 or non-200) apart from a corrupt/truncated decode
+    // (error_code == 0 but decoded != Content-Length, often a Brotli/Zstd bug).
+    {
+      const std::string spec = url_request_->url().spec();
+      const bool is_js = spec.find(".js") != std::string::npos;
+      const bool is_spa_host = spec.find("twimg.com") != std::string::npos ||
+                               spec.find("/client-web/") != std::string::npos ||
+                               spec.find("x.com") != std::string::npos;
+      if ((is_js && is_spa_host) || error_code != 0) {
+        std::string enc("(none)");
+        std::string clen("(none)");
+        int http_status = -1;
+        if (response_ && response_->headers) {
+          response_->headers->GetNormalizedHeader("Content-Encoding", &enc);
+          response_->headers->GetNormalizedHeader("Content-Length", &clen);
+          http_status = response_->headers->response_code();
+        }
+        QNX_NAV_LOG_FMT(
+            "BerryNav: ChunkDone err=%d http=%d enc=%s clen=%s "
+            "encBody=%lld decBody=%lld url=\"%.110s\"\n",
+            error_code, http_status, enc.c_str(), clen.c_str(),
+            (long long)status.encoded_body_length,
+            (long long)status.decoded_body_length, spec.c_str());
+      }
+    }
+#endif
+
     if ((options_ & mojom::kURLLoadOptionSendSSLInfoForCertificateError) &&
         net::IsCertStatusError(url_request_->ssl_info().cert_status)) {
       status.ssl_info = url_request_->ssl_info();
