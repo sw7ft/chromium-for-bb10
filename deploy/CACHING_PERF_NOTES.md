@@ -60,3 +60,28 @@ with runtime/sync/GC work rather than a fixed compile cost.
 Remaining (not pursued - low ROI): main-thread scheduling tweaks, GC flags,
 out-of-process renderer (historically spins/crashes on QNX). The durable wins are
 the two caches above (fewer re-downloads, JS not re-parsed each launch).
+
+## 5. GC probe: ruled out as the stall cause (--trace-gc)
+
+Followed up the JS/GC question with `--trace-gc` (via the berry-jsflags harness)
+on a cold tapped WhatsApp load:
+- 27 major Mark-Compact GCs, 0 large pauses: longest single GC pause = 318 ms.
+- Cumulative main-thread GC time ~4.8 s spread over a ~90 s load.
+- Peak heap only ~68 MB (no 32-bit address-space pressure).
+
+The worst `QNX:BF` stall that run was 16.5 s - far larger than any GC pause - so
+the big stalls are LONG SYNCHRONOUS JAVASCRIPT TASKS, not GC. Net verdict: the
+load stall is raw single-thread JS execution on the 32-bit Krait, a CPU ceiling
+no V8 flag removes. Heap/GC tuning is bounded to the ~4.8 s cumulative and is not
+worth pursuing.
+
+## 6. Render resolution (perceived-speed lever, not a JS fix)
+
+Already rendering at 720² upscaled to the 1440² panel (QNX_SCREEN_WIDTH/HEIGHT +
+QNX_SCREEN_OUTPUT_*). Marker profiles drop further: berry-x-540.enable (540²),
+berry-x-420.enable (420²). Lower resolution cuts raster/composite/GPU pixel work
+and frees CPU cores that otherwise compete with the JS main thread, improving
+responsiveness DURING stalls - but it does not shrink the JS compute itself.
+Same for fps caps (berry-x-slow10/12/15) and raster-thread count
+(berry-x-1thread/2thread): contention relief, not a cure for the synchronous-JS
+ceiling.
