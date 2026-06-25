@@ -29,6 +29,26 @@ static int marker_exists(const char* name) {
   return access(path, F_OK) == 0;
 }
 
+/* Read the contents of a marker file in shared/misc into out (NUL-terminated,
+ * trailing whitespace/newlines stripped). Returns the trimmed length, or 0 if
+ * the file is missing/empty. Used to A/B V8 flags without a content_shell
+ * rebuild: write the flag string into berry-jsflags and relaunch. */
+static size_t read_marker_text(const char* name, char* out, size_t out_sz) {
+  char path[512];
+  snprintf(path, sizeof(path), "%s%s", kSharedMisc, name);
+  FILE* f = fopen(path, "r");
+  if (!f)
+    return 0;
+  size_t got = fread(out, 1, out_sz - 1, f);
+  fclose(f);
+  out[got] = '\0';
+  while (got > 0 && (out[got - 1] == '\n' || out[got - 1] == '\r' ||
+                     out[got - 1] == ' ' || out[got - 1] == '\t')) {
+    out[--got] = '\0';
+  }
+  return got;
+}
+
 /* Load-reduction profiles for X.com crash triage (touch marker in shared/misc).
  * Profiles stack: berry-x-lite.enable implies 420 + 12fps + 2 raster threads.
  * Individual markers: berry-x-420.enable, berry-x-slow12.enable,
@@ -333,7 +353,7 @@ int main(int argc, char** argv) {
    * binary) rather than the content_shell.bin log-and-exec wrapper: the wrapper
    * does no env setup and only adds an extra execv hop that silently failed for
    * children (they spawned but never reached main()). */
-  char* argv_buf[32];
+  char* argv_buf[40];
   int n = 0;
   argv_buf[n++] = shell;
   argv_buf[n++] = (char*)"--no-sandbox";
@@ -400,6 +420,19 @@ int main(int argc, char** argv) {
   }
   argv_buf[n++] = (char*)kScaleFactor;
   argv_buf[n++] = (char*)kDisableFeatures;
+  /* Optional V8 flag passthrough for tuning experiments (e.g. WASM compile
+   * levers). Write the flag string into shared/misc/berry-jsflags and relaunch;
+   * no content_shell rebuild needed. Example contents:
+   *   --liftoff-only --wasm-lazy-validation --trace-wasm-compilation-times */
+  {
+    static char jsflags_buf[1024];
+    static char jsflags_arg[1040];
+    if (read_marker_text("berry-jsflags", jsflags_buf, sizeof(jsflags_buf))) {
+      snprintf(jsflags_arg, sizeof(jsflags_arg), "--js-flags=%s", jsflags_buf);
+      argv_buf[n++] = jsflags_arg;
+      fprintf(stderr, "BerryShell: js-flags = %s\n", jsflags_buf);
+    }
+  }
   argv_buf[n++] = (char*)url;
   argv_buf[n++] = NULL;
 
