@@ -22,6 +22,14 @@ using QnxScreenExitCallback = void (*)();
 void SetQnxScreenExitCallback(QnxScreenExitCallback cb);
 QnxScreenExitCallback GetQnxScreenExitCallback();
 
+// Fired on Navigator window-state changes: visible=true when the app is the
+// foreground full-screen window, false when it is thumbnailed (multitask card)
+// or fully covered. Used to mark the page hidden so rAF/timers/compositing
+// throttle while backgrounded (CPU/battery back to the foreground app).
+using QnxScreenVisibilityCallback = void (*)(bool visible);
+void SetQnxScreenVisibilityCallback(QnxScreenVisibilityCallback cb);
+QnxScreenVisibilityCallback GetQnxScreenVisibilityCallback();
+
 }  // namespace ui
 
 #endif

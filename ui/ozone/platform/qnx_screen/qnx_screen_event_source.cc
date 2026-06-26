@@ -128,6 +128,20 @@ void QnxScreenEventSource::PollEvents() {
             cb();
           break;
         }
+        case NAVIGATOR_WINDOW_STATE: {
+          // The app moved between foreground (FULLSCREEN), the multitask card
+          // (THUMBNAIL), and fully covered (INVISIBLE). Only FULLSCREEN is
+          // actually visible; thumbnail/invisible should throttle the page so
+          // rAF/timers/compositing stop burning the Krait cores in the
+          // background. Forward as a simple visible/hidden bit.
+          navigator_window_state_t st = navigator_event_get_window_state(event);
+          bool visible = (st == NAVIGATOR_WINDOW_FULLSCREEN);
+          QnxKbdLogf("KBD:nav WINDOW_STATE st=%d visible=%d\n", (int)st,
+                     visible ? 1 : 0);
+          if (auto cb = GetQnxScreenVisibilityCallback())
+            cb(visible);
+          break;
+        }
         default:
           break;
       }

@@ -25,6 +25,13 @@ void StartQnxBootWatchdog(int total_ms);
 // Cancel the boot-phase watchdog (e.g. on first real navigation commit).
 void CancelQnxBootWatchdog();
 
+// Exit-phase watchdog: armed when the Navigator asks the app to close
+// (NAVIGATOR_EXIT) right before the graceful Shell::Shutdown(). Guarantees the
+// process terminates even if teardown hangs on a busy in-process renderer or a
+// stuck present/RunUntilIdle loop, so the app window closing always tears down
+// content_shell instead of leaving an orphan. Independent of the message loop.
+void StartQnxExitWatchdog(int total_ms);
+
 // On-demand: pthread_kill(SIGUSR2) every thread so each emits its own
 // (CFI-unwound, symbolized) backtrace via the sampler in stack_trace_posix.cc.
 // Async-signal-safe (pthread_kill/nanosleep/write only), so it is safe to call
@@ -37,6 +44,7 @@ inline void StartQnxHardWatchdog(int total_ms) {}
 inline void CancelQnxHardWatchdog() {}
 inline void StartQnxBootWatchdog(int total_ms) {}
 inline void CancelQnxBootWatchdog() {}
+inline void StartQnxExitWatchdog(int total_ms) {}
 
 #endif  // BUILDFLAG(IS_QNX)
 

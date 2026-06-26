@@ -4,14 +4,17 @@
 #include "content/shell/browser/shell_platform_delegate.h"
 
 #include <sys/keycodes.h>
+#include <unistd.h>
 
 #include "base/containers/contains.h"
+#include "base/qnx_hard_watchdog.h"
 #include "base/qnx_trace.h"
 #include "base/strings/escape.h"
 #include "base/synchronization/lock.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "content/public/browser/render_widget_host_view.h"
+#include "content/public/browser/visibility.h"
 #include "content/public/browser/web_contents.h"
 #include "content/shell/browser/berry_browser_chrome.h"
 #include "content/shell/browser/shell.h"
@@ -242,8 +245,34 @@ bool QnxKeyCallback(int sym, bool down) {
   return false;
 }
 
+void QnxVisibilityCallback(bool visible) {
+  // Drive the page's visibility from the Navigator window state. Hiding marks
+  // the WebContents HIDDEN, which throttles requestAnimationFrame, applies
+  // background timer throttling, and stops compositing/painting -- so a
+  // thumbnailed or covered browser stops competing with the foreground app for
+  // the Krait cores. Showing restores VISIBLE.
+  Shell* shell = nullptr;
+  {
+    base::AutoLock lock(g_chrome_lock);
+    shell = g_active_shell;
+  }
+  if (!shell || !shell->web_contents())
+    return;
+  shell->web_contents()->UpdateWebContentsVisibility(
+      visible ? Visibility::VISIBLE : Visibility::HIDDEN);
+}
+
 void QnxExitCallback() {
+  // The Navigator (app swipe-up / close) asked us to exit. Graceful teardown
+  // below can stall on a busy in-process renderer (single-process mode) or a
+  // stuck present/RunUntilIdle loop, which is why content_shell sometimes
+  // survived after the window closed. Arm an independent hard-exit watchdog so
+  // the process is guaranteed to die shortly regardless of teardown progress.
+  base::StartQnxExitWatchdog(3000);
   Shell::Shutdown();
+  // If we got here cleanly the main loop quit closure already ran; make the
+  // exit immediate rather than waiting on any remaining loop iterations.
+  _exit(0);
 }
 
 }  // namespace
@@ -273,6 +302,7 @@ void ShellPlatformDelegate::Initialize(const gfx::Size& default_window_size) {
   ui::SetQnxScreenTouchCallback(QnxTouchCallback);
   ui::SetQnxScreenKeyCallback(QnxKeyCallback);
   ui::SetQnxScreenExitCallback(QnxExitCallback);
+  ui::SetQnxScreenVisibilityCallback(QnxVisibilityCallback);
 }
 
 void ShellPlatformDelegate::CreatePlatformWindow(

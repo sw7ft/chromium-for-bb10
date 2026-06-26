@@ -205,3 +205,40 @@ needed since they're IPs), bypassing QNX getaddrinfo. enable_built_in_dns is
 already on (=use_blink), so no gn change. System resolver remains as fallback.
 Verified on-device: "built-in DNS client ON" marker, dns=53ms real resolution,
 zero -105/-109 over the run, WhatsApp committed error=0.
+
+## 11. Guaranteed exit on app close (no orphaned content_shell)
+
+Symptom: closing the app (Navigator swipe-up) sometimes left content_shell
+running in the background, draining CPU/RAM and slowing the next launch.
+
+Root cause: NAVIGATOR_EXIT (qnx_screen_event_source.cc) -> QnxExitCallback ->
+Shell::Shutdown(), which does a GRACEFUL teardown (Close all windows, then
+RunLoop().RunUntilIdle()). In --single-process the renderer shares the process,
+so a busy page (heavy JS, stuck present loop, spinning challenge) can keep the
+loop from going idle and the process never exits.
+
+FIX (shell_platform_delegate_qnx.cc QnxExitCallback + base/qnx_hard_watchdog.*):
+on NAVIGATOR_EXIT, arm StartQnxExitWatchdog(3000) -- a detached thread that
+_exit(0)s after 3s regardless of message-loop state (dumps all thread stacks on
+the deadline for diagnosis) -- then call Shell::Shutdown() and _exit(0)
+immediately after it returns instead of waiting on remaining loop iterations.
+Net: the app window closing ALWAYS tears down content_shell within ~3s worst
+case. This is a stability + perf win (no background CPU drain between sessions).
+
+## 12. Background throttle when thumbnailed/covered (NAVIGATOR_WINDOW_STATE)
+
+The QNX event loop handled only orientation + exit; it ignored
+NAVIGATOR_WINDOW_STATE. So when the app was swiped to the multitask card
+(THUMBNAIL) or covered by another app (INVISIBLE), Chromium still treated the
+page as VISIBLE and kept running requestAnimationFrame, timers, and compositing
+at full rate -- burning Krait cores in the background and competing with the
+foreground app.
+
+FIX: qnx_screen_event_source.cc now handles NAVIGATOR_WINDOW_STATE and forwards
+a visible bit (FULLSCREEN => visible, THUMBNAIL/INVISIBLE => hidden) via a new
+QnxScreenVisibilityCallback (qnx_screen_input_callback.*). QnxVisibilityCallback
+(shell_platform_delegate_qnx.cc) calls
+WebContents::UpdateWebContentsVisibility(VISIBLE/HIDDEN). HIDDEN throttles rAF,
+engages background-timer throttling, and stops paint/composite, handing CPU and
+battery back to the foreground app; returning to fullscreen restores VISIBLE.
+Smoke-verified: new binary launches/navigates/exits cleanly on-device.

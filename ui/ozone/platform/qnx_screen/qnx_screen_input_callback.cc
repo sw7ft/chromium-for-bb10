@@ -8,6 +8,7 @@ namespace {
 QnxScreenTouchCallback g_touch_callback = nullptr;
 QnxScreenKeyCallback g_key_callback = nullptr;
 QnxScreenExitCallback g_exit_callback = nullptr;
+QnxScreenVisibilityCallback g_visibility_callback = nullptr;
 }
 
 void SetQnxScreenTouchCallback(QnxScreenTouchCallback cb) {
@@ -32,6 +33,14 @@ void SetQnxScreenExitCallback(QnxScreenExitCallback cb) {
 
 QnxScreenExitCallback GetQnxScreenExitCallback() {
   return g_exit_callback;
+}
+
+void SetQnxScreenVisibilityCallback(QnxScreenVisibilityCallback cb) {
+  g_visibility_callback = cb;
+}
+
+QnxScreenVisibilityCallback GetQnxScreenVisibilityCallback() {
+  return g_visibility_callback;
 }
 
 }  // namespace ui

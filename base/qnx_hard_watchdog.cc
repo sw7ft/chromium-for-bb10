@@ -31,6 +31,7 @@ struct WatchdogState {
 
 WatchdogState g_commit_watchdog;
 WatchdogState g_boot_watchdog;
+WatchdogState g_exit_watchdog;
 
 // Before exiting on a deadline, ask every thread to dump its stack via the
 // SIGUSR2 sampler (registered in base/debug/stack_trace_posix.cc). On QNX a
@@ -114,6 +115,13 @@ void StartQnxBootWatchdog(int total_ms) {
 
 void CancelQnxBootWatchdog() {
   g_boot_watchdog.cancelled.store(true, std::memory_order_release);
+}
+
+void StartQnxExitWatchdog(int total_ms) {
+  // Dump thread stacks on the deadline so a teardown that hangs long enough to
+  // trip the watchdog leaves a diagnosable trace of what was stuck.
+  StartWatchdog(&g_exit_watchdog, total_ms, "ExitWatchdog",
+                /*dump_threads=*/true);
 }
 
 void QnxDumpAllThreadStacks() {
