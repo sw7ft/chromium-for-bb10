@@ -23,6 +23,7 @@
 #include "content/public/test/test_service.mojom.h"
 #include "content/shell/common/main_frame_counter_test_impl.h"
 #include "content/shell/common/power_monitor_test_impl.h"
+#include "content/shell/common/berry_adblock.h"
 #include "content/shell/common/shell_switches.h"
 #include "content/shell/renderer/shell_render_frame_observer.h"
 #include "mojo/public/cpp/bindings/binder_map.h"
@@ -158,6 +159,11 @@ class ShellContentRendererUrlLoaderThrottleProvider
       int render_frame_id,
       const blink::WebURLRequest& request) override {
     blink::WebVector<std::unique_ptr<blink::URLLoaderThrottle>> throttles;
+    // Ad/tracker blocking applies to every subresource (scripts, XHR/fetch,
+    // images, beacons), including worker-initiated ones, so it is added before
+    // the frame check. The throttle is stateless and thread-safe.
+    if (auto adblock = content::MaybeCreateBerryAdblockThrottle())
+      throttles.push_back(std::move(adblock));
     // Workers can call us on a background thread. We don't care about such
     // requests because we purposefully only look at resources from frames
     // that the user can interact with.`

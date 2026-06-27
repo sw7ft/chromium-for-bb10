@@ -171,6 +171,8 @@ static_library("content_shell_lib") {
     "browser/shell_speech_recognition_manager_delegate.h",
     "browser/shell_web_contents_view_delegate.h",
     "browser/shell_web_contents_view_delegate_creator.h",
+    "common/berry_adblock.cc",
+    "common/berry_adblock.h",
     "common/main_frame_counter_test_impl.cc",
     "common/main_frame_counter_test_impl.h",
     "common/power_monitor_test_impl.cc",

@@ -80,6 +80,7 @@
 #include "content/shell/browser/shell_paths.h"
 #include "content/shell/browser/shell_web_contents_view_delegate_creator.h"
 #include "content/shell/common/shell_controller.test-mojom.h"
+#include "content/shell/common/berry_adblock.h"
 #include "content/shell/common/shell_switches.h"
 #include "media/mojo/buildflags.h"
 #include "media/mojo/mojom/media_service.mojom.h"
@@ -531,6 +532,11 @@ ShellContentBrowserClient::CreateURLLoaderThrottles(
     NavigationUIData* navigation_ui_data,
     int frame_tree_node_id) {
   std::vector<std::unique_ptr<blink::URLLoaderThrottle>> result;
+
+  // Block navigations to ad/tracker hosts -- this is the path ad IFRAMES take
+  // (subresources are handled by the renderer's throttle provider).
+  if (auto adblock = MaybeCreateBerryAdblockThrottle())
+    result.push_back(std::move(adblock));
 
   auto* factory = custom_handlers::SimpleProtocolHandlerRegistryFactory::
       GetForBrowserContext(browser_context);
@@ -1011,6 +1017,25 @@ void ShellContentBrowserClient::ConfigureNetworkContextParamsForShell(
     }
     context_params->file_paths->http_cache_directory =
         context->GetPath().Append(FILE_PATH_LITERAL("Cache"));
+
+    // Persist cookies (and session cookies) to disk. content_shell defaults to
+    // an in-memory cookie store, so every launch is a brand-new cookieless
+    // client -- which Google treats as suspicious and bot-checks on *every*
+    // search, and which prevents the consent/NID/SOCS cookies and login
+    // sessions (Gmail) from ever sticking. Giving the network context a
+    // data_directory + cookie database name switches it to the on-disk SQLite
+    // store. Cookies are stored unencrypted because OSCrypt is not wired up on
+    // QNX (encrypted_cookies would otherwise fail to read/write).
+    context_params->file_paths->data_directory = context->GetPath();
+    context_params->file_paths->cookie_database_name =
+        base::FilePath(FILE_PATH_LITERAL("Cookies"));
+    context_params->file_paths->http_server_properties_file_name =
+        base::FilePath(FILE_PATH_LITERAL("Network Persistent State"));
+    context_params->file_paths->transport_security_persister_file_name =
+        base::FilePath(FILE_PATH_LITERAL("TransportSecurity"));
+    context_params->restore_old_session_cookies = true;
+    context_params->persist_session_cookies = true;
+    context_params->enable_encrypted_cookies = false;
   }
 #endif
   auto exempt_header =

@@ -242,3 +242,36 @@ WebContents::UpdateWebContentsVisibility(VISIBLE/HIDDEN). HIDDEN throttles rAF,
 engages background-timer throttling, and stops paint/composite, handing CPU and
 battery back to the foreground app; returning to fullscreen restores VISIBLE.
 Smoke-verified: new binary launches/navigates/exits cleanly on-device.
+
+## 13. Network-level ad/tracker blocking (the cheapest JS win)
+
+The biggest practical lever for GENERAL heavy sites (news/forums/blogs) is not
+making JS faster but running LESS of it: most third-party weight is ads /
+analytics / tag managers. Cancelling those requests before they load means the
+Krait never downloads, parses, or executes that code.
+
+Implementation (content/shell/common/berry_adblock.{h,cc}): a stateless
+blink::URLLoaderThrottle that cancels (ERR_BLOCKED_BY_CLIENT) any request whose
+host suffix-matches a curated EasyList/EasyPrivacy-derived core (~60 domains).
+Wired at BOTH interception points so all request types are covered:
+- renderer ShellContentRendererUrlLoaderThrottleProvider::CreateThrottles ->
+  subresources (scripts, XHR/fetch, images, beacons, incl. worker-initiated).
+- browser ShellContentBrowserClient::CreateURLLoaderThrottles -> ad IFRAMES
+  (which load via the navigation path).
+Suffix match is label-boundary aware, so "doubleclick.net" also blocks
+"securepubads.g.doubleclick.net". The list DELIBERATELY excludes functional /
+auth hosts (accounts/apis.google.com, *.gstatic.com, *.googleapis.com, social
+logins, CDNs) so Google sign-in and normal page function are unaffected.
+
+Default ON; disable on-device without a rebuild via BERRY_ADBLOCK=0 or a
+/accounts/1000/shared/misc/berry-adblock.disable marker. Set BERRY_ADBLOCK_LOG=1
+to log each block to stderr.
+
+Verified on-device (deploy/diag_adblock.html, BERRY_ADBLOCK_LOG=1): 4/4 ad hosts
+blocked (google-analytics, googletagmanager w/ query, securepubads.g.doubleclick
+subdomain, c.amazon-adsystem), 3/3 functional hosts passed (apis.google.com,
+gstatic, example.com). No crash.
+
+Follow-ups (not done): load full EasyList/EasyPrivacy filter lists (cosmetic +
+path rules, not just hosts) from a bundled file; a per-site allowlist; counting
+blocked bytes for a "data saved" readout.
