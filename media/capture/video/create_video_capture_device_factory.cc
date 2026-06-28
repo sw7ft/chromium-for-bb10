@@ -72,6 +72,19 @@ CreatePlatformSpecificVideoCaptureDeviceFactory(
   return std::make_unique<VideoCaptureDeviceFactoryFuchsia>();
 #elif BUILDFLAG(IS_IOS)
   return CreateFakeVideoCaptureDeviceFactory();
+#elif BUILDFLAG(IS_QNX)
+  // QNX/BB10 has no camera capture backend. Returning nullptr here crashes the
+  // video capture service, which dereferences the factory unconditionally
+  // (SIGSEGV on enumerateDevices() / getUserMedia({video})). Hand back a fake
+  // factory configured with zero devices, so camera enumeration reports nothing
+  // and {video} requests fail gracefully with NotFoundError instead of crashing
+  // (audio capture still uses the real QSA microphone).
+  {
+    auto factory = std::make_unique<FakeVideoCaptureDeviceFactory>();
+    factory->SetToCustomDevicesConfig(
+        std::vector<FakeVideoCaptureDeviceSettings>());
+    return factory;
+  }
 #else
   NOTIMPLEMENTED();
   return nullptr;

@@ -61,7 +61,7 @@ static void apply_x_load_profile(int* render_w,
                                  int* use_fps_limit_flag,
                                  char* profile_name,
                                  size_t profile_name_len) {
-  strncpy(profile_name, "default", profile_name_len);
+  strncpy(profile_name, "default(1440)", profile_name_len);
 
   if (marker_exists("berry-x-lite.enable")) {
     *render_w = 420;
@@ -81,6 +81,19 @@ static void apply_x_load_profile(int* render_w,
     *render_w = 540;
     *render_h = 540;
     strncpy(profile_name, "540", profile_name_len);
+  }
+  if (marker_exists("berry-x-720.enable")) {
+    *render_w = 720;
+    *render_h = 720;
+    strncpy(profile_name, "720", profile_name_len);
+  }
+  /* Native panel resolution: 1440² render with no downscale (sharpest, but the
+   * heaviest -- 4x the pixels of 720). The output size below already tops out at
+   * 1440, so render==output is 1:1. */
+  if (marker_exists("berry-x-1440.enable")) {
+    *render_w = 1440;
+    *render_h = 1440;
+    strncpy(profile_name, "1440", profile_name_len);
   }
   if (marker_exists("berry-x-slow10.enable")) {
     *max_fps = 10;
@@ -296,7 +309,10 @@ int main(int argc, char** argv) {
   /* Orientation correction for the Navigator-composited window (overridable). */
   setenv("QNX_SCREEN_ROTATION", kRotation, 0);
 
-  int render_w = 720, render_h = 720;
+  /* Default render resolution is 1440² (native Passport panel, no downscale =
+   * sharpest). Override with berry-x-420 / berry-x-720 / berry-x-1440 markers
+   * (Settings > Display). 1440 is the heaviest (4x the pixels of 720). */
+  int render_w = 1440, render_h = 1440;
   int max_fps = 0; /* 0 = no QNX_MAX_FPS env (Viz default 60 = uncapped) */
   int raster_threads = 4;
   int use_fps_limit_flag = 0; /* 0 => --disable-frame-rate-limit (current default) */
@@ -337,10 +353,30 @@ int main(int argc, char** argv) {
   char shell[2100];
   snprintf(shell, sizeof(shell), "%s/content_shell.exe", dir);
 
-  /* Default start URL: bundled home.html in the native asset dir (omnibox +
-   * quick links). Override with the first launcher argument. */
+  /* Landing page resolution (highest priority first):
+   *   1. berry-home-url (text marker): an explicit start URL. A bare host like
+   *      "example.com" gets https:// prepended; anything with a scheme
+   *      (http://, https://, file://) is used verbatim.
+   *   2. berry-home.html in shared/misc: a user-editable landing page that
+   *      overrides the bundled one without repackaging the .bar.
+   *   3. bundled home.html in the native asset dir (default).
+   * The first launcher argument still wins over all of these. */
   char default_url[2300];
-  snprintf(default_url, sizeof(default_url), "file://%s/home.html", dir);
+  static char home_url_buf[2048];
+  if (read_marker_text("berry-home-url", home_url_buf, sizeof(home_url_buf))) {
+    if (strstr(home_url_buf, "://"))
+      snprintf(default_url, sizeof(default_url), "%s", home_url_buf);
+    else
+      snprintf(default_url, sizeof(default_url), "https://%s", home_url_buf);
+    fprintf(stderr, "BerryShell: landing = berry-home-url %s\n", default_url);
+  } else if (access("/accounts/1000/shared/misc/berry-home.html", F_OK) == 0) {
+    snprintf(default_url, sizeof(default_url),
+             "file:///accounts/1000/shared/misc/berry-home.html");
+    fprintf(stderr, "BerryShell: landing = custom berry-home.html\n");
+  } else {
+    snprintf(default_url, sizeof(default_url), "file://%s/home.html", dir);
+    fprintf(stderr, "BerryShell: landing = bundled home.html\n");
+  }
   const char* url = (argc > 1 && argv[1] && argv[1][0]) ? argv[1] : default_url;
 
   /* Mobile-first identity. We present as Android Chrome by default so sites
@@ -353,6 +389,20 @@ int main(int argc, char** argv) {
   int use_mobile_ua = !marker_exists("berry-desktop.enable");
   fprintf(stderr, "BerryShell: default ua = %s\n",
           use_mobile_ua ? "mobile" : "desktop");
+
+  /* Custom user-agent override. Write the desired UA string into
+   * shared/misc/berry-ua (single line) to spoof any device/browser. It wins
+   * over the mobile/desktop default and suppresses --use-mobile-user-agent so
+   * the requested string is sent verbatim. No content_shell rebuild needed. */
+  static char ua_buf[1024];
+  static char ua_arg[1056];
+  int use_custom_ua = 0;
+  if (read_marker_text("berry-ua", ua_buf, sizeof(ua_buf))) {
+    snprintf(ua_arg, sizeof(ua_arg), "--user-agent=%s", ua_buf);
+    use_custom_ua = 1;
+    use_mobile_ua = 0;
+    fprintf(stderr, "BerryShell: custom ua = %s\n", ua_buf);
+  }
 
   char subprocess_path[2300];
   snprintf(subprocess_path, sizeof(subprocess_path),
@@ -374,7 +424,7 @@ int main(int argc, char** argv) {
    * binary) rather than the content_shell.bin log-and-exec wrapper: the wrapper
    * does no env setup and only adds an extra execv hop that silently failed for
    * children (they spawned but never reached main()). */
-  char* argv_buf[48];
+  char* argv_buf[56];
   int n = 0;
   argv_buf[n++] = shell;
   argv_buf[n++] = (char*)"--no-sandbox";
@@ -404,16 +454,40 @@ int main(int argc, char** argv) {
    * system trust store; full verify is slow and race-prone). TLS still encrypts;
    * only certificate validation is bypassed. See deploy/HARDENING.md. */
   argv_buf[n++] = (char*)"--ignore-certificate-errors";
-  /* X.com probes camera/mic during module load; stub media to avoid crashing
-   * the default WebContentsDelegate path on QNX before permissions exist. */
+  /* Auto-grant getUserMedia permission without a prompt: content_shell has no
+   * permission UI, and this routes requests through the fake UI proxy instead
+   * of the default WebContentsDelegate path (which is unimplemented on QNX and
+   * would otherwise NOTREACHED/crash when e.g. X.com probes camera/mic at load).
+   * --use-fake-device-for-media-stream is gated on a marker file so the real
+   * QSA microphone (QsaInputStream) can be enabled per-device once the app
+   * holds the BB10 record_audio permission; absent the marker we keep the fake
+   * device so mic/camera probes never hit an unsupported real-capture path. */
   argv_buf[n++] = (char*)"--use-fake-ui-for-media-stream";
-  argv_buf[n++] = (char*)"--use-fake-device-for-media-stream";
+  if (access("/accounts/1000/shared/misc/berry-mic.enable", F_OK) != 0) {
+    argv_buf[n++] = (char*)"--use-fake-device-for-media-stream";
+  }
   /* NOTE: do NOT enable --remote-debugging-port here. It puts Chromium into
    * automation-controlled mode, which sets navigator.webdriver=true (a hard
    * bot signal that trips Google's secure-browser / reCAPTCHA checks) and
    * opens a CDP port. The renderer shim also forces navigator.webdriver=false,
    * but keeping this flag off removes the underlying signal entirely. */
-  argv_buf[n++] = (char*)"--disable-quic";
+  /* QUIC A/B: default off (historical stability), berry-quic.enable turns it on.
+   * Now that DNS is reliable (built-in resolver), HTTP/3 0-RTT may cut connect
+   * latency to Meta/Cloudflare CDNs. */
+  if (!marker_exists("berry-quic.enable")) {
+    argv_buf[n++] = (char*)"--disable-quic";
+  } else {
+    fprintf(stderr, "BerryShell: QUIC = enabled (berry-quic.enable)\n");
+  }
+  /* Telemetry blackhole A/B: berry-block.enable maps known non-essential Meta/
+   * WhatsApp logging hosts to 0.0.0.0 so they fail fast instead of consuming
+   * CPU, connections and DNS during the load-critical window. Conservative list
+   * (crash-log upload only) so the chat UI is never affected. */
+  if (marker_exists("berry-block.enable")) {
+    argv_buf[n++] = (char*)"--host-resolver-rules=MAP crashlogs.whatsapp.net "
+                           "0.0.0.0,MAP *.crashlogs.whatsapp.net 0.0.0.0";
+    fprintf(stderr, "BerryShell: telemetry blocklist = on (berry-block.enable)\n");
+  }
   /* No screen reader exists on BB10, so skip building and maintaining the
    * renderer accessibility tree. On heavy SPAs that tree is rebuilt on every
    * DOM mutation -- pure CPU we can hand back to the bootstrap JS. */
@@ -470,6 +544,8 @@ int main(int argc, char** argv) {
    * viewport layout. */
   if (use_mobile_ua)
     argv_buf[n++] = (char*)"--use-mobile-user-agent";
+  if (use_custom_ua)
+    argv_buf[n++] = ua_arg;
   /* Optional V8 flag passthrough for tuning experiments (e.g. WASM compile
    * levers). Write the flag string into shared/misc/berry-jsflags and relaunch;
    * no content_shell rebuild needed. Example contents:
@@ -481,6 +557,36 @@ int main(int argc, char** argv) {
       snprintf(jsflags_arg, sizeof(jsflags_arg), "--js-flags=%s", jsflags_buf);
       argv_buf[n++] = jsflags_arg;
       fprintf(stderr, "BerryShell: js-flags = %s\n", jsflags_buf);
+    }
+  }
+  /* Content/render settings driven by .bar markers, no rebuild needed. These
+   * map to Blink's built-in Settings via the canonical --blink-settings switch
+   * (a comma-separated name=value list applied on top of WebPreferences), so
+   * they survive the QNX OverrideWebkitPrefs pass:
+   *   berry-noimages.enable -> imagesEnabled=false      (stop image fetch/decode)
+   *   berry-nojs.enable     -> scriptEnabled=false      (disable JavaScript)
+   *   berry-dark.enable     -> forceDarkModeEnabled=true (force dark rendering)
+   * Combined into a single switch so multiple toggles can co-exist. */
+  {
+    static char blink_arg[256];
+    char settings[224];
+    settings[0] = '\0';
+    if (marker_exists("berry-noimages.enable"))
+      strncat(settings, "imagesEnabled=false,",
+              sizeof(settings) - strlen(settings) - 1);
+    if (marker_exists("berry-nojs.enable"))
+      strncat(settings, "scriptEnabled=false,",
+              sizeof(settings) - strlen(settings) - 1);
+    if (marker_exists("berry-dark.enable"))
+      strncat(settings, "forceDarkModeEnabled=true,",
+              sizeof(settings) - strlen(settings) - 1);
+    size_t sl = strlen(settings);
+    if (sl > 0) {
+      if (settings[sl - 1] == ',')
+        settings[sl - 1] = '\0'; /* strip trailing comma */
+      snprintf(blink_arg, sizeof(blink_arg), "--blink-settings=%s", settings);
+      argv_buf[n++] = blink_arg;
+      fprintf(stderr, "BerryShell: blink-settings = %s\n", settings);
     }
   }
   argv_buf[n++] = (char*)url;

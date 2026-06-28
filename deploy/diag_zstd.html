@@ -1,0 +1,13 @@
+<!doctype html>
+<html><head><meta charset="utf-8"></head><body><h2>zstd diag</h2>
+<script>
+function L(m){ console.log('ZSTD: ' + m); }
+L('start');
+fetch('http://127.0.0.1:8799/plain').then(function(r){return r.text();})
+  .then(function(t){ var ok=false; try{JSON.parse(t);ok=true;}catch(e){} L('PLAIN -> ' + (ok?'OK json':'NOT json') + ' firstbytes=' + JSON.stringify(t.slice(0,28))); })
+  .catch(function(e){ L('PLAIN FAIL ' + e); });
+
+fetch('http://127.0.0.1:8799/zstd').then(function(r){return r.text();})
+  .then(function(t){ var ok=false; try{JSON.parse(t);ok=true;}catch(e){} L('ZSTD -> ' + (ok?'OK json (DECODER WORKS)':'NOT json (DECODER BROKEN)') + ' firstbytes=' + JSON.stringify(t.slice(0,28))); })
+  .catch(function(e){ L('ZSTD FAIL ' + e); });
+</script></body></html>

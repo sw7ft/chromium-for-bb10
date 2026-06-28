@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+<head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="font-family:sans-serif">
+<h2>worker diag</h2>
+<script>
+function L(m){ console.log('WRK: ' + m); }
+L('start');
+
+// SharedArrayBuffer / crossOriginIsolated (YouTube sometimes checks these)
+L('SharedArrayBuffer present: ' + (typeof SharedArrayBuffer !== 'undefined'));
+L('crossOriginIsolated: ' + (typeof crossOriginIsolated !== 'undefined' ? crossOriginIsolated : 'undef'));
+L('WebAssembly present: ' + (typeof WebAssembly !== 'undefined'));
+
+// Dedicated Worker via blob
+try {
+  var code = "onmessage=function(e){postMessage('echo:'+e.data);};postMessage('worker-booted');";
+  var blob = new Blob([code], {type:'application/javascript'});
+  var url = URL.createObjectURL(blob);
+  var w = new Worker(url);
+  var got = false;
+  var to = setTimeout(function(){ if(!got) L('DEDICATED WORKER TIMEOUT (no message in 6s) -- WORKERS BROKEN'); }, 6000);
+  w.onmessage = function(e){ got = true; L('dedicated worker msg: ' + e.data); if(e.data.indexOf('echo')===0) clearTimeout(to); };
+  w.onerror = function(e){ L('dedicated worker ERROR: ' + (e.message||e) + ' @' + e.filename + ':' + e.lineno); };
+  w.postMessage('hello');
+  L('dedicated worker created, posted hello');
+} catch(e){ L('dedicated Worker THREW: ' + e); }
+
+// Service worker availability (registration needs https; just report presence)
+L('navigator.serviceWorker present: ' + ('serviceWorker' in navigator));
+
+// WebAssembly instantiate (YouTube player ships wasm)
+try {
+  // minimal wasm module: (module)
+  var bytes = new Uint8Array([0,97,115,109,1,0,0,0]);
+  WebAssembly.instantiate(bytes).then(function(){ L('wasm instantiate OK'); })
+    .catch(function(e){ L('wasm instantiate FAILED: ' + e); });
+} catch(e){ L('wasm THREW: ' + e); }
+</script>
+</body>
+</html>

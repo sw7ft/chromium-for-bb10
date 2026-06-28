@@ -1,0 +1,62 @@
+<!doctype html>
+<html><head><meta charset="utf-8"></head><body><h2>botguard-api diag</h2>
+<script>
+function L(m){ console.log('BG: ' + m); }
+L('start');
+
+// 1) OfflineAudioContext audio fingerprint (reCAPTCHA/BotGuard uses this).
+(function(){
+  var t0 = Date.now();
+  try {
+    var OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if (!OAC) { L('OfflineAudioContext: MISSING'); return; }
+    var ctx = new OAC(1, 44100, 44100);
+    var osc = ctx.createOscillator();
+    osc.type = 'triangle'; osc.frequency.value = 10000;
+    var comp = ctx.createDynamicsCompressor();
+    osc.connect(comp); comp.connect(ctx.destination);
+    osc.start(0);
+    var watchdog = setTimeout(function(){ L('OfflineAudioContext: HANG (no rendercomplete in 8s) -- LIKELY BOTGUARD STALL'); }, 8000);
+    ctx.oncomplete = function(e){ clearTimeout(watchdog); L('OfflineAudioContext: rendered in ' + (Date.now()-t0) + 'ms, samples=' + e.renderedBuffer.length); };
+    ctx.startRendering();
+    L('OfflineAudioContext: startRendering called');
+  } catch(e){ L('OfflineAudioContext THREW ' + e); }
+})();
+
+// 2) Canvas 2D fingerprint
+(function(){
+  var t0 = Date.now();
+  try {
+    var c = document.createElement('canvas'); c.width=220; c.height=30;
+    var x = c.getContext('2d');
+    x.textBaseline='top'; x.font="14px Arial"; x.fillStyle='#f60'; x.fillRect(0,0,100,20);
+    x.fillStyle='#069'; x.fillText('BotGuard,Cwm fjordbank',2,15);
+    var d = c.toDataURL();
+    L('Canvas2D: OK len=' + d.length + ' in ' + (Date.now()-t0) + 'ms');
+  } catch(e){ L('Canvas2D THREW ' + e); }
+})();
+
+// 3) WebGL fingerprint
+(function(){
+  var t0 = Date.now();
+  try {
+    var c = document.createElement('canvas');
+    var gl = c.getContext('webgl') || c.getContext('experimental-webgl');
+    if (!gl) { L('WebGL: MISSING (no context)'); return; }
+    var dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    var r = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : '(no ext)';
+    L('WebGL: OK renderer=' + r + ' in ' + (Date.now()-t0) + 'ms');
+  } catch(e){ L('WebGL THREW ' + e); }
+})();
+
+// 4) AudioContext (realtime) creation
+(function(){
+  var t0 = Date.now();
+  try {
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) { L('AudioContext: MISSING'); return; }
+    var ac = new AC();
+    L('AudioContext: state=' + ac.state + ' sr=' + ac.sampleRate + ' in ' + (Date.now()-t0) + 'ms');
+  } catch(e){ L('AudioContext THREW ' + e); }
+})();
+</script></body></html>

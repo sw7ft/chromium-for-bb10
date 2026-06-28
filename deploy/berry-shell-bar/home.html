@@ -6,33 +6,65 @@
 <title>Berry Browser</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: rgba(0,0,0,0); }
-  html, body { margin: 0; padding: 0; height: 100%;
+  html, body { margin: 0; padding: 0; min-height: 100%;
     font-family: -apple-system, "Slate Pro", Arial, sans-serif;
-    background: #11161c; color: #e8eef5; }
-  .wrap { max-width: 680px; margin: 0 auto; padding: 28px 20px; }
-  .logo { text-align: center; font-size: 40px; font-weight: 700;
-    letter-spacing: .5px; margin: 18px 0 6px; }
-  .logo span { color: #4aa3ff; }
-  .tag { text-align: center; color: #7e8a99; font-size: 16px; margin-bottom: 26px; }
-  form { display: flex; gap: 10px; margin-bottom: 10px; }
-  #omni { flex: 1; font-size: 26px; padding: 16px 18px; border-radius: 12px;
+    color: #e8eef5;
+    background: radial-gradient(1200px 600px at 50% -10%, #1b2942 0%, #0e131a 60%);
+  }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 22px 18px 40px; }
+
+  .bar { display: flex; align-items: center; gap: 10px; margin-bottom: 22px; }
+  .brand { font-size: 30px; font-weight: 800; letter-spacing: .3px; }
+  .brand span { color: #4aa3ff; }
+  .bar .spacer { flex: 1; }
+  .icobtn { display: inline-flex; align-items: center; justify-content: center;
+    width: 48px; height: 48px; border-radius: 12px; font-size: 24px;
+    text-decoration: none; color: #cdd8e4; background: #18222e;
+    border: 1px solid #27333f; }
+  .icobtn:active { background: #223040; }
+
+  form { display: flex; gap: 10px; margin-bottom: 8px; }
+  #omni { flex: 1; font-size: 26px; padding: 17px 18px; border-radius: 14px;
     border: 2px solid #2b3744; background: #0b0f14; color: #fff; outline: none; }
   #omni:focus { border-color: #4aa3ff; }
-  #go { font-size: 24px; padding: 0 24px; border: none; border-radius: 12px;
-    background: #4aa3ff; color: #06243f; font-weight: 700; }
-  .hint { text-align: center; color: #5a6776; font-size: 14px; margin-bottom: 26px; }
-  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-  .tile { display: block; text-decoration: none; text-align: center;
-    padding: 22px 8px; border-radius: 14px; background: #1b2530; color: #dce6f1;
-    font-size: 20px; border: 1px solid #26333f; }
-  .tile b { display: block; font-size: 30px; margin-bottom: 6px; }
-  .tile:active { background: #24323f; }
+  #go { font-size: 24px; padding: 0 26px; border: none; border-radius: 14px;
+    background: #4aa3ff; color: #06243f; font-weight: 800; }
+  .hint { text-align: center; color: #5f6e7d; font-size: 14px; margin: 6px 0 26px; }
+
+  .sec { font-size: 13px; letter-spacing: .1em; text-transform: uppercase;
+    color: #61707f; margin: 0 4px 12px; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 13px; }
+  .tile { display: flex; flex-direction: column; align-items: center; gap: 8px;
+    text-decoration: none; text-align: center; padding: 18px 6px;
+    border-radius: 16px; background: #161f2b; color: #dce6f1;
+    font-size: 15px; border: 1px solid #243140; }
+  .tile:active { background: #1f2c3a; }
+  .ic { width: 46px; height: 46px; border-radius: 13px; display: flex;
+    align-items: center; justify-content: center; font-size: 24px;
+    font-weight: 700; color: #fff; }
+  .g{background:#4285f4}.k{background:#1a73e8}.w{background:#636466}
+  .y{background:#ff0000}.b{background:#bb1919}.h{background:#ff6600}
+  .d{background:#de5833}.x{background:#222}.wa{background:#25d366}
+  .f{background:#1877f2}.r{background:#1da1f2}.n{background:#834bff}
+
+  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 13px;
+    margin-top: 22px; }
+  .act { display: flex; align-items: center; justify-content: center; gap: 10px;
+    text-decoration: none; padding: 18px; border-radius: 16px; font-size: 20px;
+    font-weight: 700; }
+  .act.set { background: #1e2a3a; color: #cfe0f3; border: 1px solid #2c3e54; }
+  .act.res { background: #2a2030; color: #f0d6ea; border: 1px solid #4f3a52; }
+  .act:active { filter: brightness(1.15); }
 </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="logo">Berry<span>Browser</span></div>
-    <div class="tag">Chromium 120 on BlackBerry 10</div>
+    <div class="bar">
+      <div class="brand">Berry<span>Browser</span></div>
+      <div class="spacer"></div>
+      <a class="icobtn" href="https://berry.settings/" title="Settings">&#9881;</a>
+      <a class="icobtn" href="https://berry.restart/" title="Restart">&#8635;</a>
+    </div>
 
     <form id="f">
       <input id="omni" type="text" inputmode="url" autocomplete="off"
@@ -40,19 +72,27 @@
              placeholder="Search or type a URL">
       <button id="go" type="submit">Go</button>
     </form>
-    <div class="hint">Type an address (example.com) or a search, then press Enter</div>
+    <div class="hint">Type an address or a search, then press Enter</div>
 
+    <div class="sec">Quick links</div>
     <div class="grid">
-      <a class="tile" href="https://www.google.com/"><b>G</b>Google</a>
-      <a class="tile" href="https://accounts.google.com/"><b>🔑</b>Google Sign-in</a>
-      <a class="tile" href="https://en.wikipedia.org/"><b>W</b>Wikipedia</a>
-      <a class="tile" href="https://www.youtube.com/"><b>▶</b>YouTube</a>
-      <a class="tile" href="https://www.bbc.com/news"><b>📰</b>BBC News</a>
-      <a class="tile" href="https://news.ycombinator.com/"><b>Y</b>Hacker News</a>
-      <a class="tile" href="https://duckduckgo.com/"><b>🦆</b>DuckDuckGo</a>
-      <a class="tile" href="https://x.com/"><b>X</b>X</a>
-      <a class="tile" href="https://web.whatsapp.com/"><b>💬</b>WhatsApp</a>
-      <a class="tile" href="https://m.facebook.com/"><b>f</b>Facebook</a>
+      <a class="tile" href="https://www.google.com/"><span class="ic g">G</span>Google</a>
+      <a class="tile" href="https://accounts.google.com/"><span class="ic k">&#128273;</span>Sign-in</a>
+      <a class="tile" href="https://en.wikipedia.org/"><span class="ic w">W</span>Wikipedia</a>
+      <a class="tile" href="https://www.youtube.com/"><span class="ic y">&#9658;</span>YouTube</a>
+      <a class="tile" href="https://www.bbc.com/news"><span class="ic b">B</span>BBC</a>
+      <a class="tile" href="https://news.ycombinator.com/"><span class="ic h">Y</span>HN</a>
+      <a class="tile" href="https://duckduckgo.com/"><span class="ic d">&#129414;</span>DuckDuckGo</a>
+      <a class="tile" href="https://x.com/"><span class="ic x">X</span>X</a>
+      <a class="tile" href="https://web.whatsapp.com/"><span class="ic wa">&#128172;</span>WhatsApp</a>
+      <a class="tile" href="https://m.facebook.com/"><span class="ic f">f</span>Facebook</a>
+      <a class="tile" href="https://www.reddit.com/"><span class="ic n">r</span>Reddit</a>
+      <a class="tile" href="https://www.google.com/maps"><span class="ic g">&#128205;</span>Maps</a>
+    </div>
+
+    <div class="actions">
+      <a class="act set" href="https://berry.settings/">&#9881; Settings</a>
+      <a class="act res" href="https://berry.restart/">&#8635; Restart</a>
     </div>
   </div>
 
@@ -63,11 +103,11 @@
     e.preventDefault();
     var v = (omni.value || '').trim();
     if (!v) return;
-    var isUrl = /^[a-z]+:\/\//i.test(v) ||
-      (/^[^\s]+\.[^\s]{2,}/.test(v) && !/\s/.test(v));
+    var hasScheme = /^[a-z]+:\/\//i.test(v);
+    var looksUrl = /^[^\s]+\.[^\s]{2,}/.test(v) && !/\s/.test(v);
     var dest;
-    if (/^[a-z]+:\/\//i.test(v)) dest = v;
-    else if (isUrl) dest = 'https://' + v;
+    if (hasScheme) dest = v;
+    else if (looksUrl) dest = 'https://' + v;
     else dest = 'https://www.google.com/search?q=' + encodeURIComponent(v);
     window.location.href = dest;
   });

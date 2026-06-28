@@ -275,3 +275,120 @@ gstatic, example.com). No crash.
 Follow-ups (not done): load full EasyList/EasyPrivacy filter lists (cosmetic +
 path rules, not just hosts) from a bundled file; a per-site allowlist; counting
 blocked bytes for a "data saved" readout.
+
+## 14. PartitionAlloc-as-malloc: builds + links, but hangs at startup (PARKED)
+
+Goal: route malloc/new through PartitionAlloc (faster, lower-fragmentation than
+the QNX system malloc -- a direct win for allocation-heavy JS/DOM on the Krait).
+
+State of the world: use_partition_alloc=true already (PA lib compiles & runs on
+QNX for its internal partitions). PA-as-malloc additionally needs the allocator
+shim, which a gn assert blocked on QNX and which had no QNX code.
+
+Build enablement (DONE, links cleanly):
+- partition_alloc.gni: add is_qnx to the use_allocator_shim assert allowlist.
+- shim/allocator_shim.cc: no change -- QNX already routes to cpp_symbols +
+  (via #else) libc_symbols; glibc_weak_symbols is gated behind LIBC_GLIBC, and
+  allocator_shim_internals.h falls back to empty/noexcept __THROW off glibc.
+- shim BUILD.gn: add an is_qnx branch listing cpp_symbols + libc_symbols.
+- allocator_shim_override_libc_symbols.h: the ONLY source conflict was cfree --
+  QNX declares `int cfree(void*)`, not void, so guard an int-returning override
+  for IS_QNX (functions can't differ only by return type).
+- build_overrides/partition_alloc.gni: `|| is_qnx` flips both defaults on.
+With those, gn reports use_allocator_shim=true, use_partition_alloc_as_malloc=
+true, BRP off, and content_shell builds and LINKS with no undefined symbols.
+
+Runtime BLOCKER (why it's parked): the linked binary wedges in very early PA
+init. content_shell launches with a SINGLE thread (tid 1) pegged at ~100% CPU
+(utime climbs ~1s/s) and emits ZERO output -- it never reaches thread-pool /
+logging / SIGUSR2-sampler setup, so no on-device backtrace is obtainable (no
+gdbserver deployed). SpinningMutex uses a pthread mutex on QNX (POSIX fast
+mutex), so the spin is NOT the lock; most likely the 32-bit PartitionAddressSpace
+/ pool reservation or an early CAS/retry loop that needs a genuine PA-internals
+port for 32-bit QNX (has_64_bit_pointers=false). Reverted to system malloc so the
+browser keeps working; the inert enablement (assert allowlist, cfree fix, shim
+BUILD.gn branch) is kept. To retry: re-add `|| is_qnx` in build_overrides, deploy
+gdbserver + cross-gdb, and backtrace the spinning thread.
+
+## 15. Self-contained .bar + user-facing settings via launcher markers
+
+The browser now ships as one self-contained `.bar`
+(`deploy/berry-shell-bar/BerryBrowser.bar`, descriptor `bar-descriptor.xml`)
+built with the BB10 NDK packager:
+```
+source /root/bbndk/bbndk-env_10_3_1_995.sh
+cd deploy/berry-shell-bar
+bash ../build-launcher.sh                 # rebuild launcher (QNX ARM)
+# refresh payload/ from out/qnx-arm (content_shell + paks + snapshot + icu)
+blackberry-nativepackager -package BerryBrowser.bar bar-descriptor.xml
+```
+
+Two correctness fixes made the .bar work on a CLEAN install (no SSH hot-swap):
+- The descriptor now stages the engine as `content_shell.exe` (the launcher
+  execs `<dir>/content_shell.exe`); previously it shipped as `content_shell`,
+  so a fresh install only ran after `deploy-binary.sh` pushed `.exe` over SSH.
+- `payload/` is refreshed from the current `out/qnx-arm` build so the bundled
+  binary carries the ad-block + guaranteed-exit + background-throttle work
+  (the staged payload had been stale from the mic build).
+
+Settings are exposed as **launcher marker files** in
+`/accounts/1000/shared/misc/` (read each app start, mapped to built-in Chromium
+switches, no rebuild needed). New in launcher.c:
+- `berry-noimages.enable` -> `--blink-settings=imagesEnabled=false`
+- `berry-nojs.enable`     -> `--blink-settings=scriptEnabled=false`
+- `berry-dark.enable`     -> `--blink-settings=forceDarkModeEnabled=true`
+- `berry-ua` (text)       -> `--user-agent=<verbatim>` (suppresses mobile-UA)
+Multiple content/appearance toggles coalesce into one `--blink-settings`.
+Full reference: `deploy/berry-shell-bar/BROWSER-SETTINGS.md`.
+
+## 16. BerryBrowserV3: in-app restart, resolution presets, custom landing page
+
+Shipped as a SEPARATE package (`bar-descriptor-v3.xml`,
+id `com.sw7ft.BerryShellV3`, name `BerryBrowserV3`, output `BerryBrowserV3.bar`)
+so it installs alongside the existing app instead of replacing it.
+
+In-app "Restart browser" (so a resolution change can be applied without manually
+closing/reopening). Design choice: keep the PROVEN pid model. The launcher still
+`execv`s content_shell (content_shell stays the Navigator-launched pid that owns
+the qnx_screen window group `berryshell_<pid>`), and RESTART is done engine-side:
+- shell.cc `DidStartNavigation`: a navigation to host `berry.restart` posts
+  `BerryRestartRelaunch()` (deferred off the observer callback).
+- `BerryRestartRelaunch()`: arms the exit watchdog, `Shell::Shutdown()` (releases
+  the window/group cleanly), then `execv("<dir>/launcher")` — same pid, so the
+  relaunch re-reads every marker (resolution/landing/UA/flags) with the proven
+  window model. Falls back to `_exit(42)` if exec fails.
+- The Restart control lives in the .bar's `home.html` (a tile -> berry.restart),
+  matching the "URL/controls shipped in the .bar" intent. URL bar `berry.restart`
+  works too. (A launcher fork-supervisor was rejected: it would make even the
+  FIRST launch's window come from a child pid — too risky for the primary path.)
+
+Why the URL bar stays in content_shell: it's a Skia toolbar composited with the
+page (`berry_browser_chrome.cc`); the launcher has no window. A native overlay
+toolbar would be a large QNX windowing rewrite for no real gain.
+
+Resolution presets (launcher markers, apply on Restart): `berry-x-420` /
+`berry-x-720` (default) / `berry-x-1440` (native panel, no downscale).
+
+Custom landing page (launcher, no rebuild): `berry-home-url` (text start URL,
+bare host gets https://) > `berry-home.html` in shared/misc (editable) > bundled
+home.html.
+
+## 17. In-app Settings page (engine-served) + 1440 default
+
+Replaces the "edit marker files over SSH" flow with a real on-device Settings UI,
+since web pages are sandboxed and can't write shared/misc but content_shell can.
+Same sentinel pattern as restart, all in shell.cc `DidStartNavigation` (QNX):
+- `berry.settings` -> engine builds an HTML page from the CURRENT marker state
+  (BerryBuildSettingsHtml), writes it to `shared/misc/.berry-settings.html`, and
+  LoadURLs it. Toggles/switches are links/forms to `berry.set`.
+- `berry.set?k=KEY&v=VAL` -> BerryHandleSet writes/removes the marker
+  (BerrySetMarker / BerrySetTextMarker for ua/home), then re-renders the page so
+  state is always accurate. Resolution radio clears berry-x-* then sets the chosen
+  one. Adblock toggle maps to presence of berry-adblock.disable (inverted).
+- `berry.home` -> loads the bundled home.html (derives app dir from exefile).
+Settings are startup flags, so the page has an "Apply & Restart" button
+(-> berry.restart). Landing page (home.html) redesigned with a gear (Settings)
+and restart button + Settings/Restart action tiles.
+
+Default resolution is now 1440² (launcher render default; native panel, no
+downscale). Override in Settings > Display (420/720/1440).

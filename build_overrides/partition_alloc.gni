@@ -60,6 +60,17 @@ if ((is_linux || is_chromeos || is_android || is_apple ||
      (is_win && !is_component_build && !is_debug)) && !_is_using_sanitizers) {
   _default_use_allocator_shim = true
 } else {
+  # QNX/BB10: PA-as-malloc is DISABLED. The build enablement works (links
+  # cleanly -- see the assert allowlist in partition_alloc.gni, the cfree
+  # int-return fix, and the is_qnx override-symbol branch in the shim BUILD.gn),
+  # but at runtime content_shell wedges in very early PartitionAlloc init: one
+  # thread pegs a core at ~100% before the thread pools, logging, or the
+  # SIGUSR2 stack sampler come up (so no backtrace is obtainable on-device, and
+  # there is no gdbserver deployed). SpinningMutex uses a pthread mutex on QNX
+  # (POSIX fast-mutex), so the spin is elsewhere -- most likely the 32-bit
+  # PartitionAddressSpace / pool reservation or an early CAS/retry loop that
+  # needs a real PA-internals port for 32-bit QNX. To retry: add `|| is_qnx` to
+  # the condition above, deploy gdbserver, and backtrace the spinning thread.
   _default_use_allocator_shim = false
 }
 

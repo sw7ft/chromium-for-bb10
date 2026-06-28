@@ -325,6 +325,25 @@ bool IsDolbyVisionProfileSupported(const VideoType& type) {
 #endif
 }
 
+#if BUILDFLAG(IS_QNX)
+// On QNX/BB10 (32-bit Krait, software decode only) AV1 is far too expensive to
+// decode in real time, and there is always a lighter alternative (H.264 on the
+// desktop site, VP9 elsewhere), so hide AV1 from capability queries.
+//
+// VP9, in contrast, must stay advertised: the mobile YouTube site (m.youtube.com)
+// and short-form content (Shorts, FB/IG reels) frequently ship VP9-only streams.
+// Hiding VP9 there yields "no supported source" and playback never starts. VP9 is
+// heavier than H.264 in software, but the media pipeline still prefers H.264 when a
+// site offers both, so we keep VP9 as the universal fallback.
+//
+// --berry-allow-av1 restores AV1 advertisement for A/B testing.
+bool BerryHideAV1() {
+  static const bool hide = !base::CommandLine::ForCurrentProcess()->HasSwitch(
+      "berry-allow-av1");
+  return hide;
+}
+#endif  // BUILDFLAG(IS_QNX)
+
 }  // namespace
 
 bool IsSupportedAudioType(const AudioType& type) {
@@ -357,6 +376,10 @@ bool IsDefaultSupportedVideoType(const VideoType& type) {
     case VideoCodec::kVP8:
       return true;
     case VideoCodec::kAV1:
+#if BUILDFLAG(IS_QNX)
+      if (BerryHideAV1())
+        return false;
+#endif
       return IsAV1Supported(type);
     case VideoCodec::kVP9:
       return IsVp9ProfileSupported(type);

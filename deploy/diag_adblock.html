@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>adblock diag</title></head>
+<body>
+<h2>BerryAdblock diagnostic</h2>
+<p>Fires requests at known ad/tracker hosts (should be blocked) and a couple of
+allowed hosts (should pass the throttle). Launch with BERRY_ADBLOCK_LOG=1 and
+grep stderr for "BerryAdblock: blocked".</p>
+<pre id="out"></pre>
+<script>
+function log(m){ var o=document.getElementById('out'); o.textContent += m + "\n"; console.log("ADIAG: " + m); }
+function probe(label, url){
+  fetch(url, {mode:'no-cors', cache:'no-store'})
+    .then(function(){ log(label + " PASSED -> " + url); })
+    .catch(function(e){ log(label + " ERR(" + e + ") -> " + url); });
+}
+// Expected BLOCKED:
+probe("BLOCK?", "https://www.google-analytics.com/analytics.js");
+probe("BLOCK?", "https://www.googletagmanager.com/gtm.js?id=GTM-XXXX");
+probe("BLOCK?", "https://securepubads.g.doubleclick.net/tag/js/gpt.js");
+probe("BLOCK?", "https://c.amazon-adsystem.com/aax2/apstag.js");
+// Expected ALLOWED (functional hosts must NOT be blocked):
+probe("ALLOW?", "https://www.gstatic.com/firebasejs/9.0.0/firebase-app.js");
+probe("ALLOW?", "https://apis.google.com/js/api.js");
+probe("ALLOW?", "https://example.com/");
+</script>
+</body>
+</html>

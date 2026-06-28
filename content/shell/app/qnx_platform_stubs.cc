@@ -618,16 +618,12 @@ std::unique_ptr<PrintingContext> PrintingContext::CreateImpl(Delegate*, ProcessB
 // =====================================================================
 // media
 // =====================================================================
-#include "media/audio/audio_manager.h"
-#include "media/audio/fake_audio_manager.h"
-namespace media {
-std::unique_ptr<AudioManager> CreateAudioManager(
-    std::unique_ptr<AudioThread> audio_thread,
-    AudioLogFactory* audio_log_factory) {
-  return std::make_unique<FakeAudioManager>(std::move(audio_thread),
-                                            audio_log_factory);
-}
-}  // namespace media
+// NOTE: media::CreateAudioManager is intentionally NOT stubbed here. The real
+// implementation lives in media/audio/openal/audio_manager_openal.cc and returns
+// an OpenAL-backed AudioManager (with QSA microphone capture). A stub returning
+// FakeAudioManager here would shadow it at link time (this object is linked
+// directly into the executable, overriding the media archive), leaving the app
+// with no real audio output and no microphone input.
 
 // =====================================================================
 // net - avoid including full cert headers to prevent incomplete type issues

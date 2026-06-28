@@ -1,0 +1,42 @@
+<!doctype html>
+<html><head><meta charset="utf-8"></head><body><h2>mic diag</h2>
+<script>
+function L(m){ console.log('MIC: ' + m); }
+L('start');
+
+navigator.mediaDevices.enumerateDevices().then(function(ds){
+  var ai = ds.filter(function(d){return d.kind==='audioinput';});
+  L('enumerateDevices audioinput count=' + ai.length);
+  ai.forEach(function(d,i){ L('  audioinput['+i+'] id=' + d.deviceId + ' label="' + d.label + '"'); });
+}).catch(function(e){ L('enumerateDevices FAIL ' + e); });
+
+L('calling getUserMedia({audio:true})');
+navigator.mediaDevices.getUserMedia({audio:true}).then(function(stream){
+  var tracks = stream.getAudioTracks();
+  L('getUserMedia SUCCESS tracks=' + tracks.length);
+  tracks.forEach(function(t){
+    L('  track label="' + t.label + '" enabled=' + t.enabled + ' state=' + t.readyState);
+    try { L('  settings=' + JSON.stringify(t.getSettings())); } catch(e){}
+  });
+  // Measure live audio level to prove real samples are flowing.
+  try {
+    var Ctx = window.AudioContext || window.webkitAudioContext;
+    var ctx = new Ctx();
+    var src = ctx.createMediaStreamSource(stream);
+    var an = ctx.createAnalyser();
+    an.fftSize = 512;
+    src.connect(an);
+    var buf = new Uint8Array(an.fftSize);
+    var n = 0;
+    var iv = setInterval(function(){
+      n++;
+      an.getByteTimeDomainData(buf);
+      var sum = 0;
+      for (var i=0;i<buf.length;i++){ var v = (buf[i]-128)/128; sum += v*v; }
+      var rms = Math.sqrt(sum/buf.length);
+      L('level#' + n + ' rms=' + rms.toFixed(4) + ' ctxState=' + ctx.state);
+      if (n >= 10) { clearInterval(iv); L('done sampling'); }
+    }, 1000);
+  } catch(e){ L('analyser setup FAIL ' + e); }
+}).catch(function(e){ L('getUserMedia FAIL ' + e.name + ' ' + e.message); });
+</script></body></html>

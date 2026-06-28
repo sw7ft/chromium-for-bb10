@@ -290,6 +290,29 @@ source_set("audio") {
     sources += [ "linux/audio_manager_linux.cc" ]
   }
 
+  if (is_qnx) {
+    # OpenAL is the only working audio output path on QNX/BB10. Provides this
+    # platform's CreateAudioManager() in place of the Linux/fake factory.
+    sources += [
+      "openal/audio_manager_openal.cc",
+      "openal/audio_manager_openal.h",
+      "openal/openal_output_stream.cc",
+      "openal/openal_output_stream.h",
+      "openal/qsa_input_stream.cc",
+      "openal/qsa_input_stream.h",
+    ]
+
+    # OpenAL: playback. asound (QSA): microphone capture (libasound is bundled
+    # with the app since it is not in the BB10 base image). audio_manager: BB10
+    # audio routing service -- required so the mic capture route is actually
+    # opened (raw QSA opens of the capture node return ENOENT without it).
+    libs += [
+      "OpenAL",
+      "asound",
+      "audio_manager",
+    ]
+  }
+
   if (use_alsa) {
     libs += [ "asound" ]
     sources += [

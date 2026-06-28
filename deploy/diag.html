@@ -1,0 +1,47 @@
+<!doctype html>
+<html>
+<head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="font-family:sans-serif">
+<h2 id="h">media diag</h2>
+<video id="v" controls autoplay playsinline style="width:320px;height:240px;background:#000"></video>
+<script>
+function L(m){ console.log('DIAG: ' + m); }
+L('start');
+L('MediaSource in window: ' + ('MediaSource' in window));
+try {
+  L('MSE h264 avc1.42E01E: ' + MediaSource.isTypeSupported('video/mp4; codecs="avc1.42E01E"'));
+  L('MSE h264+aac:         ' + MediaSource.isTypeSupported('video/mp4; codecs="avc1.42E01E, mp4a.40.2"'));
+  L('MSE aac mp4a.40.2:    ' + MediaSource.isTypeSupported('audio/mp4; codecs="mp4a.40.2"'));
+  L('MSE vp9 webm:         ' + MediaSource.isTypeSupported('video/webm; codecs="vp9"'));
+  L('MSE vp9 mp4:          ' + MediaSource.isTypeSupported('video/mp4; codecs="vp09.00.10.08"'));
+  L('MSE av1:              ' + MediaSource.isTypeSupported('video/mp4; codecs="av01.0.05M.08"'));
+} catch (e) { L('MSE isTypeSupported threw: ' + e); }
+
+var v = document.getElementById('v');
+L('canPlayType h264+aac: ' + v.canPlayType('video/mp4; codecs="avc1.42E01E, mp4a.40.2"'));
+L('canPlayType vp9 webm: ' + v.canPlayType('video/webm; codecs="vp9"'));
+
+['loadstart','loadedmetadata','loadeddata','canplay','canplaythrough','play','playing',
+ 'waiting','stalled','suspend','abort','error','ended'].forEach(function(ev){
+  v.addEventListener(ev, function(){
+    var msg = 'video event ' + ev + ' rs=' + v.readyState + ' net=' + v.networkState +
+              ' t=' + v.currentTime.toFixed(2);
+    if (v.error) msg += ' MEDIA_ERR code=' + v.error.code + ' msg=' + v.error.message;
+    L(msg);
+  });
+});
+
+v.src = 'https://www.w3schools.com/html/mov_bbb.mp4';
+v.play().then(function(){ L('play() resolved'); })
+        .catch(function(e){ L('play() rejected: ' + e); });
+
+var n = 0;
+var iv = setInterval(function(){
+  n++;
+  L('tick#' + n + ' t=' + v.currentTime.toFixed(2) + ' rs=' + v.readyState +
+    ' paused=' + v.paused + ' net=' + v.networkState);
+  if (n >= 15) clearInterval(iv);
+}, 2000);
+</script>
+</body>
+</html>

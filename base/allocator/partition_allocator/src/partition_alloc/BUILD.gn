@@ -589,6 +589,14 @@ source_set("allocator_shim") {
         "shim/allocator_shim_override_libc_symbols.h",
       ]
     }
+    if (is_qnx) {
+      # QNX is not glibc: take the generic libc strong-symbol path (no
+      # glibc_weak_symbols). allocator_shim.cc selects these via its #else.
+      sources += [
+        "shim/allocator_shim_override_cpp_symbols.h",
+        "shim/allocator_shim_override_libc_symbols.h",
+      ]
+    }
     if (is_win) {
       sources += [
         "shim/allocator_shim_override_ucrt_symbols_win.h",

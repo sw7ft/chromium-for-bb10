@@ -1,0 +1,23 @@
+<!doctype html>
+<html><head><meta charset="utf-8"></head><body><h2>OAC oscillator granular</h2>
+<script>
+// Ping a range of ports so a TIME_WAIT-incremented tracer still receives steps.
+function step(n){ for (var p=8850; p<=8856; p++){ try { var x=new XMLHttpRequest(); x.open('GET','http://127.0.0.1:'+p+'/step?'+n,false); x.send(); } catch(e){} } }
+step('B-start');
+var OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+var ctx = new OAC(1, 4096, 44100);
+step('B-constructed');
+var osc = ctx.createOscillator();
+step('B-osc-created');
+osc.frequency.value = 440;
+step('B-freq-set');
+osc.type = 'triangle';
+step('B-type-triangle-set');
+osc.connect(ctx.destination);
+step('B-connected');
+osc.start(0);
+step('B-started');
+ctx.oncomplete = function(e){ step('B-oncomplete-' + e.renderedBuffer.length); };
+ctx.startRendering();
+step('B-render-called');
+</script></body></html>

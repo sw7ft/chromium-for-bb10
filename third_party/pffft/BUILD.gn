@@ -17,10 +17,17 @@ config("common_config") {
   }
 
   # PFFFT doesn't support SIMD on some cpus, so build a scalar version.
+  #
+  # QNX/BB10 (32-bit ARM, clang-qnx + softfp): PFFFT's ARM NEON path SIGSEGVs at
+  # runtime on this toolchain (e.g. OfflineAudioContext / OscillatorNode wavetable
+  # FFTs crash the renderer, which silently breaks reCAPTCHA's BotGuard audio
+  # fingerprint and any WebAudio FFT use). The rest of WebAudio's NEON (vector_math)
+  # is fine; only PFFFT's NEON kernels are affected. WebAudio FFTs are small and
+  # infrequent, so the scalar build is an acceptable, crash-free fallback.
   if ((current_cpu == "arm" && !arm_use_neon) || current_cpu == "mipsel" ||
       current_cpu == "mips64el" || current_cpu == "ppc64" ||
       current_cpu == "riscv64" || current_cpu == "s390x" ||
-      current_cpu == "loong64") {
+      current_cpu == "loong64" || is_qnx) {
     defines = [ "PFFFT_SIMD_DISABLE" ]
   }
 }

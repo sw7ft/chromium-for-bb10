@@ -1,0 +1,21 @@
+<!doctype html>
+<html><head><meta charset="utf-8"></head><body><h2>OAC oscillator low sample rate</h2>
+<script>
+function step(n){ for (var p=8850; p<=8856; p++){ try { var x=new XMLHttpRequest(); x.open('GET','http://127.0.0.1:'+p+'/step?'+n,false); x.send(); } catch(e){} } }
+function run(sr, tag){
+  try {
+    var OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    var ctx = new OAC(1, 2048, sr);
+    step(tag+'-constructed-sr'+sr);
+    var osc = ctx.createOscillator();
+    step(tag+'-osc-created');
+    osc.type='triangle';
+    osc.connect(ctx.destination); osc.start(0);
+    step(tag+'-wired');
+    ctx.startRendering();
+    step(tag+'-render-called');
+  } catch(e){ step(tag+'-THREW-'+e); }
+}
+step('C-start');
+run(8000, 'LO');
+</script></body></html>

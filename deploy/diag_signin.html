@@ -1,0 +1,13 @@
+<!doctype html><html><body><h2>signin probe</h2>
+<script>
+function L(m){ console.log('SIGNIN: ' + m); }
+L('UA=' + navigator.userAgent);
+// Fetch the sign-in identifier page and inspect for a "browser not secure" block.
+fetch('https://accounts.google.com/v3/signin/identifier?flowName=GlifWebSignIn', {credentials:'include'})
+  .then(function(r){ L('signin page status=' + r.status); return r.text(); })
+  .then(function(t){
+    var blocked = /couldn.t sign you in|browser or app may not be secure|not secure/i.test(t);
+    L('blocked_text_present=' + blocked + ' len=' + t.length);
+  })
+  .catch(function(e){ L('FETCH FAIL ' + e); });
+</script></body></html>

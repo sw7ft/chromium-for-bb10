@@ -1,0 +1,23 @@
+<!doctype html>
+<html><head><meta charset="utf-8"></head><body><h2>OAC crash tracer</h2>
+<script>
+// Synchronous XHR so each step is flushed to the server (survives a native crash).
+function step(n){ try { var x=new XMLHttpRequest(); x.open('GET','http://127.0.0.1:8840/step?'+n,false); x.send(); } catch(e){} }
+step('1-start');
+var OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+step('2-ctor-present-' + (!!OAC));
+var ctx = new OAC(1, 44100, 44100);
+step('3-constructed');
+var osc = ctx.createOscillator();
+step('4-osc-created');
+osc.type = 'triangle'; osc.frequency.value = 10000;
+var comp = ctx.createDynamicsCompressor();
+step('5-compressor-created');
+osc.connect(comp); comp.connect(ctx.destination);
+step('6-connected');
+osc.start(0);
+step('7-osc-started');
+ctx.oncomplete = function(e){ step('9-oncomplete-samples-' + e.renderedBuffer.length); };
+ctx.startRendering();
+step('8-startRendering-returned');
+</script></body></html>

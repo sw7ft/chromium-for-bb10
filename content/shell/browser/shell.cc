@@ -13,6 +13,9 @@
 #include <utility>
 
 #if BUILDFLAG(IS_QNX)
+#include <fcntl.h>
+#include <unistd.h>
+#include <cstring>
 #include "base/qnx_pump_activity.h"
 #endif
 #include "base/command_line.h"
@@ -22,7 +25,9 @@
 #include "base/location.h"
 #include "base/no_destructor.h"
 #include "base/run_loop.h"
+#include "base/strings/escape.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
@@ -743,6 +748,361 @@ bool BerryHostPrefersDesktopUA(const GURL& url) {
          base::EndsWith(host, ".whatsapp.com",
                         base::CompareCase::INSENSITIVE_ASCII);
 }
+
+// In-app "Restart browser". Gracefully tears down, then re-execs the launcher in
+// the SAME process (pid preserved, so the QNX/Navigator window-group model is
+// identical to a normal launch). The launcher re-reads every marker, so settings
+// that only apply at startup -- notably a new resolution (berry-x-*) -- take
+// effect on restart. Mirrors QnxExitCallback but relaunches instead of exiting.
+// Posted off the navigation observer callback so teardown doesn't run while a
+// navigation is in flight. The host below must match home.html's restart link.
+void BerryRestartRelaunch() {
+  base::StartQnxExitWatchdog(3000);
+  Shell::Shutdown();
+  char exe[2048];
+  exe[0] = '\0';
+  int fd = open("/proc/self/exefile", O_RDONLY);
+  if (fd >= 0) {
+    ssize_t r = read(fd, exe, sizeof(exe) - 1);
+    close(fd);
+    if (r > 0) {
+      exe[r] = '\0';
+      while (r > 0 && (exe[r - 1] == '\n' || exe[r - 1] == '\r' ||
+                       exe[r - 1] == ' ' || exe[r - 1] == '\0'))
+        exe[--r] = '\0';
+    }
+  }
+  if (exe[0]) {
+    char* slash = strrchr(exe, '/');
+    if (slash) {
+      *slash = '\0';
+      char launcher[2100];
+      snprintf(launcher, sizeof(launcher), "%s/launcher", exe);
+      char* args[] = {launcher, nullptr};
+      execv(launcher, args);
+    }
+  }
+  // Relaunch failed: just exit (Navigator closes the torn-down app).
+  _exit(42);
+}
+
+// ---------------------------------------------------------------------------
+// In-app Settings, rendered by the engine.
+//
+// Web pages (home.html) run sandboxed and cannot write the marker files in
+// shared/misc that drive the launcher. content_shell CAN (it already writes its
+// log there), so the Settings UI is generated and served by the engine:
+//   - navigate to https://berry.settings/  -> render the live Settings page
+//   - tap a toggle -> https://berry.set/?k=KEY&v=VAL -> engine writes the marker
+//     and re-renders, so the page always reflects the real on-disk state.
+// Most settings are startup flags, so the page tells the user to tap Restart to
+// apply. The page is written to a file and loaded (avoids data: URL escaping).
+// ---------------------------------------------------------------------------
+const char kBerryMiscDir[] = "/accounts/1000/shared/misc/";
+
+bool BerryHasMarker(const char* name) {
+  std::string p = std::string(kBerryMiscDir) + name;
+  return access(p.c_str(), F_OK) == 0;
+}
+
+void BerrySetMarker(const char* name, bool on) {
+  std::string p = std::string(kBerryMiscDir) + name;
+  if (on) {
+    int fd = open(p.c_str(), O_WRONLY | O_CREAT, 0644);
+    if (fd >= 0)
+      close(fd);
+  } else {
+    unlink(p.c_str());
+  }
+}
+
+std::string BerryReadTextMarker(const char* name) {
+  std::string p = std::string(kBerryMiscDir) + name;
+  std::string out;
+  FILE* f = fopen(p.c_str(), "r");
+  if (f) {
+    char buf[1024];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0)
+      out.append(buf, n);
+    fclose(f);
+  }
+  while (!out.empty() && (out.back() == '\n' || out.back() == '\r' ||
+                          out.back() == ' ' || out.back() == '\t'))
+    out.pop_back();
+  return out;
+}
+
+void BerrySetTextMarker(const char* name, const std::string& val) {
+  std::string p = std::string(kBerryMiscDir) + name;
+  if (val.empty()) {
+    unlink(p.c_str());
+    return;
+  }
+  FILE* f = fopen(p.c_str(), "w");
+  if (f) {
+    fwrite(val.data(), 1, val.size(), f);
+    fclose(f);
+  }
+}
+
+std::string BerryHtmlEscape(const std::string& s) {
+  std::string o;
+  o.reserve(s.size());
+  for (char c : s) {
+    switch (c) {
+      case '&': o += "&amp;"; break;
+      case '<': o += "&lt;"; break;
+      case '>': o += "&gt;"; break;
+      case '"': o += "&quot;"; break;
+      case '\'': o += "&#39;"; break;
+      default: o += c;
+    }
+  }
+  return o;
+}
+
+std::string BerryBuildSettingsHtml() {
+  auto toggle = [](const char* label, const char* sub, const char* key,
+                   bool on) -> std::string {
+    std::string s = "<div class='row'><div class='lbl'><b>";
+    s += label;
+    s += "</b><i>";
+    s += sub;
+    s += "</i></div><a class='sw ";
+    s += on ? "on" : "off";
+    s += "' href='https://berry.set/?k=";
+    s += key;
+    s += "&v=";
+    s += on ? "0" : "1";
+    s += "'><span></span></a></div>";
+    return s;
+  };
+
+  std::string res = "1440";  // launcher default when no marker
+  if (BerryHasMarker("berry-x-420.enable"))
+    res = "420";
+  else if (BerryHasMarker("berry-x-720.enable"))
+    res = "720";
+  else if (BerryHasMarker("berry-x-1440.enable"))
+    res = "1440";
+
+  auto resbtn = [&](const char* val, const char* label) -> std::string {
+    std::string s = "<a class='res";
+    if (res == val)
+      s += " cur";
+    s += "' href='https://berry.set/?k=res&v=";
+    s += val;
+    s += "'>";
+    s += label;
+    s += "</a>";
+    return s;
+  };
+
+  std::string ua = BerryReadTextMarker("berry-ua");
+  std::string home = BerryReadTextMarker("berry-home-url");
+
+  std::string h;
+  h += "<!DOCTYPE html><html><head><meta charset='utf-8'>";
+  h += "<meta name='viewport' content='width=device-width,initial-scale=1'>";
+  h += "<title>Settings</title><style>";
+  h += "*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}";
+  h += "html,body{margin:0;padding:0;background:#0e1218;color:#e8eef5;"
+       "font-family:-apple-system,'Slate Pro',Arial,sans-serif;}";
+  h += ".wrap{max-width:720px;margin:0 auto;padding:20px 18px 40px;}";
+  h += ".top{display:flex;align-items:center;gap:12px;margin:6px 0 18px;}";
+  h += ".top h1{font-size:30px;margin:0;font-weight:700;}";
+  h += ".top a.home{margin-left:auto;font-size:18px;color:#9fb2c6;"
+       "text-decoration:none;border:1px solid #2b3744;padding:8px 14px;"
+       "border-radius:10px;}";
+  h += ".sec{font-size:14px;letter-spacing:.08em;text-transform:uppercase;"
+       "color:#6b7a8c;margin:22px 4px 8px;}";
+  h += ".card{background:#161d26;border:1px solid #232f3c;border-radius:14px;"
+       "overflow:hidden;}";
+  h += ".row{display:flex;align-items:center;padding:14px 16px;"
+       "border-top:1px solid #1f2a35;}";
+  h += ".card .row:first-child{border-top:none;}";
+  h += ".lbl{display:flex;flex-direction:column;gap:2px;}";
+  h += ".lbl b{font-size:19px;font-weight:600;}";
+  h += ".lbl i{font-size:13px;color:#7e8c9c;font-style:normal;}";
+  h += ".sw{margin-left:auto;width:58px;height:32px;border-radius:18px;"
+       "position:relative;flex:none;background:#2a3643;transition:.15s;}";
+  h += ".sw span{position:absolute;top:3px;left:3px;width:26px;height:26px;"
+       "border-radius:50%;background:#cdd8e4;transition:.15s;}";
+  h += ".sw.on{background:#3ba55d;}.sw.on span{left:29px;background:#fff;}";
+  h += ".resrow{display:flex;gap:10px;padding:14px 16px;}";
+  h += ".res{flex:1;text-align:center;padding:14px 0;border-radius:10px;"
+       "background:#1d2733;color:#cdd8e4;text-decoration:none;font-size:18px;"
+       "border:1px solid #2a3643;}";
+  h += ".res.cur{background:#2563b6;color:#fff;border-color:#2563b6;}";
+  h += "form.tx{display:flex;gap:8px;padding:12px 16px;}";
+  h += "form.tx input{flex:1;font-size:17px;padding:12px;border-radius:10px;"
+       "border:1px solid #2b3744;background:#0b0f14;color:#fff;outline:none;}";
+  h += "form.tx button{font-size:17px;padding:0 18px;border:none;"
+       "border-radius:10px;background:#2563b6;color:#fff;font-weight:600;}";
+  h += ".apply{display:block;margin:26px 0 0;text-align:center;font-size:22px;"
+       "font-weight:700;padding:18px;border-radius:14px;background:#e8554e;"
+       "color:#fff;text-decoration:none;}";
+  h += ".note{text-align:center;color:#7e8c9c;font-size:14px;margin:14px 4px 0;}";
+  h += "</style></head><body><div class='wrap'>";
+  h += "<div class='top'><h1>Settings</h1>"
+       "<a class='home' href='https://berry.settings/'>\u21bb</a>"
+       "<a class='home' href='https://berry.home/'>Home</a></div>";
+
+  h += "<div class='sec'>Display</div><div class='card'>";
+  h += "<div class='resrow'>";
+  h += resbtn("420", "420\u00b2<br><small>fast</small>");
+  h += resbtn("720", "720\u00b2<br><small>balanced</small>");
+  h += resbtn("1440", "1440\u00b2<br><small>sharp</small>");
+  h += "</div>";
+  h += toggle("Dark mode", "Force dark rendering on all sites", "dark",
+              BerryHasMarker("berry-dark.enable"));
+  h += "</div>";
+
+  h += "<div class='sec'>Content &amp; privacy</div><div class='card'>";
+  h += toggle("Block images", "Don't load images (faster, less data)",
+              "noimages", BerryHasMarker("berry-noimages.enable"));
+  h += toggle("Disable JavaScript", "Static pages only", "nojs",
+              BerryHasMarker("berry-nojs.enable"));
+  h += toggle("Block ads &amp; trackers", "Built-in network blocklist",
+              "adblock", !BerryHasMarker("berry-adblock.disable"));
+  h += "</div>";
+
+  h += "<div class='sec'>Identity</div><div class='card'>";
+  h += toggle("Desktop site", "Request desktop layout/UA", "desktop",
+              BerryHasMarker("berry-desktop.enable"));
+  h += "<form class='tx' action='https://berry.set/' method='get'>"
+       "<input type='hidden' name='k' value='ua'>"
+       "<input name='v' placeholder='Custom user-agent (blank = default)' "
+       "value='";
+  h += BerryHtmlEscape(ua);
+  h += "'><button type='submit'>Set</button></form>";
+  h += "</div>";
+
+  h += "<div class='sec'>Performance</div><div class='card'>";
+  h += toggle("GPU rendering", "EGL compositing (default: software)", "gpu",
+              BerryHasMarker("berry-gpu.enable"));
+  h += toggle("Low-end mode", "Smaller heaps/caches", "lowend",
+              BerryHasMarker("berry-lowend.enable"));
+  h += toggle("Service Workers", "PWA app-shell caching", "sw",
+              BerryHasMarker("berry-sw.enable"));
+  h += toggle("HTTP/3 (QUIC)", "Faster connect on supported CDNs", "quic",
+              BerryHasMarker("berry-quic.enable"));
+  h += "</div>";
+
+  h += "<div class='sec'>Start page</div><div class='card'>";
+  h += "<form class='tx' action='https://berry.set/' method='get'>"
+       "<input type='hidden' name='k' value='home'>"
+       "<input name='v' placeholder='Start URL (blank = built-in home)' "
+       "value='";
+  h += BerryHtmlEscape(home);
+  h += "'><button type='submit'>Set</button></form>";
+  h += "</div>";
+
+  h += "<a class='apply' href='https://berry.restart/'>Apply &amp; Restart</a>";
+  h += "<div class='note'>Changes are saved instantly but take effect after a "
+       "restart.</div>";
+  h += "</div></body></html>";
+  return h;
+}
+
+// Load the bundled landing page (the quick-links + Settings tile home), used by
+// the Settings page's "Home" link. Derives the app's native dir from our own
+// executable path, the same way the launcher resolves it.
+void BerryShowHome(Shell* shell) {
+  char exe[2048];
+  exe[0] = '\0';
+  int fd = open("/proc/self/exefile", O_RDONLY);
+  if (fd >= 0) {
+    ssize_t r = read(fd, exe, sizeof(exe) - 1);
+    close(fd);
+    if (r > 0) {
+      exe[r] = '\0';
+      while (r > 0 && (exe[r - 1] == '\n' || exe[r - 1] == '\r' ||
+                       exe[r - 1] == ' ' || exe[r - 1] == '\0'))
+        exe[--r] = '\0';
+    }
+  }
+  std::string home_url = "about:blank";
+  if (exe[0]) {
+    char* slash = strrchr(exe, '/');
+    if (slash) {
+      *slash = '\0';
+      home_url = std::string("file://") + exe + "/home.html";
+    }
+  }
+  GURL u(home_url);
+  GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&Shell::LoadURL, base::Unretained(shell), u));
+}
+
+void BerryShowSettings(Shell* shell) {
+  std::string html = BerryBuildSettingsHtml();
+  std::string path = std::string(kBerryMiscDir) + ".berry-settings.html";
+  FILE* f = fopen(path.c_str(), "w");
+  if (f) {
+    fwrite(html.data(), 1, html.size(), f);
+    fclose(f);
+  }
+  GURL file_url("file://" + path);
+  GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE,
+      base::BindOnce(&Shell::LoadURL, base::Unretained(shell), file_url));
+}
+
+void BerryHandleSet(Shell* shell, const GURL& url) {
+  base::StringPairs pairs;
+  base::SplitStringIntoKeyValuePairs(url.query(), '=', '&', &pairs);
+  std::string k, v;
+  for (const auto& p : pairs) {
+    if (p.first == "k")
+      k = p.second;
+    else if (p.first == "v")
+      v = p.second;
+  }
+  std::string vdec;
+  vdec.reserve(v.size());
+  for (char c : v)
+    vdec += (c == '+') ? ' ' : c;
+  vdec = base::UnescapeBinaryURLComponent(vdec);
+  const bool on = (vdec == "1");
+
+  if (k == "nojs")
+    BerrySetMarker("berry-nojs.enable", on);
+  else if (k == "noimages")
+    BerrySetMarker("berry-noimages.enable", on);
+  else if (k == "dark")
+    BerrySetMarker("berry-dark.enable", on);
+  else if (k == "adblock")
+    BerrySetMarker("berry-adblock.disable", !on);  // on => no disable marker
+  else if (k == "desktop")
+    BerrySetMarker("berry-desktop.enable", on);
+  else if (k == "lowend")
+    BerrySetMarker("berry-lowend.enable", on);
+  else if (k == "gpu")
+    BerrySetMarker("berry-gpu.enable", on);
+  else if (k == "sw")
+    BerrySetMarker("berry-sw.enable", on);
+  else if (k == "quic")
+    BerrySetMarker("berry-quic.enable", on);
+  else if (k == "res") {
+    BerrySetMarker("berry-x-420.enable", false);
+    BerrySetMarker("berry-x-540.enable", false);
+    BerrySetMarker("berry-x-720.enable", false);
+    BerrySetMarker("berry-x-1440.enable", false);
+    if (vdec == "420")
+      BerrySetMarker("berry-x-420.enable", true);
+    else if (vdec == "720")
+      BerrySetMarker("berry-x-720.enable", true);
+    else if (vdec == "1440")
+      BerrySetMarker("berry-x-1440.enable", true);
+  } else if (k == "ua")
+    BerrySetTextMarker("berry-ua", vdec);
+  else if (k == "home")
+    BerrySetTextMarker("berry-home-url", vdec);
+
+  BerryShowSettings(shell);
+}
 }  // namespace
 #endif
 
@@ -757,6 +1117,34 @@ void Shell::DidStartNavigation(NavigationHandle* navigation_handle) {
   QNX_NAV_LOG_FMT(
       "BerryNav: DidStartNavigation url=\"%s\" same_doc=%d\n", spec.c_str(),
       navigation_handle->IsSameDocument() ? 1 : 0);
+  // In-app "Restart browser" action. Any navigation to the sentinel host
+  // triggers a graceful relaunch -- the home.html "Restart" tile links here, and
+  // typing "berry.restart" in the URL bar works too. We catch it at navigation
+  // *start*, so it never reaches DNS/network. Deferred to a fresh task so the
+  // teardown/re-exec doesn't run inside this navigation observer callback. Keep
+  // the host in sync with home.html.
+  if (!navigation_handle->IsSameDocument() && url.host() == "berry.restart") {
+    QNX_NAV_LOG_FMT("%s", "BerryNav: restart sentinel -> graceful relaunch\n");
+    GetUIThreadTaskRunner({})->PostTask(FROM_HERE,
+                                        base::BindOnce(&BerryRestartRelaunch));
+    return;
+  }
+  // In-app Settings (engine-served, writes marker files in shared/misc).
+  if (!navigation_handle->IsSameDocument() && url.host() == "berry.set") {
+    QNX_NAV_LOG_FMT("%s", "BerryNav: settings write\n");
+    BerryHandleSet(this, url);
+    return;
+  }
+  if (!navigation_handle->IsSameDocument() && url.host() == "berry.settings") {
+    QNX_NAV_LOG_FMT("%s", "BerryNav: open settings\n");
+    BerryShowSettings(this);
+    return;
+  }
+  if (!navigation_handle->IsSameDocument() && url.host() == "berry.home") {
+    QNX_NAV_LOG_FMT("%s", "BerryNav: open home\n");
+    BerryShowHome(this);
+    return;
+  }
   // Per-host User-Agent. The network-context default UA is mobile (Android),
   // which makes sites serve their lighter mobile bundles. A few hosts gate on a
   // desktop UA, so override just those on a per-navigation basis -- this works

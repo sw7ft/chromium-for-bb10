@@ -1,0 +1,23 @@
+<!doctype html>
+<html><head><meta charset="utf-8"></head><body><h2>OfflineAudioContext only</h2>
+<script>
+function L(m){ console.log('OAC: ' + m); }
+L('start');
+try {
+  var OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  L('ctor present: ' + (!!OAC));
+  var ctx = new OAC(1, 44100, 44100);
+  L('constructed sr=' + ctx.sampleRate);
+  var osc = ctx.createOscillator();
+  osc.type = 'triangle'; osc.frequency.value = 10000;
+  var comp = ctx.createDynamicsCompressor();
+  osc.connect(comp); comp.connect(ctx.destination);
+  osc.start(0);
+  L('graph built, calling startRendering');
+  var wd = setTimeout(function(){ L('HANG: no oncomplete in 8s'); }, 8000);
+  ctx.oncomplete = function(e){ clearTimeout(wd); L('rendered samples=' + e.renderedBuffer.length); };
+  var p = ctx.startRendering();
+  L('startRendering returned');
+  if (p && p.then) p.then(function(buf){ L('promise resolved samples=' + buf.length); }).catch(function(e){ L('promise rejected ' + e); });
+} catch(e){ L('THREW ' + e); }
+</script></body></html>

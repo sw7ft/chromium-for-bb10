@@ -1,0 +1,21 @@
+<!doctype html>
+<html><head><meta charset="utf-8"></head><body><h2>encoding diag</h2>
+<script>
+function L(m){ console.log('ENC: ' + m); }
+L('start');
+fetch('https://httpbin.org/headers').then(function(r){return r.json();})
+  .then(function(j){ L('Accept-Encoding SENT = ' + (j.headers && j.headers['Accept-Encoding'])); })
+  .catch(function(e){ L('headers FAIL ' + e); });
+
+fetch('https://httpbin.org/gzip').then(function(r){return r.text();})
+  .then(function(t){ var ok=false; try{JSON.parse(t);ok=true;}catch(e){} L('GZIP -> ' + (ok?'OK json':'NOT json') + ' firstbytes=' + JSON.stringify(t.slice(0,24))); })
+  .catch(function(e){ L('GZIP FAIL ' + e); });
+
+fetch('https://httpbin.org/brotli').then(function(r){return r.text();})
+  .then(function(t){ var ok=false; try{JSON.parse(t);ok=true;}catch(e){} L('BROTLI -> ' + (ok?'OK json':'NOT json (DECODING BROKEN)') + ' firstbytes=' + JSON.stringify(t.slice(0,24))); })
+  .catch(function(e){ L('BROTLI FAIL ' + e); });
+
+fetch('https://httpbin.org/deflate').then(function(r){return r.text();})
+  .then(function(t){ var ok=false; try{JSON.parse(t);ok=true;}catch(e){} L('DEFLATE -> ' + (ok?'OK json':'NOT json') + ' firstbytes=' + JSON.stringify(t.slice(0,24))); })
+  .catch(function(e){ L('DEFLATE FAIL ' + e); });
+</script></body></html>

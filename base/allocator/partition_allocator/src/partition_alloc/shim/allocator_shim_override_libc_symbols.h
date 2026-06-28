@@ -49,9 +49,19 @@ SHIM_ALWAYS_EXPORT void* calloc(size_t n, size_t size) __THROW {
   return ShimCalloc(n, size, nullptr);
 }
 
+#if BUILDFLAG(IS_QNX)
+// QNX declares cfree as `int cfree(void*)`; match its return type so the
+// override does not clash with <malloc.h> (functions cannot differ only by
+// return type). The legacy cfree contract has no meaningful return value.
+SHIM_ALWAYS_EXPORT int cfree(void* ptr) __THROW {
+  ShimFree(ptr, nullptr);
+  return 0;
+}
+#else
 SHIM_ALWAYS_EXPORT void cfree(void* ptr) __THROW {
   ShimFree(ptr, nullptr);
 }
+#endif
 
 SHIM_ALWAYS_EXPORT void* memalign(size_t align, size_t s) __THROW {
   return ShimMemalign(align, s, nullptr);

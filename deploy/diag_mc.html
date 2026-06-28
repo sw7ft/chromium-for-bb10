@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+<head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="font-family:sans-serif">
+<h2>mediaCapabilities diag</h2>
+<script>
+function L(m){ console.log('MC: ' + m); }
+L('start');
+L('UA = ' + navigator.userAgent);
+L('mediaCapabilities present: ' + (!!navigator.mediaCapabilities));
+L('mediaCapabilities.decodingInfo present: ' +
+  (navigator.mediaCapabilities && typeof navigator.mediaCapabilities.decodingInfo === 'function'));
+
+function test(label, cfg){
+  L('calling decodingInfo: ' + label);
+  var t0 = Date.now();
+  var timed = false;
+  var to = setTimeout(function(){ timed = true; L('TIMEOUT (no resolve in 8s): ' + label); }, 8000);
+  try {
+    navigator.mediaCapabilities.decodingInfo(cfg).then(function(r){
+      clearTimeout(to);
+      if (!timed) L('RESULT ' + label + ' -> supported=' + r.supported +
+                    ' smooth=' + r.smooth + ' powerEfficient=' + r.powerEfficient +
+                    ' (' + (Date.now()-t0) + 'ms)');
+    }).catch(function(e){
+      clearTimeout(to);
+      L('REJECTED ' + label + ' -> ' + e + ' (' + (Date.now()-t0) + 'ms)');
+    });
+  } catch(e){ clearTimeout(to); L('THREW ' + label + ' -> ' + e); }
+}
+
+test('h264-720p', { type:'media-source', video:{ contentType:'video/mp4; codecs="avc1.640028"', width:1280, height:720, bitrate:2000000, framerate:30 } });
+test('vp9-720p',  { type:'media-source', video:{ contentType:'video/webm; codecs="vp9"',        width:1280, height:720, bitrate:2000000, framerate:30 } });
+test('aac',       { type:'media-source', audio:{ contentType:'audio/mp4; codecs="mp4a.40.2"',   channels:'2', bitrate:128000, samplerate:44100 } });
+
+// Also test a few other APIs YouTube's player commonly touches.
+L('requestVideoFrameCallback present: ' + ('requestVideoFrameCallback' in HTMLVideoElement.prototype));
+L('navigator.scheduling present: ' + (!!navigator.scheduling));
+L('isInputPending present: ' + (navigator.scheduling && !!navigator.scheduling.isInputPending));
+try { L('Trusted Types present: ' + (typeof window.trustedTypes)); } catch(e){ L('TT err ' + e); }
+</script>
+</body>
+</html>

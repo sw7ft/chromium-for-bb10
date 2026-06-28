@@ -1,0 +1,17 @@
+<!doctype html>
+<html><head><meta charset="utf-8"></head><body><h2>OAC minimal (no FFT) tracer</h2>
+<script>
+function step(n){ try { var x=new XMLHttpRequest(); x.open('GET','http://127.0.0.1:8840/step?'+n,false); x.send(); } catch(e){} }
+step('A1-start');
+var OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+var ctx = new OAC(1, 4096, 44100);
+step('A2-constructed');
+// Pure rendering infra, NO FFT-using nodes: a gain fed by a buffer source.
+var g = ctx.createGain(); g.gain.value = 0.5;
+step('A3-gain-created');
+g.connect(ctx.destination);
+step('A4-connected');
+ctx.oncomplete = function(e){ step('A6-oncomplete-samples-' + e.renderedBuffer.length); };
+ctx.startRendering();
+step('A5-startRendering-returned');
+</script></body></html>

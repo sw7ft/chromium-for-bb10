@@ -1,11 +1,13 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <qnx xmlns="http://www.qnx.com/schemas/application/1.0">
-    <id>com.sw7ft.BerryShell</id>
+    <!-- Distinct package id + name so V3 installs ALONGSIDE the existing
+         BerryShell/BerryBrowser app instead of replacing it. -->
+    <id>com.sw7ft.BerryShellV3</id>
 
-    <name>BerryBrowser V2</name>
-    <versionNumber>2.0.2</versionNumber>
-    <buildId>4</buildId>
-    <description>Chromium content_shell browser for BlackBerry 10 (QNX, on-screen via qnx_screen).</description>
+    <name>BerryBrowserV3</name>
+    <versionNumber>3.0.0</versionNumber>
+    <buildId>1</buildId>
+    <description>Chromium content_shell browser for BlackBerry 10 (QNX, on-screen via qnx_screen). V3: in-app restart, custom resolution (420/720/1440), custom landing page, content settings.</description>
     <author>sw7ft</author>
 
     <!-- Native entry point: a tiny launcher that sets LD_LIBRARY_PATH / CA
@@ -32,7 +34,7 @@
     <asset path="payload/snapshot_blob.bin">snapshot_blob.bin</asset>
     <asset path="payload/root_store.certs">root_store.certs</asset>
 
-    <!-- Local start page (omnibox + bookmarks) loaded by default. -->
+    <!-- Local start page (omnibox + bookmarks + Restart) loaded by default. -->
     <asset path="home.html">home.html</asset>
 
     <icon>
@@ -52,8 +54,7 @@
     <permission>access_shared</permission>
     <permission>run_when_backgrounded</permission>
     <!-- Microphone capture (getUserMedia audio). Without this, QNX io-audio
-         denies snd_pcm capture and the real mic stays silent. Requires
-         rebuilding/reinstalling the .bar to take effect on-device. -->
+         denies snd_pcm capture and the real mic stays silent. -->
     <permission>record_audio</permission>
 
     <!-- Ensure bundled libs are found at run-time (launcher also sets this). -->

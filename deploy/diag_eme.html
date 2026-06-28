@@ -1,0 +1,21 @@
+<!doctype html>
+<html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="font-family:sans-serif"><h2>EME diag</h2>
+<script>
+function L(m){ console.log('EME: ' + m); }
+L('start');
+L('requestMediaKeySystemAccess present: ' + (!!navigator.requestMediaKeySystemAccess));
+var caps = [{ contentType:'video/mp4; codecs="avc1.42E01E"' }];
+var cfg = [{ initDataTypes:['cenc'], videoCapabilities:caps,
+             audioCapabilities:[{contentType:'audio/mp4; codecs="mp4a.40.2"'}] }];
+function test(ks){
+  if(!navigator.requestMediaKeySystemAccess){ L(ks + ': API missing'); return; }
+  navigator.requestMediaKeySystemAccess(ks, cfg)
+    .then(function(a){ L(ks + ': SUPPORTED (' + a.keySystem + ')'); })
+    .catch(function(e){ L(ks + ': NOT supported -> ' + e.name + ' ' + e.message); });
+}
+test('com.widevine.alpha');
+test('com.microsoft.playready');
+test('org.w3.clearkey');
+test('com.youtube.widevine.l3');
+</script></body></html>
