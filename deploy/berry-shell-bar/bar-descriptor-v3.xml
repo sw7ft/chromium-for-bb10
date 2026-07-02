@@ -5,9 +5,9 @@
     <id>com.sw7ft.BerryShellV3</id>
 
     <name>BerryBrowserV3</name>
-    <versionNumber>3.0.0</versionNumber>
-    <buildId>1</buildId>
-    <description>Chromium content_shell browser for BlackBerry 10 (QNX, on-screen via qnx_screen). V3: in-app restart, custom resolution (420/720/1440), custom landing page, content settings.</description>
+    <versionNumber>3.0.2</versionNumber>
+    <buildId>43</buildId>
+    <description>Chromium content_shell browser for BlackBerry 10 (QNX, on-screen via qnx_screen). V3: balanced defaults (GPU on, 720, 45fps, low-end mode), in-app Settings, restart, custom landing page.</description>
     <author>sw7ft</author>
 
     <!-- Native entry point: a tiny launcher that sets LD_LIBRARY_PATH / CA

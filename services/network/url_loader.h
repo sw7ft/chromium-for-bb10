@@ -25,6 +25,7 @@
 #include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "mojo/public/cpp/system/simple_watcher.h"
+#include "net/base/io_buffer.h"
 #include "net/base/load_states.h"
 #include "net/base/network_delegate.h"
 #include "net/base/transport_info.h"
@@ -506,6 +507,22 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) URLLoader
   // reCAPTCHA/sorry XHRs to tell a browser decode bug from a reCAPTCHA-internal
   // failure. See url_loader.cc DidRead.
   bool qnx_captcha_probe_logged_ = false;
+  bool qnx_skip_request_body_ = false;
+  bool qnx_youtube_player_buffer_ = false;
+  bool qnx_response_sent_to_client_ = false;
+  std::string qnx_youtube_player_body_;
+  scoped_refptr<net::IOBufferWithSize> qnx_youtube_read_buffer_;
+  bool qnx_youtube_watch_shim_active_ = false;
+  bool qnx_youtube_watch_shim_buffer_ = false;
+  bool qnx_watch_shim_response_ready_ = false;
+  bool qnx_watch_shim_scrubbed_ = false;
+  std::string qnx_youtube_video_id_;
+  std::string qnx_youtube_watch_shim_html_;
+  std::string qnx_youtube_watch_page_sniff_;
+  void QnxPrepareYoutubeWatchShim();
+  bool QnxWriteBodyToNewDataPipe(const std::string& body, const char* log_tag);
+  void QnxFlushBufferedYoutubePlayerBody();
+  void QnxFlushWatchShimBody();
 #endif
   void CompletePendingWrite(bool success);
   void SetRawResponseHeaders(scoped_refptr<const net::HttpResponseHeaders>);

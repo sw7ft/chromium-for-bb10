@@ -53,9 +53,11 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/renderer_preferences_util.h"
+#include "content/public/browser/visibility.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
 #include "content/shell/app/resource.h"
+#include "content/shell/browser/berry_geolocation_qnx.h"
 #include "content/shell/browser/shell_content_browser_client.h"
 #include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
 #include "content/shell/browser/shell_devtools_frontend.h"
@@ -69,6 +71,12 @@
 #include "url/url_constants.h"
 
 namespace content {
+
+#if BUILDFLAG(IS_QNX)
+namespace {
+void BerryApplySessionDesktopUA(WebContents* web_contents);
+}  // namespace
+#endif
 
 namespace {
 // Null until/unless the default main message loop is running.
@@ -253,6 +261,13 @@ Shell* Shell::CreateNewWindow(BrowserContext* browser_context,
       CreateShell(std::move(web_contents), AdjustWindowSize(initial_size),
                   true /* should_set_delegate */);
   QNX_TRACE_MSG("QNX:Shell:3 CreateShell\n");
+  /* Navigator may deliver NAVIGATOR_WINDOW_STATE after first paint; until then
+   * WebContents defaults to hidden and YouTube/mobile players refuse to start
+   * stream fetch (no get_watch / googlevideo). Assume visible at launch. */
+  shell->web_contents()->UpdateWebContentsVisibility(Visibility::VISIBLE);
+#if BUILDFLAG(IS_QNX)
+  BerryApplySessionDesktopUA(shell->web_contents());
+#endif
 
   if (!url.is_empty()) {
 #if BUILDFLAG(IS_QNX)
@@ -739,14 +754,56 @@ void Shell::OnTimeout() {
 
 #if BUILDFLAG(IS_QNX)
 namespace {
+
 // Hosts that refuse a mobile UA and must be served the desktop UA. WhatsApp Web
 // is the canonical case: on mobile it shows "use WhatsApp by opening a browser
 // on your computer" instead of the chat UI.
 bool BerryHostPrefersDesktopUA(const GURL& url) {
   const std::string host = url.host();
-  return host == "whatsapp.com" ||
-         base::EndsWith(host, ".whatsapp.com",
-                        base::CompareCase::INSENSITIVE_ASCII);
+  if (host == "whatsapp.com" ||
+      base::EndsWith(host, ".whatsapp.com",
+                     base::CompareCase::INSENSITIVE_ASCII))
+    return true;
+  // YouTube: desktop UA by default on www.youtube.com — progressive HTTPS
+  // videoplayback (fmt=18) without SABR/PO tokens. Mobile/m.youtube uses SABR
+  // which content_shell cannot decode. Opt into mobile with berry-youtube-mobile.enable.
+  if (access("/accounts/1000/shared/misc/berry-youtube-mobile.enable",
+             F_OK) == 0)
+    return false;
+  if (host == "youtube.com" || host == "www.youtube.com" ||
+      host == "m.youtube.com" ||
+      base::EndsWith(host, ".googlevideo.com",
+                     base::CompareCase::INSENSITIVE_ASCII))
+    return true;
+  // Legacy opt-in for desktop watch experiments.
+  if (access("/accounts/1000/shared/misc/berry-youtube-desktop.enable",
+             F_OK) == 0) {
+    if (host == "youtube.com" || host == "www.youtube.com" ||
+        base::EndsWith(host, ".googlevideo.com",
+                       base::CompareCase::INSENSITIVE_ASCII))
+      return true;
+  }
+  // Google Maps Lite on mobile waits forever for geolocation before fetching
+  // raster tiles; desktop Maps uses URL coords and loads tiles without GPS.
+  if (host == "maps.google.com")
+    return true;
+  if ((host == "google.com" || host == "www.google.com") &&
+      base::StartsWith(url.path(), "/maps", base::CompareCase::SENSITIVE))
+    return true;
+  return false;
+}
+
+void BerryApplySessionDesktopUA(content::WebContents* web_contents) {
+  if (!web_contents)
+    return;
+  if (access("/accounts/1000/shared/misc/berry-youtube-mobile.enable", F_OK) ==
+      0)
+    return;
+  blink::UserAgentOverride ov;
+  ov.ua_string_override = GetBerryDesktopUserAgent();
+  ov.ua_metadata_override = GetBerryDesktopUserAgentMetadata();
+  web_contents->SetUserAgentOverride(ov, /*override_in_new_tabs=*/false);
+  QNX_NAV_LOG_FMT("%s", "BerryNav: UA = desktop (session preset)\n");
 }
 
 // In-app "Restart browser". Gracefully tears down, then re-execs the launcher in
@@ -805,6 +862,43 @@ bool BerryHasMarker(const char* name) {
   return access(p.c_str(), F_OK) == 0;
 }
 
+// Matches launcher defaults + marker precedence (see apply_x_load_profile).
+std::string BerryCurrentResKey() {
+  if (BerryHasMarker("berry-x-420.enable"))
+    return "420";
+  if (BerryHasMarker("berry-x-540.enable"))
+    return "540";
+  if (BerryHasMarker("berry-x-720.enable"))
+    return "720";
+  if (BerryHasMarker("berry-x-1440.enable"))
+    return "1440";
+  return "720";
+}
+
+std::string BerryCurrentFpsKey() {
+  if (BerryHasMarker("berry-x-lite.enable"))
+    return "lite";
+  if (BerryHasMarker("berry-x-fullfps.enable"))
+    return "60";
+  if (BerryHasMarker("berry-x-slow12.enable"))
+    return "12";
+  if (BerryHasMarker("berry-x-slow10.enable"))
+    return "10";
+  if (BerryHasMarker("berry-x-slow15.enable"))
+    return "15";
+  if (BerryHasMarker("berry-x-slow45.enable"))
+    return "45";
+  return "45";
+}
+
+bool BerryGpuEnabledByDefault() {
+  return !BerryHasMarker("berry-gpu.disable");
+}
+
+bool BerryLowendEnabledByDefault() {
+  return !BerryHasMarker("berry-lowend.disable");
+}
+
 void BerrySetMarker(const char* name, bool on) {
   std::string p = std::string(kBerryMiscDir) + name;
   if (on) {
@@ -831,6 +925,41 @@ std::string BerryReadTextMarker(const char* name) {
                           out.back() == ' ' || out.back() == '\t'))
     out.pop_back();
   return out;
+}
+
+std::string BerryCurrentDeviceKey() {
+  std::string d = BerryReadTextMarker("berry-device");
+  if (d.empty())
+    return "passport";
+  return d;
+}
+
+const char* BerryDeviceLabel(const std::string& id) {
+  if (id == "classic")
+    return "Classic";
+  if (id == "q10")
+    return "Q10";
+  if (id == "q5")
+    return "Q5";
+  if (id == "z10")
+    return "Z10";
+  if (id == "z30")
+    return "Z30";
+  if (id == "z3")
+    return "Z3";
+  if (id == "leap")
+    return "Leap";
+  return "Passport";
+}
+
+const char* BerryDevicePanelHint(const std::string& id) {
+  if (id == "classic" || id == "q10" || id == "q5")
+    return "720\u00b2 panel";
+  if (id == "z10")
+    return "768\u00d71280";
+  if (id == "z30" || id == "z3" || id == "leap")
+    return "720\u00d71280";
+  return "1440\u00b2 panel";
 }
 
 void BerrySetTextMarker(const char* name, const std::string& val) {
@@ -879,19 +1008,42 @@ std::string BerryBuildSettingsHtml() {
     return s;
   };
 
-  std::string res = "1440";  // launcher default when no marker
-  if (BerryHasMarker("berry-x-420.enable"))
-    res = "420";
-  else if (BerryHasMarker("berry-x-720.enable"))
-    res = "720";
-  else if (BerryHasMarker("berry-x-1440.enable"))
-    res = "1440";
+  std::string res = BerryCurrentResKey();
+  std::string fps = BerryCurrentFpsKey();
+  std::string device = BerryCurrentDeviceKey();
+
+  auto devbtn = [&](const char* val, const char* label,
+                    const char* sub) -> std::string {
+    std::string s = "<a class='res";
+    if (device == val)
+      s += " cur";
+    s += "' href='https://berry.set/?k=device&v=";
+    s += val;
+    s += "'>";
+    s += label;
+    s += "<br><small>";
+    s += sub;
+    s += "</small></a>";
+    return s;
+  };
 
   auto resbtn = [&](const char* val, const char* label) -> std::string {
     std::string s = "<a class='res";
     if (res == val)
       s += " cur";
     s += "' href='https://berry.set/?k=res&v=";
+    s += val;
+    s += "'>";
+    s += label;
+    s += "</a>";
+    return s;
+  };
+
+  auto fpsbtn = [&](const char* val, const char* label) -> std::string {
+    std::string s = "<a class='res";
+    if (fps == val)
+      s += " cur";
+    s += "' href='https://berry.set/?k=fps&v=";
     s += val;
     s += "'>";
     s += label;
@@ -930,10 +1082,10 @@ std::string BerryBuildSettingsHtml() {
   h += ".sw span{position:absolute;top:3px;left:3px;width:26px;height:26px;"
        "border-radius:50%;background:#cdd8e4;transition:.15s;}";
   h += ".sw.on{background:#3ba55d;}.sw.on span{left:29px;background:#fff;}";
-  h += ".resrow{display:flex;gap:10px;padding:14px 16px;}";
+  h += ".resrow{display:flex;gap:10px;padding:14px 16px;flex-wrap:wrap;}";
   h += ".res{flex:1;text-align:center;padding:14px 0;border-radius:10px;"
        "background:#1d2733;color:#cdd8e4;text-decoration:none;font-size:18px;"
-       "border:1px solid #2a3643;}";
+       "border:1px solid #2a3643;min-width:140px;}";
   h += ".res.cur{background:#2563b6;color:#fff;border-color:#2563b6;}";
   h += "form.tx{display:flex;gap:8px;padding:12px 16px;}";
   h += "form.tx input{flex:1;font-size:17px;padding:12px;border-radius:10px;"
@@ -949,15 +1101,44 @@ std::string BerryBuildSettingsHtml() {
        "<a class='home' href='https://berry.settings/'>\u21bb</a>"
        "<a class='home' href='https://berry.home/'>Home</a></div>";
 
+  h += "<div class='sec'>Device</div><div class='card'>";
+  h += "<div class='row'><div class='lbl'><b>";
+  h += BerryDeviceLabel(device);
+  h += "</b><i>Touch mapping + panel size (";
+  h += BerryDevicePanelHint(device);
+  h += "). Pick your phone model.</i></div></div>";
+  h += "<div class='resrow'>";
+  h += devbtn("passport", "Passport", "1440 sq");
+  h += devbtn("classic", "Classic", "720 sq");
+  h += devbtn("q10", "Q10", "720 sq");
+  h += devbtn("q5", "Q5", "720 sq");
+  h += "</div><div class='resrow'>";
+  h += devbtn("z10", "Z10", "768 wide");
+  h += devbtn("z30", "Z30", "720 wide");
+  h += devbtn("z3", "Z3", "720 wide");
+  h += devbtn("leap", "Leap", "720 wide");
+  h += "</div></div>";
+
   h += "<div class='sec'>Display</div><div class='card'>";
   h += "<div class='resrow'>";
   h += resbtn("420", "420\u00b2<br><small>fast</small>");
-  h += resbtn("720", "720\u00b2<br><small>balanced</small>");
-  h += resbtn("1440", "1440\u00b2<br><small>sharp</small>");
+  h += resbtn("540", "540\u00b2<br><small>balanced</small>");
+  h += resbtn("720", "720\u00b2<br><small>sharp</small>");
+  h += resbtn("1440", "1440<br><small>native</small>");
   h += "</div>";
+  h += "<div class='row'><div class='lbl'><b>Resolution tier</b><i>Scales "
+       "render buffer for your device profile (aspect kept).</i></div></div>";
   h += toggle("Dark mode", "Force dark rendering on all sites", "dark",
               BerryHasMarker("berry-dark.enable"));
   h += "</div>";
+
+  h += "<div class='sec'>Frame rate</div><div class='card'>";
+  h += "<div class='resrow'>";
+  h += fpsbtn("60", "60<br><small>smooth</small>");
+  h += fpsbtn("45", "45<br><small>balanced</small>");
+  h += fpsbtn("15", "15<br><small>cool</small>");
+  h += fpsbtn("lite", "Lite<br><small>420+12</small>");
+  h += "</div></div>";
 
   h += "<div class='sec'>Content &amp; privacy</div><div class='card'>";
   h += toggle("Block images", "Don't load images (faster, less data)",
@@ -966,6 +1147,22 @@ std::string BerryBuildSettingsHtml() {
               BerryHasMarker("berry-nojs.enable"));
   h += toggle("Block ads &amp; trackers", "Built-in network blocklist",
               "adblock", !BerryHasMarker("berry-adblock.disable"));
+  h += "</div>";
+
+  h += "<div class='sec'>Network</div><div class='card'>";
+  h += toggle("HTTP/3 (QUIC)", "Faster connect on supported CDNs", "quic",
+              BerryHasMarker("berry-quic.enable"));
+  h += toggle("HTTP/1.1 only", "Fallback when HTTP/2 misbehaves", "http1",
+              BerryHasMarker("berry-http1.enable"));
+  h += toggle("Disable Alt-Svc", "Skip DNS HTTPS/SVCB upgrade hints", "altsvc",
+              BerryHasMarker("berry-alt-svc.disable"));
+  h += toggle("Block telemetry", "Fast-fail crash/analytics hosts", "block",
+              BerryHasMarker("berry-block.enable"));
+  h += "</div>";
+
+  h += "<div class='sec'>YouTube</div><div class='card'>";
+  h += toggle("Mobile YouTube", "Use mobile UI (default is desktop)", "ytmobile",
+              BerryHasMarker("berry-youtube-mobile.enable"));
   h += "</div>";
 
   h += "<div class='sec'>Identity</div><div class='card'>";
@@ -980,14 +1177,25 @@ std::string BerryBuildSettingsHtml() {
   h += "</div>";
 
   h += "<div class='sec'>Performance</div><div class='card'>";
-  h += toggle("GPU rendering", "EGL compositing (default: software)", "gpu",
-              BerryHasMarker("berry-gpu.enable"));
-  h += toggle("Low-end mode", "Smaller heaps/caches", "lowend",
-              BerryHasMarker("berry-lowend.enable"));
-  h += toggle("Service Workers", "PWA app-shell caching", "sw",
-              BerryHasMarker("berry-sw.enable"));
-  h += toggle("HTTP/3 (QUIC)", "Faster connect on supported CDNs", "quic",
-              BerryHasMarker("berry-quic.enable"));
+  h += toggle("GPU rendering", "EGL compositing (default on)", "gpu",
+              BerryGpuEnabledByDefault());
+  h += toggle("Low-end mode", "Smaller heaps/caches (default on)", "lowend",
+              BerryLowendEnabledByDefault());
+  h += toggle("Service Workers", "PWA app-shell caching (default on)", "sw",
+              !BerryHasMarker("berry-sw.disable"));
+  h += toggle("Disk &amp; media cache", "64MB HTTP/media cache (default on)",
+              "diskcache", !BerryHasMarker("berry-disk-cache.disable"));
+  h += toggle("Privacy sandbox cuts", "Disable FedCM/ads APIs background work",
+              "privacy", BerryHasMarker("berry-privacy.disable"));
+  h += "</div>";
+
+  h += "<div class='sec'>Developer</div><div class='card'>";
+  h += toggle("Real microphone", "QSA mic capture (needs record_audio)", "mic",
+              BerryHasMarker("berry-mic.enable"));
+  h += toggle("Video debug log", "Verbose media logging to berry-kbd.log",
+              "videodebug", BerryHasMarker("berry-video.debug"));
+  h += toggle("Input debug log", "Touch/keyboard tracing (slow)", "kbddebug",
+              BerryHasMarker("berry-kbd.debug"));
   h += "</div>";
 
   h += "<div class='sec'>Start page</div><div class='card'>";
@@ -1077,29 +1285,79 @@ void BerryHandleSet(Shell* shell, const GURL& url) {
     BerrySetMarker("berry-adblock.disable", !on);  // on => no disable marker
   else if (k == "desktop")
     BerrySetMarker("berry-desktop.enable", on);
-  else if (k == "lowend")
-    BerrySetMarker("berry-lowend.enable", on);
-  else if (k == "gpu")
-    BerrySetMarker("berry-gpu.enable", on);
-  else if (k == "sw")
-    BerrySetMarker("berry-sw.enable", on);
-  else if (k == "quic")
+  else if (k == "lowend") {
+    BerrySetMarker("berry-lowend.disable", !on);
+    BerrySetMarker("berry-lowend.enable", false);
+  } else if (k == "gpu") {
+    BerrySetMarker("berry-gpu.disable", !on);
+    BerrySetMarker("berry-gpu.enable", false);
+  } else if (k == "sw") {
+    BerrySetMarker("berry-sw.disable", !on);
+    BerrySetMarker("berry-sw.enable", false);
+  } else if (k == "quic")
     BerrySetMarker("berry-quic.enable", on);
-  else if (k == "res") {
+  else if (k == "http1")
+    BerrySetMarker("berry-http1.enable", on);
+  else if (k == "altsvc")
+    BerrySetMarker("berry-alt-svc.disable", on);
+  else if (k == "block")
+    BerrySetMarker("berry-block.enable", on);
+  else if (k == "ytmobile")
+    BerrySetMarker("berry-youtube-mobile.enable", on);
+  else if (k == "diskcache")
+    BerrySetMarker("berry-disk-cache.disable", !on);
+  else if (k == "privacy")
+    BerrySetMarker("berry-privacy.disable", on);
+  else if (k == "mic")
+    BerrySetMarker("berry-mic.enable", on);
+  else if (k == "videodebug")
+    BerrySetMarker("berry-video.debug", on);
+  else if (k == "kbddebug") {
+    BerrySetMarker("berry-kbd.debug", on);
+    if (!on)
+      BerrySetMarker("berry-nav.debug", false);
+  } else if (k == "res") {
     BerrySetMarker("berry-x-420.enable", false);
     BerrySetMarker("berry-x-540.enable", false);
     BerrySetMarker("berry-x-720.enable", false);
     BerrySetMarker("berry-x-1440.enable", false);
     if (vdec == "420")
       BerrySetMarker("berry-x-420.enable", true);
+    else if (vdec == "540")
+      BerrySetMarker("berry-x-540.enable", true);
     else if (vdec == "720")
       BerrySetMarker("berry-x-720.enable", true);
     else if (vdec == "1440")
       BerrySetMarker("berry-x-1440.enable", true);
+  } else if (k == "fps") {
+    BerrySetMarker("berry-x-lite.enable", false);
+    BerrySetMarker("berry-x-fullfps.enable", false);
+    BerrySetMarker("berry-x-slow10.enable", false);
+    BerrySetMarker("berry-x-slow12.enable", false);
+    BerrySetMarker("berry-x-slow15.enable", false);
+    BerrySetMarker("berry-x-slow45.enable", false);
+    if (vdec == "lite")
+      BerrySetMarker("berry-x-lite.enable", true);
+    else if (vdec == "60")
+      BerrySetMarker("berry-x-fullfps.enable", true);
+    else if (vdec == "12")
+      BerrySetMarker("berry-x-slow12.enable", true);
+    else if (vdec == "10")
+      BerrySetMarker("berry-x-slow10.enable", true);
+    else if (vdec == "15")
+      BerrySetMarker("berry-x-slow15.enable", true);
+    else if (vdec == "45")
+      BerrySetMarker("berry-x-slow45.enable", true);
   } else if (k == "ua")
     BerrySetTextMarker("berry-ua", vdec);
   else if (k == "home")
     BerrySetTextMarker("berry-home-url", vdec);
+  else if (k == "device") {
+    if (vdec == "passport" || vdec == "classic" || vdec == "q10" ||
+        vdec == "q5" || vdec == "z10" || vdec == "z30" || vdec == "z3" ||
+        vdec == "leap")
+      BerrySetTextMarker("berry-device", vdec);
+  }
 
   BerryShowSettings(shell);
 }
@@ -1145,23 +1403,44 @@ void Shell::DidStartNavigation(NavigationHandle* navigation_handle) {
     BerryShowHome(this);
     return;
   }
-  // Per-host User-Agent. The network-context default UA is mobile (Android),
-  // which makes sites serve their lighter mobile bundles. A few hosts gate on a
-  // desktop UA, so override just those on a per-navigation basis -- this works
-  // for any navigation type (omnibox, link, redirect), unlike the launcher's
-  // launch-URL check which only sees the very first URL.
-  // NavigationHandle::SetIsOverridingUserAgent is documented to be called here.
-  if (!navigation_handle->IsSameDocument() && url.SchemeIsHTTPOrHTTPS()) {
-    const bool want_desktop = BerryHostPrefersDesktopUA(url);
-    if (want_desktop) {
-      blink::UserAgentOverride ov;
-      ov.ua_string_override = GetBerryDesktopUserAgent();
-      ov.ua_metadata_override = GetBerryDesktopUserAgentMetadata();
-      web_contents_->SetUserAgentOverride(ov, /*override_in_new_tabs=*/false);
+  if (BerryIsGoogleMapsUrl(url)) {
+    BerryApplyFixedGeolocationOverride(web_contents_.get());
+    BerryScheduleMapsGeolocationRetries(web_contents_.get());
+    QNX_NAV_LOG_FMT("%s", "BerryNav: Maps geolocation override applied\n");
+  }
+  // Pin visibility early — YouTube aborts googlevideo fetches if hidden.
+  if (!navigation_handle->IsSameDocument() && !navigation_handle->IsErrorPage() &&
+      url.SchemeIsHTTPOrHTTPS()) {
+    const std::string host = url.host();
+    if (host.find("youtube.com") != std::string::npos ||
+        host.find("googlevideo.com") != std::string::npos) {
+      web_contents_->UpdateWebContentsVisibility(Visibility::VISIBLE);
     }
-    navigation_handle->SetIsOverridingUserAgent(want_desktop);
-    QNX_NAV_LOG_FMT("BerryNav: UA = %s for host=\"%s\"\n",
-                    want_desktop ? "desktop" : "mobile", url.host().c_str());
+  }
+  // User-Agent: preset desktop at WebContents creation (BerryApplySessionDesktopUA)
+  // so the first youtube.com navigation does not flip UA mid-flight and restart
+  // the loader (FactoryStart #2 + ERR_ABORTED on #1).
+  if (!navigation_handle->IsSameDocument() &&
+      (url.SchemeIsHTTPOrHTTPS() || url.SchemeIsFile())) {
+    const bool session_desktop =
+        access("/accounts/1000/shared/misc/berry-youtube-mobile.enable", F_OK) !=
+        0;
+    if (session_desktop) {
+      navigation_handle->SetIsOverridingUserAgent(true);
+      QNX_NAV_LOG_FMT("BerryNav: UA = desktop (session) host=\"%s\"\n",
+                      url.host().c_str());
+    } else if (url.SchemeIsHTTPOrHTTPS()) {
+      const bool want_desktop = BerryHostPrefersDesktopUA(url);
+      if (want_desktop) {
+        blink::UserAgentOverride ov;
+        ov.ua_string_override = GetBerryDesktopUserAgent();
+        ov.ua_metadata_override = GetBerryDesktopUserAgentMetadata();
+        web_contents_->SetUserAgentOverride(ov, /*override_in_new_tabs=*/false);
+      }
+      navigation_handle->SetIsOverridingUserAgent(want_desktop);
+      QNX_NAV_LOG_FMT("BerryNav: UA = %s for host=\"%s\"\n",
+                      want_desktop ? "desktop" : "mobile", url.host().c_str());
+    }
   }
   // Update the toolbar as soon as navigation starts so the user sees the
   // destination URL while the network fetch runs (commit can take 20+ s).
@@ -1187,6 +1466,21 @@ void Shell::DidFinishNavigation(NavigationHandle* navigation_handle) {
         spec.c_str(), navigation_handle->IsErrorPage() ? 1 : 0,
         static_cast<int>(navigation_handle->GetNetErrorCode()),
         static_cast<long long>(ms));
+    // Navigator can report hidden after first paint; mobile/desktop YouTube
+    // players abort googlevideo fetches when visibility != visible.
+    if (!navigation_handle->IsErrorPage() && url.SchemeIsHTTPOrHTTPS()) {
+      const std::string host = url.host();
+      if (host.find("youtube.com") != std::string::npos ||
+          host.find("googlevideo.com") != std::string::npos ||
+          BerryIsGoogleMapsUrl(url)) {
+        web_contents_->UpdateWebContentsVisibility(Visibility::VISIBLE);
+      }
+    }
+    if (!navigation_handle->IsErrorPage() && BerryIsGoogleMapsUrl(url)) {
+      BerryApplyFixedGeolocationOverride(web_contents_.get());
+      BerryScheduleMapsGeolocationRetries(web_contents_.get());
+      QNX_NAV_LOG_FMT("%s", "BerryNav: Maps geolocation re-applied post-nav\n");
+    }
   }
 #endif
   MaybeArmDumpTimeout(navigation_handle);

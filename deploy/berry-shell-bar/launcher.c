@@ -19,9 +19,88 @@
 #include <string.h>
 #include <unistd.h>
 
-static const char* kRotation = "90";
 static const char* kScaleFactor = "--force-device-scale-factor=1";
 static const char* kSharedMisc = "/accounts/1000/shared/misc/";
+
+static int marker_exists(const char* name);
+static size_t read_marker_text(const char* name, char* out, size_t out_sz);
+
+/* BB10 device panel geometry (portrait). Render defaults are ~half panel on the
+ * short axis unless the user picks a Display resolution tier. Touch coordinates
+ * from libscreen are mapped using QNX_SCREEN_OUTPUT_* vs render size. */
+typedef struct {
+  const char* id;
+  const char* label;
+  int output_w;
+  int output_h;
+  int rotation;
+  int default_render_w;
+  int default_render_h;
+} BerryDeviceProfile;
+
+static const BerryDeviceProfile kDeviceProfiles[] = {
+    {"passport", "Passport", 1440, 1440, 90, 720, 720},
+    {"classic", "Classic", 720, 720, 90, 540, 540},
+    {"q10", "Q10", 720, 720, 90, 540, 540},
+    {"q5", "Q5", 720, 720, 90, 540, 540},
+    {"z10", "Z10", 768, 1280, 90, 384, 640},
+    {"z30", "Z30", 720, 1280, 90, 360, 640},
+    {"z3", "Z3", 720, 1280, 90, 360, 640},
+    {"leap", "Leap", 720, 1280, 90, 360, 640},
+};
+
+static const BerryDeviceProfile* find_device_profile(const char* id) {
+  if (id && id[0]) {
+    for (size_t i = 0; i < sizeof(kDeviceProfiles) / sizeof(kDeviceProfiles[0]);
+         ++i) {
+      if (strcmp(id, kDeviceProfiles[i].id) == 0)
+        return &kDeviceProfiles[i];
+    }
+  }
+  return &kDeviceProfiles[0];
+}
+
+static void apply_device_profile(int* output_w,
+                                 int* output_h,
+                                 int* rotation,
+                                 int* base_render_w,
+                                 int* base_render_h,
+                                 char* device_name,
+                                 size_t device_name_len) {
+  char dev_id[64];
+  const char* id = "passport";
+  if (read_marker_text("berry-device", dev_id, sizeof(dev_id)))
+    id = dev_id;
+  const BerryDeviceProfile* p = find_device_profile(id);
+  *output_w = p->output_w;
+  *output_h = p->output_h;
+  *rotation = p->rotation;
+  *base_render_w = p->default_render_w;
+  *base_render_h = p->default_render_h;
+  snprintf(device_name, device_name_len, "%s", p->label);
+
+  char rot_buf[16];
+  if (read_marker_text("berry-device-rotation", rot_buf, sizeof(rot_buf))) {
+    int r = atoi(rot_buf);
+    if (r == 0 || r == 90 || r == 180 || r == 270)
+      *rotation = r;
+  }
+}
+
+static void scale_render_dims(int* render_w,
+                              int* render_h,
+                              int base_w,
+                              int base_h,
+                              float scale) {
+  int w = (int)(base_w * scale + 0.5f);
+  int h = (int)(base_h * scale + 0.5f);
+  if (w < 320)
+    w = 320;
+  if (h < 320)
+    h = 320;
+  *render_w = w;
+  *render_h = h;
+}
 
 static int marker_exists(const char* name) {
   char path[512];
@@ -49,51 +128,54 @@ static size_t read_marker_text(const char* name, char* out, size_t out_sz) {
   return got;
 }
 
-/* Load-reduction profiles for X.com crash triage (touch marker in shared/misc).
- * Profiles stack: berry-x-lite.enable implies 420 + 12fps + 2 raster threads.
- * Individual markers: berry-x-420.enable, berry-x-slow12.enable,
- * berry-x-slow15.enable. Logged at startup as BerryShell: load profile = ...
- * Remove all berry-x-* markers to restore default 720² / uncapped / 4 threads. */
+/* Load-reduction profiles (Settings > Display / Frame rate, or marker files).
+ * Defaults (no markers): device profile render size, 45 fps cap, 4 raster threads.
+ * Resolution tiers scale the device profile's default render (420/540/720/1440
+ * relative to a 720px reference on the short axis). Profiles stack unless
+ * noted: berry-x-lite.enable implies 420-tier + 12fps + 2 thr. */
 static void apply_x_load_profile(int* render_w,
                                  int* render_h,
                                  int* max_fps,
                                  int* raster_threads,
                                  int* use_fps_limit_flag,
                                  char* profile_name,
-                                 size_t profile_name_len) {
-  strncpy(profile_name, "default(1440)", profile_name_len);
+                                 size_t profile_name_len,
+                                 int base_render_w,
+                                 int base_render_h) {
+  float scale = 1.0f;
+  strncpy(profile_name, "default", profile_name_len);
+  scale_render_dims(render_w, render_h, base_render_w, base_render_h, scale);
 
   if (marker_exists("berry-x-lite.enable")) {
-    *render_w = 420;
-    *render_h = 420;
+    scale = 420.0f / 720.0f;
+    scale_render_dims(render_w, render_h, base_render_w, base_render_h, scale);
     *max_fps = 12;
     *raster_threads = 2;
     *use_fps_limit_flag = 1;
-    strncpy(profile_name, "lite(420+12fps+2thr)", profile_name_len);
+    strncpy(profile_name, "lite(420-tier+12fps+2thr)", profile_name_len);
     return;
   }
   if (marker_exists("berry-x-420.enable")) {
-    *render_w = 420;
-    *render_h = 420;
+    scale = 420.0f / 720.0f;
     strncpy(profile_name, "420", profile_name_len);
   }
   if (marker_exists("berry-x-540.enable")) {
-    *render_w = 540;
-    *render_h = 540;
+    scale = 540.0f / 720.0f;
     strncpy(profile_name, "540", profile_name_len);
   }
   if (marker_exists("berry-x-720.enable")) {
-    *render_w = 720;
-    *render_h = 720;
+    scale = 1.0f;
     strncpy(profile_name, "720", profile_name_len);
   }
-  /* Native panel resolution: 1440² render with no downscale (sharpest, but the
-   * heaviest -- 4x the pixels of 720). The output size below already tops out at
-   * 1440, so render==output is 1:1. */
   if (marker_exists("berry-x-1440.enable")) {
-    *render_w = 1440;
-    *render_h = 1440;
+    scale = 1440.0f / 720.0f;
     strncpy(profile_name, "1440", profile_name_len);
+  }
+  scale_render_dims(render_w, render_h, base_render_w, base_render_h, scale);
+  if (marker_exists("berry-x-fullfps.enable")) {
+    *max_fps = 0;
+    *use_fps_limit_flag = 0;
+    strncpy(profile_name, "fullfps", profile_name_len);
   }
   if (marker_exists("berry-x-slow10.enable")) {
     *max_fps = 10;
@@ -109,6 +191,11 @@ static void apply_x_load_profile(int* render_w,
     *max_fps = 15;
     *use_fps_limit_flag = 1;
     strncpy(profile_name, "slow15", profile_name_len);
+  }
+  if (marker_exists("berry-x-slow45.enable")) {
+    *max_fps = 45;
+    *use_fps_limit_flag = 1;
+    strncpy(profile_name, "slow45", profile_name_len);
   }
   if (marker_exists("berry-x-1thread.enable")) {
     *raster_threads = 1;
@@ -127,7 +214,9 @@ static void apply_x_load_profile(int* render_w,
  * intentionally left ENABLED because on-screen qnx_screen rendering needs it. */
 static const char* kDisableFeatures =
     "--disable-features=ServiceWorker,NetworkServiceDedicatedThread,MojoIpcz,"
-    "Translate,OptimizationHints,MediaRouter,PreconnectToSearch";
+    "Translate,OptimizationHints,MediaRouter,PreconnectToSearch,"
+    "BackForwardCache,AutofillServerCommunication,HeavyAdPrivacyMitigations,"
+    "InterestFeedContentSuggestions";
 
 /* Same list but with ServiceWorker LEFT ENABLED. WhatsApp Web (and most PWAs)
  * use a Service Worker as their primary cache: it stores the app shell + JS +
@@ -137,7 +226,9 @@ static const char* kDisableFeatures =
  * test whether it's stable here and how much it speeds repeat loads. */
 static const char* kDisableFeaturesSW =
     "--disable-features=NetworkServiceDedicatedThread,MojoIpcz,"
-    "Translate,OptimizationHints,MediaRouter,PreconnectToSearch";
+    "Translate,OptimizationHints,MediaRouter,PreconnectToSearch,"
+    "BackForwardCache,AutofillServerCommunication,HeavyAdPrivacyMitigations,"
+    "InterestFeedContentSuggestions";
 
 /* Resolve the directory that holds this executable (the app's native asset
  * dir). The Navigator launches the app with cwd=/accounts/devuser (NOT the
@@ -227,23 +318,24 @@ int main(int argc, char** argv) {
     use_multi_process = 1;
   const int use_single_process = !use_multi_process;
 
-  /* Software rendering is the default on Passport (A/B: faster steady-state than
-   * EGL full-frame swap). Opt in to GPU: berry-gpu.enable or QNX_ENABLE_GPU=1.
-   * berry-gpu.disable / QNX_DISABLE_GPU=1 still force software. */
-  int use_gpu = 0;
-  if (access("/accounts/1000/shared/misc/berry-gpu.enable", F_OK) == 0)
-    use_gpu = 1;
-  {
-    const char* gpu_env = getenv("QNX_ENABLE_GPU");
-    if (gpu_env && gpu_env[0] == '1')
-      use_gpu = 1;
-  }
+  /* GPU/EGL on by default for sharp compositing; FFmpeg software decode handles
+   * video (--disable-accelerated-video-decode). Opt out: berry-gpu.disable.
+   * Legacy berry-gpu.enable is redundant. QNX_ENABLE_GPU=1 / QNX_DISABLE_GPU=1
+   * override markers for SSH testing. */
+  int use_gpu = 1;
   if (access("/accounts/1000/shared/misc/berry-gpu.disable", F_OK) == 0)
     use_gpu = 0;
   {
     const char* gpu_env = getenv("QNX_DISABLE_GPU");
     if (gpu_env && gpu_env[0] == '1')
       use_gpu = 0;
+  }
+  if (access("/accounts/1000/shared/misc/berry-gpu.enable", F_OK) == 0)
+    use_gpu = 1;
+  {
+    const char* gpu_env = getenv("QNX_ENABLE_GPU");
+    if (gpu_env && gpu_env[0] == '1')
+      use_gpu = 1;
   }
 
   /* DIAGNOSTIC: the .bar runs sandboxed under a per-app uid, so its own data
@@ -256,7 +348,7 @@ int main(int argc, char** argv) {
     /* Append, don't truncate: Navigator respawns the app on crash and was
      * wiping the only copy of the crash backtrace (O_TRUNC). */
     int lfd = open("/accounts/1000/shared/misc/berry-kbd.log",
-                   O_WRONLY | O_CREAT | O_APPEND, 0644);
+                   O_WRONLY | O_CREAT | O_APPEND, 0666);
     if (lfd >= 0) {
       dup2(lfd, 1);
       dup2(lfd, 2);
@@ -282,12 +374,13 @@ int main(int argc, char** argv) {
       setenv("QNX_GPU_PROBE", "0", 1);
   }
 
+  fprintf(stderr, "BerryShell: BerryBrowserV3 build 43\n");
   fprintf(stderr, "BerryShell: app dir = %s\n", dir);
   fprintf(stderr, "BerryShell: work dir (cwd) = %s\n", work);
   fprintf(stderr, "BerryShell: %s\n",
           use_single_process ? "single-process mode" : "multi-process mode");
-  fprintf(stderr, "BerryShell: %s (opt-in GPU: berry-gpu.enable in shared/misc)\n",
-          use_gpu ? "GPU/EGL mode" : "software mode (--disable-gpu, default)");
+  fprintf(stderr, "BerryShell: %s (opt-out GPU: berry-gpu.disable in shared/misc)\n",
+          use_gpu ? "GPU/EGL mode" : "software mode (--disable-gpu)");
 
   /* Bundled shared libs sit next to content_shell. */
   {
@@ -306,30 +399,39 @@ int main(int argc, char** argv) {
       setenv("QNX_CA_BUNDLE", ca, 1);
   }
 
-  /* Orientation correction for the Navigator-composited window (overridable). */
-  setenv("QNX_SCREEN_ROTATION", kRotation, 0);
+  /* Device panel + orientation (Settings > Device, or berry-device marker). */
+  int output_w = 1440, output_h = 1440, rotation = 90;
+  int base_render_w = 720, base_render_h = 720;
+  char device_name[64];
+  apply_device_profile(&output_w, &output_h, &rotation, &base_render_w,
+                       &base_render_h, device_name, sizeof(device_name));
 
-  /* Default render resolution is 1440² (native Passport panel, no downscale =
-   * sharpest). Override with berry-x-420 / berry-x-720 / berry-x-1440 markers
-   * (Settings > Display). 1440 is the heaviest (4x the pixels of 720). */
-  int render_w = 1440, render_h = 1440;
-  int max_fps = 0; /* 0 = no QNX_MAX_FPS env (Viz default 60 = uncapped) */
+  /* Default render: device profile, scaled by Display resolution tier. */
+  int render_w = base_render_w, render_h = base_render_h;
+  int max_fps = 45;
   int raster_threads = 4;
-  int use_fps_limit_flag = 0; /* 0 => --disable-frame-rate-limit (current default) */
+  int use_fps_limit_flag = 1;
   char profile_name[64];
   apply_x_load_profile(&render_w, &render_h, &max_fps, &raster_threads,
-                       &use_fps_limit_flag, profile_name, sizeof(profile_name));
+                       &use_fps_limit_flag, profile_name, sizeof(profile_name),
+                       base_render_w, base_render_h);
 
   {
     char dim[16];
+    char rot[16];
     snprintf(dim, sizeof(dim), "%d", render_w);
     setenv("QNX_SCREEN_WIDTH", dim, 1);
     snprintf(dim, sizeof(dim), "%d", render_h);
     setenv("QNX_SCREEN_HEIGHT", dim, 1);
+    snprintf(dim, sizeof(dim), "%d", output_w);
+    setenv("QNX_SCREEN_OUTPUT_WIDTH", dim, 1);
+    snprintf(dim, sizeof(dim), "%d", output_h);
+    setenv("QNX_SCREEN_OUTPUT_HEIGHT", dim, 1);
+    snprintf(rot, sizeof(rot), "%d", rotation);
+    setenv("QNX_SCREEN_ROTATION", rot, 1);
   }
-  /* Panel upscale stays 1440² so the window still fills the Passport display. */
-  setenv("QNX_SCREEN_OUTPUT_WIDTH", "1440", 0);
-  setenv("QNX_SCREEN_OUTPUT_HEIGHT", "1440", 0);
+  /* Faster BPS input drain (keyboard/touch). See qnx_screen_event_source.cc. */
+  setenv("QNX_INPUT_POLL_MS", "1", 0);
   if (max_fps > 0) {
     char fps[16];
     snprintf(fps, sizeof(fps), "%d", max_fps);
@@ -340,9 +442,10 @@ int main(int argc, char** argv) {
     if (max_fps > 0)
       snprintf(fps_buf, sizeof(fps_buf), "%d", max_fps);
     fprintf(stderr,
-            "BerryShell: load profile = %s render=%dx%d raster_thr=%d max_fps=%s "
-            "fps_limit=%s\n",
-            profile_name, render_w, render_h, raster_threads,
+            "BerryShell: device = %s panel=%dx%d rot=%d render=%dx%d "
+            "load=%s raster_thr=%d max_fps=%s fps_limit=%s\n",
+            device_name, output_w, output_h, rotation, render_w, render_h,
+            profile_name, raster_threads,
             max_fps > 0 ? fps_buf : "off",
             use_fps_limit_flag ? "on" : "off");
   }
@@ -447,9 +550,31 @@ int main(int argc, char** argv) {
   argv_buf[n++] = (char*)"--disable-prompt-on-repost";
   argv_buf[n++] = (char*)"--disable-sync";
   argv_buf[n++] = (char*)"--disable-translate";
+  argv_buf[n++] = (char*)"--disable-notifications";
+  argv_buf[n++] = (char*)"--disable-smooth-scrolling";
   argv_buf[n++] = (char*)"--no-first-run";
   argv_buf[n++] = (char*)"--no-default-browser-check";
   argv_buf[n++] = (char*)"--disable-component-update";
+  /* YouTube/mobile video: allow <video> autoplay without an extra gesture tap
+   * after the user already opened a watch page. */
+  argv_buf[n++] = (char*)"--autoplay-policy=no-user-gesture-required";
+  /* QNX has no HW video decode; force FFmpeg software path so MSE/DASH and
+   * progressive MP4 share the same in-process decoders. */
+  argv_buf[n++] = (char*)"--disable-accelerated-video-decode";
+  if (marker_exists("berry-video.debug")) {
+    setenv("QNX_NAV_DEBUG", "1", 1);
+    argv_buf[n++] = (char*)"--enable-logging=stderr";
+    if (marker_exists("berry-video.verbose")) {
+      argv_buf[n++] = (char*)"--v=1";
+    }
+    fprintf(stderr,
+            "BerryShell: video debug = on (berry-video.debug, nav ChunkDone on)\n");
+  } else if (access("/accounts/1000/shared/misc/berry-kbd.debug", F_OK) != 0 &&
+             access("/accounts/1000/shared/misc/berry-nav.debug", F_OK) != 0) {
+    /* Verbose logging to berry-kbd.log costs measurable CPU/IO on BB10; keep
+     * stderr quiet unless a debug marker is present. */
+    argv_buf[n++] = (char*)"--disable-logging";
+  }
   /* Skip CertVerifierService Mojo round-trip on every HTTPS load (QNX has no
    * system trust store; full verify is slow and race-prone). TLS still encrypts;
    * only certificate validation is bypassed. See deploy/HARDENING.md. */
@@ -478,6 +603,25 @@ int main(int argc, char** argv) {
     argv_buf[n++] = (char*)"--disable-quic";
   } else {
     fprintf(stderr, "BerryShell: QUIC = enabled (berry-quic.enable)\n");
+  }
+  /* HTTP/1.1 A/B: googlevideo may fail over HTTP/2 ALPN on QNX (see HARDENING.md). */
+  if (marker_exists("berry-http1.enable")) {
+    argv_buf[n++] = (char*)"--disable-http2";
+    fprintf(stderr, "BerryShell: HTTP/2 = disabled (berry-http1.enable)\n");
+  }
+  /* Alt-Svc/SVCB A/B: stop DNS HTTPS records from advertising HTTP/3 paths. */
+  if (marker_exists("berry-alt-svc.disable")) {
+    argv_buf[n++] =
+        (char*)"--disable-features=UseDnsHttpsSvcb,UseDnsHttpsSvcbAlpn";
+    fprintf(stderr,
+            "BerryShell: Alt-Svc/SVCB = disabled (berry-alt-svc.disable)\n");
+  }
+  /* Privacy sandbox / identity APIs: FedCM, ads measurement, etc. — background
+   * work with no BB10 benefit. Toggle in Settings or berry-privacy.disable. */
+  if (marker_exists("berry-privacy.disable")) {
+    argv_buf[n++] = (char*)"--disable-features=FedCm,PrivacySandboxAdsAPIs,"
+                           "SharedStorageAPI,PrivateAggregationApi";
+    fprintf(stderr, "BerryShell: privacy sandbox APIs = disabled\n");
   }
   /* Telemetry blackhole A/B: berry-block.enable maps known non-essential Meta/
    * WhatsApp logging hosts to 0.0.0.0 so they fail fast instead of consuming
@@ -523,20 +667,28 @@ int main(int argc, char** argv) {
     }
   }
   argv_buf[n++] = (char*)kScaleFactor;
-  /* ServiceWorker A/B: berry-sw.enable keeps SW on (PWA app-shell caching);
-   * default leaves it disabled for stability. */
-  if (marker_exists("berry-sw.enable")) {
-    argv_buf[n++] = (char*)kDisableFeaturesSW;
-    fprintf(stderr, "BerryShell: ServiceWorker = ENABLED (berry-sw.enable)\n");
-  } else {
+  /* ServiceWorker A/B: ON by default (YouTube/PWA app-shell caching). Opt out:
+   * berry-sw.disable. Legacy berry-sw.enable is redundant. */
+  if (marker_exists("berry-sw.disable")) {
     argv_buf[n++] = (char*)kDisableFeatures;
-    fprintf(stderr, "BerryShell: ServiceWorker = disabled (default)\n");
+    fprintf(stderr, "BerryShell: ServiceWorker = disabled (berry-sw.disable)\n");
+  } else {
+    argv_buf[n++] = (char*)kDisableFeaturesSW;
+    fprintf(stderr, "BerryShell: ServiceWorker = ENABLED (default)\n");
   }
-  /* Low-end device mode A/B: forces Chromium's phone memory/GC/tile heuristics
-   * (smaller V8 heap, leaner image/tile caches). berry-lowend.enable to try. */
-  if (marker_exists("berry-lowend.enable")) {
+  /* Low-end device mode ON by default (smaller V8 heap + leaner tile caches;
+   * big win on heavy SPAs like WhatsApp). Opt out: berry-lowend.disable.
+   * Legacy berry-lowend.enable is redundant. */
+  if (!marker_exists("berry-lowend.disable")) {
     argv_buf[n++] = (char*)"--enable-low-end-device-mode";
-    fprintf(stderr, "BerryShell: low-end device mode = ON (berry-lowend.enable)\n");
+    fprintf(stderr, "BerryShell: low-end device mode = ON (default)\n");
+  }
+  /* Larger HTTP cache for repeat visits (YouTube thumbs, Maps tiles, SW shells).
+   * Opt out: berry-disk-cache.disable */
+  if (!marker_exists("berry-disk-cache.disable")) {
+    argv_buf[n++] = (char*)"--disk-cache-size=67108864";
+    argv_buf[n++] = (char*)"--media-cache-size=67108864";
+    fprintf(stderr, "BerryShell: disk+media cache = 64MB (default)\n");
   }
   /* Present as Android Chrome unless a desktop-gated host forced desktop above.
    * content_shell's GetUserAgent()/GetUserAgentMetadata() and OverrideWebkitPrefs
@@ -571,6 +723,11 @@ int main(int argc, char** argv) {
     static char blink_arg[256];
     char settings[224];
     settings[0] = '\0';
+    /* Low-end defaults: skip ping-on-click and other tiny background fetches. */
+    if (!marker_exists("berry-lowend.disable"))
+      strncat(settings, "hyperlinkAuditingEnabled=false,"
+                          "spellcheckEnabledByDefault=false,",
+              sizeof(settings) - strlen(settings) - 1);
     if (marker_exists("berry-noimages.enable"))
       strncat(settings, "imagesEnabled=false,",
               sizeof(settings) - strlen(settings) - 1);

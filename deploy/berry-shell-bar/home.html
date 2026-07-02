@@ -28,8 +28,17 @@
     border: 2px solid #2b3744; background: #0b0f14; color: #fff; outline: none; }
   #omni:focus { border-color: #4aa3ff; }
   #go { font-size: 24px; padding: 0 26px; border: none; border-radius: 14px;
-    background: #4aa3ff; color: #06243f; font-weight: 800; }
-  .hint { text-align: center; color: #5f6e7d; font-size: 14px; margin: 6px 0 26px; }
+    background: #de5833; color: #fff; font-weight: 800; }
+  .hint { text-align: center; color: #5f6e7d; font-size: 14px; margin: 6px 0 14px; }
+
+  .auth-row { display: grid; grid-template-columns: 1fr 1fr; gap: 13px;
+    margin-bottom: 26px; }
+  .auth { display: flex; align-items: center; justify-content: center; gap: 10px;
+    text-decoration: none; padding: 16px 12px; border-radius: 14px;
+    font-size: 18px; font-weight: 700; color: #fff; border: 1px solid #243140; }
+  .auth:active { filter: brightness(1.12); }
+  .auth.g { background: #4285f4; }
+  .auth.k { background: #1a73e8; }
 
   .sec { font-size: 13px; letter-spacing: .1em; text-transform: uppercase;
     color: #61707f; margin: 0 4px 12px; }
@@ -37,15 +46,16 @@
   .tile { display: flex; flex-direction: column; align-items: center; gap: 8px;
     text-decoration: none; text-align: center; padding: 18px 6px;
     border-radius: 16px; background: #161f2b; color: #dce6f1;
-    font-size: 15px; border: 1px solid #243140; }
+    font-size: 14px; border: 1px solid #243140; }
   .tile:active { background: #1f2c3a; }
   .ic { width: 46px; height: 46px; border-radius: 13px; display: flex;
-    align-items: center; justify-content: center; font-size: 24px;
+    align-items: center; justify-content: center; font-size: 22px;
     font-weight: 700; color: #fff; }
-  .g{background:#4285f4}.k{background:#1a73e8}.w{background:#636466}
-  .y{background:#ff0000}.b{background:#bb1919}.h{background:#ff6600}
-  .d{background:#de5833}.x{background:#222}.wa{background:#25d366}
-  .f{background:#1877f2}.r{background:#1da1f2}.n{background:#834bff}
+  .d{background:#de5833}.wa{background:#25d366}.f{background:#1877f2}
+  .w{background:#636466}.wsj{background:#0274b6}.g{background:#4285f4}
+  .y{background:#ff0000}.h{background:#ff6600}.x{background:#222}
+  .b{background:#bb1919}.n{background:#834bff}.m{background:#34a853}
+  .yf{background:#6001d2}
 
   .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 13px;
     margin-top: 22px; }
@@ -55,6 +65,13 @@
   .act.set { background: #1e2a3a; color: #cfe0f3; border: 1px solid #2c3e54; }
   .act.res { background: #2a2030; color: #f0d6ea; border: 1px solid #4f3a52; }
   .act:active { filter: brightness(1.15); }
+
+  .support { margin-top: 26px; padding: 16px 18px; border-radius: 14px;
+    background: #141c28; border: 1px solid #243140; text-align: center; }
+  .support p { margin: 0; font-size: 15px; line-height: 1.45; color: #8fa0b3; }
+  .support a { color: #ff424d; font-weight: 700; text-decoration: none; }
+  .support a:active { opacity: .85; }
+  .ver { margin-top: 10px; font-size: 12px; color: #4f6070; letter-spacing: .04em; }
 </style>
 </head>
 <body>
@@ -67,32 +84,53 @@
     </div>
 
     <form id="f">
-      <input id="omni" type="text" inputmode="url" autocomplete="off"
+      <input id="omni" type="text" inputmode="search" autocomplete="off"
              autocapitalize="off" spellcheck="false"
-             placeholder="Search or type a URL">
+             placeholder="Search DuckDuckGo or enter a URL">
       <button id="go" type="submit">Go</button>
     </form>
-    <div class="hint">Type an address or a search, then press Enter</div>
+    <div class="hint">Searches use DuckDuckGo &middot; URLs open directly</div>
+
+    <div class="auth-row">
+      <a class="auth g" href="https://www.google.com/"><span class="ic g">G</span>Google</a>
+      <a class="auth k" href="https://accounts.google.com/"><span class="ic k">&#128273;</span>Sign in</a>
+    </div>
 
     <div class="sec">Quick links</div>
     <div class="grid">
-      <a class="tile" href="https://www.google.com/"><span class="ic g">G</span>Google</a>
-      <a class="tile" href="https://accounts.google.com/"><span class="ic k">&#128273;</span>Sign-in</a>
-      <a class="tile" href="https://en.wikipedia.org/"><span class="ic w">W</span>Wikipedia</a>
-      <a class="tile" href="https://www.youtube.com/"><span class="ic y">&#9658;</span>YouTube</a>
-      <a class="tile" href="https://www.bbc.com/news"><span class="ic b">B</span>BBC</a>
-      <a class="tile" href="https://news.ycombinator.com/"><span class="ic h">Y</span>HN</a>
+      <!-- row 1 -->
       <a class="tile" href="https://duckduckgo.com/"><span class="ic d">&#129414;</span>DuckDuckGo</a>
-      <a class="tile" href="https://x.com/"><span class="ic x">X</span>X</a>
       <a class="tile" href="https://web.whatsapp.com/"><span class="ic wa">&#128172;</span>WhatsApp</a>
       <a class="tile" href="https://m.facebook.com/"><span class="ic f">f</span>Facebook</a>
+      <a class="tile" href="https://en.wikipedia.org/"><span class="ic w">W</span>Wikipedia</a>
+      <!-- row 2 -->
+      <a class="tile" href="https://www.wsj.com/"><span class="ic wsj">WSJ</span>WSJ</a>
+      <a class="tile" href="https://www.google.com/"><span class="ic g">G</span>Google</a>
+      <a class="tile" href="https://www.youtube.com/watch?v=jNQXAC9IVRw"><span class="ic y">&#9658;</span>YouTube</a>
+      <a class="tile" href="https://news.ycombinator.com/"><span class="ic h">Y</span>Hacker News</a>
+      <!-- row 3 -->
       <a class="tile" href="https://www.reddit.com/"><span class="ic n">r</span>Reddit</a>
-      <a class="tile" href="https://www.google.com/maps"><span class="ic g">&#128205;</span>Maps</a>
+      <a class="tile" href="https://x.com/"><span class="ic x">X</span>X</a>
+      <a class="tile" href="https://finance.yahoo.com/"><span class="ic yf">$</span>Yahoo Finance</a>
+      <a class="tile" href="https://www.google.com/maps"><span class="ic m">&#128205;</span>Maps</a>
     </div>
 
     <div class="actions">
       <a class="act set" href="https://berry.settings/">&#9881; Settings</a>
       <a class="act res" href="https://berry.restart/">&#8635; Restart</a>
+    </div>
+
+    <div class="support">
+      <p>BerryBrowser is built by <strong style="color:#cdd8e4">sw7ft</strong>.
+        If it helps you, consider supporting development on
+        <a href="https://www.patreon.com/sw7ft">Patreon</a>.</p>
+      <p style="font-size:11px;margin-top:8px">
+        <a href="file:///accounts/1000/shared/misc/diag.html">diag</a> &middot;
+        <a href="file:///accounts/1000/shared/misc/diag_mc.html">diag_mc</a> &middot;
+        <a href="file:///accounts/1000/shared/misc/diag_mse.html">diag_mse</a> &middot;
+        <a href="file:///accounts/1000/shared/misc/diag_eme.html">diag_eme</a>
+      </p>
+      <div class="ver">BerryBrowserV3 &middot; v3.0.2 &middot; build 25</div>
     </div>
   </div>
 
@@ -108,7 +146,7 @@
     var dest;
     if (hasScheme) dest = v;
     else if (looksUrl) dest = 'https://' + v;
-    else dest = 'https://www.google.com/search?q=' + encodeURIComponent(v);
+    else dest = 'https://duckduckgo.com/?q=' + encodeURIComponent(v);
     window.location.href = dest;
   });
   requestAnimationFrame(function(){ omni.focus(); });

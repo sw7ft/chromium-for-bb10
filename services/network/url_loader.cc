@@ -14,6 +14,7 @@
 #if defined(__QNX__) || defined(__QNXNTO__)
 #include <unistd.h>
 #include <cstdio>
+#include <cstdlib>
 #endif
 
 #include "base/command_line.h"
@@ -28,10 +29,11 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/ranges/algorithm.h"
 #include "base/sequence_checker.h"
-#include "base/strings/strcat.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
+#include "base/threading/platform_thread.h"
 #include "base/task/thread_pool.h"
 #include "base/thread_annotations.h"
 #include "base/time/time.h"
@@ -44,8 +46,10 @@
 #include "net/base/isolation_info.h"
 #include "net/base/load_flags.h"
 #include "net/base/load_timing_info.h"
+#include "net/base/net_errors.h"
 #include "net/base/mime_sniffer.h"
 #include "net/base/schemeful_site.h"
+#include "net/base/url_util.h"
 #include "net/base/transport_info.h"
 #include "net/base/upload_bytes_element_reader.h"
 #include "net/base/upload_file_element_reader.h"
@@ -65,6 +69,7 @@
 #include "net/ssl/ssl_connection_status_flags.h"
 #include "net/ssl/ssl_private_key.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
+#include "net/url_request/referrer_policy.h"
 #include "net/url_request/redirect_info.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -160,6 +165,835 @@ class FileElementReader : public net::UploadFileElementReader {
  private:
   scoped_refptr<ResourceRequestBody> resource_request_body_;
 };
+
+#if defined(__QNX__) || defined(__QNXNTO__)
+// True when a googlevideo videoplayback URL looks like SABR garbage (bad expire,
+// absurd duration, or sabr listed in sparams).
+bool BerryGooglevideoUrlLooksSabrOrGarbage(const std::string& spec) {
+  if (spec.find("googlevideo.com") == std::string::npos ||
+      spec.find("videoplayback") == std::string::npos)
+    return false;
+  if (spec.find("sabr=") != std::string::npos ||
+      spec.find("%2Csabr%2C") != std::string::npos ||
+      spec.find("sabr%2C") != std::string::npos ||
+      spec.find("%2Csabr") != std::string::npos)
+    return false;  // Scrub on GET; do not block signed URLs outright.
+  size_t exp = spec.find("expire=");
+  if (exp != std::string::npos) {
+    char* end = nullptr;
+    const long long val = strtoll(spec.c_str() + exp + 7, &end, 10);
+    if (val > 2100000000LL || val < 1400000000LL)
+      return true;
+  }
+  size_t dur = spec.find("dur=");
+  if (dur != std::string::npos) {
+    char* end = nullptr;
+    const long long val = strtoll(spec.c_str() + dur + 4, &end, 10);
+    if (val > 86400 * 24)
+      return true;
+  }
+  if (spec.find("mn=") != std::string::npos && spec.find("sn-") == std::string::npos)
+    return true;
+  return false;
+}
+
+// Progressive googlevideo URLs extracted from a player response; <video> fetches
+// matching these pass through untouched (no scrub/block/POST logic).
+std::vector<std::string> g_berry_googlevideo_allowlist;
+std::string g_berry_youtube_visitor_data;
+
+const char kBerryVisitorDataPath[] =
+    "/accounts/1000/shared/misc/berry-youtube-visitor.dat";
+
+void BerryClearGooglevideoAllowlist() {
+  g_berry_googlevideo_allowlist.clear();
+}
+
+void BerryLoadPersistedVisitorData() {
+  static bool loaded = false;
+  if (loaded)
+    return;
+  loaded = true;
+  FILE* f = fopen(kBerryVisitorDataPath, "r");
+  if (!f)
+    return;
+  char buf[1024];
+  size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+  fclose(f);
+  if (n == 0)
+    return;
+  buf[n] = '\0';
+  while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r'))
+    buf[--n] = '\0';
+  if (n > 0) {
+    g_berry_youtube_visitor_data.assign(buf, n);
+    QNX_NAV_LOG_FMT("BerryNav: VisitorDataLoad bytes=%zu\n", n);
+  }
+}
+
+void BerryPersistVisitorData() {
+  if (g_berry_youtube_visitor_data.empty())
+    return;
+  FILE* f = fopen(kBerryVisitorDataPath, "w");
+  if (!f)
+    return;
+  fwrite(g_berry_youtube_visitor_data.data(), 1,
+         g_berry_youtube_visitor_data.size(), f);
+  fclose(f);
+}
+
+std::string BerryExtractVisitorDataFromJson(const std::string& body) {
+  static const char* kKeys[] = {"\"visitorData\":\"", "\"visitorData\": \""};
+  for (const char* key : kKeys) {
+    size_t pos = body.find(key);
+    if (pos == std::string::npos)
+      continue;
+    pos += strlen(key);
+    size_t end = body.find('"', pos);
+    if (end != std::string::npos && end > pos)
+      return body.substr(pos, end - pos);
+  }
+  return std::string();
+}
+
+void BerryTryCacheVisitorDataFromWatchHtml(const std::string& html) {
+  if (html.empty())
+    return;
+  std::string visitor = BerryExtractVisitorDataFromJson(html);
+  if (visitor.empty()) {
+    static const char* kMarkers[] = {"\"VISITOR_DATA\":\"", "VISITOR_DATA\":\"",
+                                     "\\\"VISITOR_DATA\\\":\\\""};
+    for (const char* marker : kMarkers) {
+      size_t pos = html.find(marker);
+      if (pos == std::string::npos)
+        continue;
+      pos += strlen(marker);
+      size_t end = pos;
+      while (end < html.size() && html[end] != '"' && html[end] != '\\' &&
+             html[end] != '\'')
+        ++end;
+      if (end > pos) {
+        visitor = html.substr(pos, end - pos);
+        break;
+      }
+    }
+  }
+  if (visitor.empty() || visitor == g_berry_youtube_visitor_data)
+    return;
+  g_berry_youtube_visitor_data = visitor;
+  BerryPersistVisitorData();
+  QNX_NAV_LOG_FMT("BerryNav: VisitorDataWatch bytes=%zu\n", visitor.size());
+}
+
+void BerryCacheVisitorDataFromPlayerResponse(const std::string& body) {
+  const std::string visitor = BerryExtractVisitorDataFromJson(body);
+  if (visitor.empty())
+    return;
+  if (visitor == g_berry_youtube_visitor_data)
+    return;
+  g_berry_youtube_visitor_data = visitor;
+  BerryPersistVisitorData();
+  QNX_NAV_LOG_FMT("BerryNav: VisitorDataCache bytes=%zu\n", visitor.size());
+}
+
+bool BerryJsonClientHasVisitorData(const std::string& body) {
+  return !BerryExtractVisitorDataFromJson(body).empty();
+}
+
+bool BerryInjectVisitorDataIntoPlayerJson(std::string* body) {
+  if (!body || body->empty() || g_berry_youtube_visitor_data.empty())
+    return false;
+  if (BerryJsonClientHasVisitorData(*body))
+    return false;
+
+  size_t client = body->find("\"client\":");
+  if (client == std::string::npos)
+    client = body->find("\"client\" :");
+  if (client == std::string::npos)
+    return false;
+  size_t brace = body->find('{', client);
+  if (brace == std::string::npos)
+    return false;
+
+  const std::string insert =
+      "\"visitorData\":\"" + g_berry_youtube_visitor_data + "\",";
+  body->insert(brace + 1, insert);
+  return true;
+}
+
+bool BerryGooglevideoUrlIsAllowlisted(const std::string& spec) {
+  for (const std::string& allowed : g_berry_googlevideo_allowlist) {
+    if (spec == allowed)
+      return true;
+  }
+  return false;
+}
+
+void BerryRegisterGooglevideoAllowlist(const std::string& body) {
+  const size_t streaming = body.find("\"streamingData\"");
+  if (streaming == std::string::npos)
+    return;
+  const size_t formats_key = body.find("\"formats\"", streaming);
+  if (formats_key == std::string::npos)
+    return;
+  const size_t arr_start = body.find('[', formats_key);
+  if (arr_start == std::string::npos)
+    return;
+  const size_t arr_end = body.find(']', arr_start);
+  if (arr_end == std::string::npos || arr_end <= arr_start)
+    return;
+  const std::string formats_section =
+      body.substr(arr_start, arr_end - arr_start + 1);
+
+  size_t pos = 0;
+  while ((pos = formats_section.find("\"url\":\"", pos)) != std::string::npos) {
+    pos += 7;
+    size_t url_end = pos;
+    while (url_end < formats_section.size() && formats_section[url_end] != '"')
+      ++url_end;
+    if (url_end <= pos)
+      continue;
+    std::string url = formats_section.substr(pos, url_end - pos);
+    pos = url_end + 1;
+    if (url.rfind("https://", 0) != 0 ||
+        url.find("googlevideo.com") == std::string::npos)
+      continue;
+    if (BerryGooglevideoUrlIsAllowlisted(url))
+      continue;
+    g_berry_googlevideo_allowlist.push_back(url);
+    QNX_NAV_LOG_FMT("BerryNav: WatchShim allowlist url=\"%.120s\"\n",
+                    url.c_str());
+  }
+}
+
+void BerryScrubGooglevideoUrl(std::string* spec) {
+  if (!spec || spec->empty())
+    return;
+  base::ReplaceSubstringsAfterOffset(spec, 0, "c=WEB", "c=ANDROID");
+  base::ReplaceSubstringsAfterOffset(spec, 0, "%2Csabr%2C", "%2C");
+  base::ReplaceSubstringsAfterOffset(spec, 0, "sabr%2C", "");
+  base::ReplaceSubstringsAfterOffset(spec, 0, "%2Csabr", "");
+  base::ReplaceSubstringsAfterOffset(spec, 0, "sabr=1&", "");
+  base::ReplaceSubstringsAfterOffset(spec, 0, "&sabr=1", "");
+  base::ReplaceSubstringsAfterOffset(spec, 0, "?sabr=1&", "?");
+  base::ReplaceSubstringsAfterOffset(spec, 0, "?sabr=1", "?");
+  base::ReplaceSubstringsAfterOffset(spec, 0, "&keepalive=yes", "");
+}
+
+// Scrub googlevideo URLs embedded in youtubei player JSON (WEB+SABR → ANDROID).
+bool BerryScrubGooglevideoUrlsInPlayerBody(std::string* body) {
+  if (!body || body->empty())
+    return false;
+  bool changed = false;
+  const char* needle = "https://";
+  size_t pos = 0;
+  while ((pos = body->find(needle, pos)) != std::string::npos) {
+    size_t end = body->find('"', pos);
+    if (end == std::string::npos)
+      break;
+    if (body->substr(pos, end - pos).find("googlevideo.com") ==
+        std::string::npos) {
+      pos = end + 1;
+      continue;
+    }
+    std::string url = body->substr(pos, end - pos);
+    BerryScrubGooglevideoUrl(&url);
+    if (BerryGooglevideoUrlLooksSabrOrGarbage(url)) {
+      body->erase(pos, end - pos);
+      changed = true;
+      continue;
+    }
+    if (url != body->substr(pos, end - pos)) {
+      body->replace(pos, end - pos, url);
+      changed = true;
+    }
+    pos += url.size();
+  }
+  return changed;
+}
+
+// Returns true when the request body should be dropped (legacy; unused for POST).
+bool BerryPrepareYoutubeUrlAndMethod(
+    GURL* url,
+    std::string* method,
+    const ResourceRequestBody* /*request_body*/) {
+  if (!url || !method || !url->is_valid() || !url->SchemeIsHTTPOrHTTPS())
+    return false;
+
+  const std::string host = url->host();
+  const bool is_googlevideo = host.find("googlevideo.com") != std::string::npos;
+  if (!is_googlevideo)
+    return false;
+
+  std::string spec = url->spec();
+  if (spec.find("videoplayback") == std::string::npos)
+    return false;
+
+  if (BerryGooglevideoUrlIsAllowlisted(spec)) {
+    QNX_NAV_LOG_FMT("BerryNav: GooglevideoAllowlist pass url=\"%.100s\"\n",
+                    spec.c_str());
+    return false;
+  }
+
+  const std::string before = spec;
+  const bool is_post = *method == "POST";
+
+  if (BerryGooglevideoUrlLooksSabrOrGarbage(spec)) {
+    if (!g_berry_googlevideo_allowlist.empty() &&
+        !BerryGooglevideoUrlIsAllowlisted(spec)) {
+      QNX_NAV_LOG_FMT(
+          "BerryNav: GooglevideoNotAllowlisted %s url=\"%.100s\"\n",
+          is_post ? "POST" : "GET", spec.c_str());
+    }
+    QNX_NAV_LOG_FMT(
+        "BerryNav: BlockGarbageGooglevideo %s url=\"%.100s\"\n",
+        is_post ? "POST" : "GET", spec.c_str());
+    *url = GURL("https://www.youtube.com/generate_204");
+    *method = "GET";
+    return false;
+  }
+
+  if (is_post) {
+    // Keep POST + body intact — POST→GET drops signed body bytes and yields 403.
+    BerryScrubGooglevideoUrl(&spec);
+    if (BerryGooglevideoUrlLooksSabrOrGarbage(spec)) {
+      QNX_NAV_LOG_FMT(
+          "BerryNav: BlockGarbageGooglevideo POST url=\"%.100s\"\n",
+          spec.c_str());
+      *url = GURL("https://www.youtube.com/generate_204");
+      *method = "GET";
+      return false;
+    }
+    if (spec != before) {
+      *url = GURL(spec);
+      QNX_NAV_LOG_FMT("BerryNav: GooglevideoPostScrub url=\"%.100s\"\n",
+                      spec.c_str());
+    } else {
+      QNX_NAV_LOG_FMT("BerryNav: GooglevideoPostPass url=\"%.100s\"\n",
+                      spec.c_str());
+    }
+    return false;
+  }
+
+  BerryScrubGooglevideoUrl(&spec);
+  if (spec != before) {
+    *url = GURL(spec);
+    QNX_NAV_LOG_FMT("BerryNav: GooglevideoScrub url=\"%.100s\"\n",
+                    spec.c_str());
+  }
+  return false;
+}
+
+// Referer / Origin fixes for YouTube. Embed flows need a third-party Referer
+// (error 153); watch-page googlevideo needs youtube.com (reddit → HTTP 403).
+void BerryMaybeFixYoutubeEmbedReferer(net::URLRequest* url_request) {
+  if (!url_request)
+    return;
+  const GURL& url = url_request->url();
+  if (!url.SchemeIsHTTPOrHTTPS())
+    return;
+  const std::string spec = url.spec();
+  const std::string host = url.host();
+  const bool is_yt_host =
+      host.find("youtube.com") != std::string::npos ||
+      host.find("youtube-nocookie.com") != std::string::npos;
+  const bool is_embed_page = is_yt_host && spec.find("/embed/") != std::string::npos;
+  const bool is_youtubei = is_yt_host && spec.find("/youtubei/") != std::string::npos;
+  const bool is_googlevideo = host.find("googlevideo.com") != std::string::npos;
+  if (!is_embed_page && !is_youtubei && !is_googlevideo)
+    return;
+
+  const std::string& ref = url_request->referrer();
+  const bool ref_is_file = ref.rfind("file:", 0) == 0;
+  const bool ref_is_empty = ref.empty();
+  const bool ref_is_yt_watch =
+      !ref_is_empty && ref.find("youtube.com") != std::string::npos &&
+      ref.find("/embed/") == std::string::npos;
+  const bool ref_is_embed_ctx =
+      ref_is_file || ref_is_empty ||
+      (!ref_is_empty && ref.find("/embed/") != std::string::npos) ||
+      (!ref_is_empty && ref.find("reddit.com") != std::string::npos);
+
+  if (is_googlevideo) {
+    if (BerryGooglevideoUrlIsAllowlisted(spec)) {
+      static const char kAndroidVrUA[] =
+          "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android "
+          "12L; eureka-user Build/SQ3A.220605.009.A1) gzip";
+      url_request->SetExtraRequestHeaderByName("User-Agent", kAndroidVrUA, true);
+      url_request->RemoveRequestHeaderByName("Origin");
+      url_request->SetReferrer(std::string());
+      url_request->set_referrer_policy(net::ReferrerPolicy::NEVER_CLEAR);
+      QNX_NAV_LOG_FMT("BerryNav: GooglevideoAllowlist UA url=\"%.100s\"\n",
+                      spec.c_str());
+      return;
+    }
+    static const char kWatchReferer[] = "https://www.youtube.com/";
+    url_request->SetReferrer(kWatchReferer);
+    url_request->set_referrer_policy(net::ReferrerPolicy::NEVER_CLEAR);
+    url_request->SetExtraRequestHeaderByName("Origin", "https://www.youtube.com",
+                                             true);
+    QNX_NAV_LOG_FMT(
+        "BerryNav: WatchReferer url=\"%.100s\" old_ref=\"%.60s\"\n",
+        spec.c_str(), ref.c_str());
+    return;
+  }
+
+  if (!is_embed_page && !ref_is_embed_ctx)
+    return;
+  if (!ref_is_file && !ref_is_empty && ref_is_yt_watch)
+    return;
+
+  static const char kEmbedReferer[] = "https://www.reddit.com/";
+  url_request->SetReferrer(kEmbedReferer);
+  url_request->set_referrer_policy(net::ReferrerPolicy::NEVER_CLEAR);
+  QNX_NAV_LOG_FMT(
+      "BerryNav: EmbedReferer fix url=\"%.100s\" old_ref=\"%.60s\"\n",
+      spec.c_str(), ref.c_str());
+}
+
+// Rewrite youtubei/v1/player POST bodies from WEB_EMBEDDED_PLAYER (SABR-only,
+// 403 on content_shell) to ANDROID_VR 1.65.10 which still serves progressive
+// HTTPS formats (fmt=18) without PO tokens per yt-dlp client table.
+bool BerryRewriteYoutubePlayerJson(std::string* body) {
+  if (!body)
+    return false;
+
+  const bool use_ios =
+      access("/accounts/1000/shared/misc/berry-youtube-ios.enable", F_OK) == 0;
+  const char* kClient = use_ios ? "IOS" : "ANDROID_VR";
+  const char* kVersion = use_ios ? "19.45.4" : "1.65.10";
+  const char* kDeviceFields = use_ios
+      ? ",\"deviceMake\":\"Apple\",\"deviceModel\":\"iPhone14,3\","
+        "\"osName\":\"iPhone\",\"osVersion\":\"17.0\""
+      : ",\"deviceMake\":\"Oculus\",\"deviceModel\":\"Quest "
+        "3\",\"androidSdkVersion\":32,\"osName\":\"Android\","
+        "\"osVersion\":\"12L\"";
+
+  bool rewritten = false;
+  if (body->find("WEB_EMBEDDED") != std::string::npos) {
+    base::ReplaceSubstringsAfterOffset(body, 0, "WEB_EMBEDDED_PLAYER", kClient);
+    rewritten = true;
+  }
+
+  static const char* kWebClients[] = {
+      "\"clientName\":\"WEB\"",
+      "\"clientName\":\"MWEB\"",
+      "\"clientName\":\"WEB_REMIX\"",
+      "\"clientName\":\"WEB_CREATOR\"",
+      "\"clientName\": \"WEB\"",
+      "\"clientName\": \"MWEB\"",
+  };
+  const std::string kClientJson = std::string("\"clientName\":\"") + kClient + "\"";
+  for (const char* from : kWebClients) {
+    if (body->find(from) != std::string::npos) {
+      base::ReplaceSubstringsAfterOffset(body, 0, from, kClientJson);
+      rewritten = true;
+    }
+  }
+
+  if (!rewritten && body->find(kClient) == std::string::npos)
+    return false;
+
+  const std::string kName = kClientJson;
+  size_t pos = body->find(kName);
+  if (pos == std::string::npos)
+    return rewritten;
+
+  size_t ver_key = body->find("\"clientVersion\":", pos);
+  if (ver_key != std::string::npos) {
+    size_t val_start = body->find('"', ver_key + 16);
+    if (val_start != std::string::npos) {
+      size_t val_end = body->find('"', val_start + 1);
+      if (val_end != std::string::npos)
+        body->replace(val_start + 1, val_end - val_start - 1, kVersion);
+    }
+  }
+
+  if (body->find("\"deviceMake\":", pos) == std::string::npos) {
+    size_t insert_at = body->find("\"clientVersion\":", pos);
+    if (insert_at != std::string::npos) {
+      insert_at = body->find('"', insert_at + 16);
+      if (insert_at != std::string::npos) {
+        insert_at = body->find('"', insert_at + 1);
+        if (insert_at != std::string::npos)
+          body->insert(insert_at + 1, kDeviceFields);
+      }
+    }
+  }
+
+  return true;
+}
+
+bool BerryShouldBufferYoutubeResponse(const GURL& url) {
+  if (!url.is_valid() || url.host().find("youtube.com") == std::string::npos)
+    return false;
+  return url.spec().find("/youtubei/v1/player") != std::string::npos;
+}
+
+// Strip SABR-only fields from youtubei/v1/player JSON so the JS player picks
+// progressive formats (fmt=18). Do NOT run on watch-page HTML (breaks kevlar).
+bool BerryStripSabrFromYoutubePlayerResponse(const GURL& url,
+                                             std::string* body) {
+  if (!body || body->empty() || body->size() > 512 * 1024)
+    return false;
+  if (url.spec().find("/youtubei/v1/player") == std::string::npos)
+    return false;
+  if (body->find("streamingData") == std::string::npos &&
+      body->find("serverAbrStreamingUrl") == std::string::npos)
+    return false;
+
+  bool changed = false;
+  for (const char* key :
+       {"\"serverAbrStreamingUrl\"", "\"sabrContextUpdate\""}) {
+    for (;;) {
+      size_t pos = body->find(key);
+      if (pos == std::string::npos)
+        break;
+      size_t start = pos;
+      if (start > 0 && (*body)[start - 1] == ',')
+        --start;
+      size_t colon = body->find(':', pos);
+      if (colon == std::string::npos)
+        break;
+      size_t val_start = colon + 1;
+      while (val_start < body->size() &&
+             ((*body)[val_start] == ' ' || (*body)[val_start] == '\t'))
+        ++val_start;
+      size_t end = val_start;
+      if (val_start < body->size() && (*body)[val_start] == '"') {
+        end = body->find('"', val_start + 1);
+        if (end == std::string::npos)
+          break;
+        ++end;
+      } else if (val_start < body->size() && (*body)[val_start] == '{') {
+        int depth = 0;
+        for (end = val_start; end < body->size(); ++end) {
+          if ((*body)[end] == '{')
+            ++depth;
+          else if ((*body)[end] == '}') {
+            --depth;
+            if (depth == 0) {
+              ++end;
+              break;
+            }
+          }
+        }
+      } else {
+        break;
+      }
+      if (end < body->size() && (*body)[end] == ',')
+        ++end;
+      body->erase(start, end - start);
+      changed = true;
+    }
+  }
+
+  const size_t before = body->size();
+  base::ReplaceSubstringsAfterOffset(body, 0, "sabr=1&", "");
+  base::ReplaceSubstringsAfterOffset(body, 0, "&sabr=1", "");
+  base::ReplaceSubstringsAfterOffset(body, 0, "?sabr=1&", "?");
+  base::ReplaceSubstringsAfterOffset(body, 0, "?sabr=1", "?");
+  base::ReplaceSubstringsAfterOffset(body, 0, "&keepalive=yes", "");
+  base::ReplaceSubstringsAfterOffset(body, 0, ",sabr", "");
+  base::ReplaceSubstringsAfterOffset(body, 0, "sabr,", "");
+  if (body->size() != before)
+    changed = true;
+
+  if (changed) {
+    QNX_NAV_LOG_FMT(
+        "BerryNav: PlayerResponseStripSabr bytes=%zu url=\"%.80s\"\n",
+        body->size(), url.spec().c_str());
+  }
+  if (BerryScrubGooglevideoUrlsInPlayerBody(body))
+    changed = true;
+  return changed;
+}
+
+void BerryMaybeSpoofYoutubeInnertube(ResourceRequest* request,
+                                     net::URLRequest* url_request) {
+  if (!request || !url_request)
+    return;
+  if (access("/accounts/1000/shared/misc/berry-youtube-innertube.disable",
+             F_OK) == 0)
+    return;
+  if (request->method != "POST")
+    return;
+  const GURL& url = request->url;
+  if (!url.is_valid() || url.host().find("youtube.com") == std::string::npos)
+    return;
+  const std::string spec = url.spec();
+  if (spec.find("/youtubei/v1/player") == std::string::npos)
+    return;
+  if (!request->request_body)
+    return;
+
+  BerryLoadPersistedVisitorData();
+
+  bool spoofed = false;
+  size_t spoof_body_size = 0;
+  bool visitor_injected = false;
+  for (auto& element : *request->request_body->elements_mutable()) {
+    if (element.type() != mojom::DataElementDataView::Tag::kBytes)
+      continue;
+    std::string json(element.As<DataElementBytes>().AsStringPiece());
+    const bool rewrote = BerryRewriteYoutubePlayerJson(&json);
+    const bool injected = BerryInjectVisitorDataIntoPlayerJson(&json);
+    if (!rewrote && !injected)
+      continue;
+    if (injected)
+      visitor_injected = true;
+    spoof_body_size = json.size();
+    element = DataElement(DataElementBytes(
+        std::vector<uint8_t>(json.begin(), json.end())));
+    spoofed = true;
+    break;
+  }
+
+  if (!spoofed)
+    return;
+
+  const std::string visitor_header = g_berry_youtube_visitor_data;
+  const bool use_ios =
+      access("/accounts/1000/shared/misc/berry-youtube-ios.enable", F_OK) == 0;
+  if (!use_ios) {
+    static const char kAndroidVrUA[] =
+        "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android "
+        "12L; eureka-user Build/SQ3A.220605.009.A1) gzip";
+    url_request->SetExtraRequestHeaderByName("User-Agent", kAndroidVrUA, true);
+    url_request->SetExtraRequestHeaderByName("X-Youtube-Client-Name", "28",
+                                             true);
+    url_request->SetExtraRequestHeaderByName("X-Youtube-Client-Version",
+                                             "1.65.10", true);
+    if (!visitor_header.empty()) {
+      url_request->SetExtraRequestHeaderByName("X-Goog-Visitor-Id",
+                                               visitor_header.c_str(), true);
+    }
+    QNX_NAV_LOG_FMT(
+        "BerryNav: InnertubeSpoof ANDROID_VR/1.65.10 body=%zu visitor=%s "
+        "hdrs=UA,ClientName,ClientVersion%s url=\"%.80s\"\n",
+        spoof_body_size,
+        visitor_injected ? "injected"
+                         : (visitor_header.empty() ? "none" : "cached"),
+        visitor_header.empty() ? "" : ",GoogVisitorId", spec.c_str());
+  } else {
+    static const char kIosUA[] =
+        "com.google.ios.youtube/19.45.4 (iPhone14,3; U; CPU iOS 17_0 like Mac "
+        "OS X) gzip";
+    url_request->SetExtraRequestHeaderByName("User-Agent", kIosUA, true);
+    url_request->SetExtraRequestHeaderByName("X-Youtube-Client-Name", "5",
+                                             true);
+    url_request->SetExtraRequestHeaderByName("X-Youtube-Client-Version",
+                                             "19.45.4", true);
+    if (!visitor_header.empty()) {
+      url_request->SetExtraRequestHeaderByName("X-Goog-Visitor-Id",
+                                               visitor_header.c_str(), true);
+    }
+    QNX_NAV_LOG_FMT(
+        "BerryNav: InnertubeSpoof IOS/19.45.4 body=%zu visitor=%s "
+        "hdrs=UA,ClientName,ClientVersion%s url=\"%.80s\"\n",
+        spoof_body_size,
+        visitor_injected ? "injected"
+                         : (visitor_header.empty() ? "none" : "cached"),
+        visitor_header.empty() ? "" : ",GoogVisitorId", spec.c_str());
+  }
+}
+
+std::string BerryHtmlEscape(const std::string& input) {
+  std::string out;
+  out.reserve(input.size() + 16);
+  for (char c : input) {
+    switch (c) {
+      case '&':
+        out += "&amp;";
+        break;
+      case '<':
+        out += "&lt;";
+        break;
+      case '>':
+        out += "&gt;";
+        break;
+      case '"':
+        out += "&quot;";
+        break;
+      case '\'':
+        out += "&#39;";
+        break;
+      default:
+        out += c;
+        break;
+    }
+  }
+  return out;
+}
+
+std::string BerryExtractYoutubeVideoId(const GURL& url) {
+  if (!url.is_valid())
+    return std::string();
+  for (net::QueryIterator it(url); !it.IsAtEnd(); it.Advance()) {
+    if (it.GetKey() == "v" && !it.GetValue().empty())
+      return std::string(it.GetValue());
+  }
+  const std::string spec = url.spec();
+  static const char* kNeedles[] = {"watch?v=", "?v=", "&v="};
+  for (const char* needle : kNeedles) {
+    size_t pos = spec.find(needle);
+    if (pos == std::string::npos)
+      continue;
+    pos += strlen(needle);
+    size_t end = pos;
+    while (end < spec.size()) {
+      const char c = spec[end];
+      if (c == '&' || c == '?' || c == '#' || c == '"')
+        break;
+      ++end;
+    }
+    if (end <= pos)
+      continue;
+    std::string v = spec.substr(pos, end - pos);
+    const size_t amp = v.find('&');
+    if (amp != std::string::npos)
+      v = v.substr(0, amp);
+    if (!v.empty())
+      return v;
+  }
+  return std::string();
+}
+
+GURL BerryCanonicalizeYoutubeWatchUrl(const GURL& url) {
+  const std::string vid = BerryExtractYoutubeVideoId(url);
+  if (vid.empty())
+    return url;
+  return GURL("https://www.youtube.com/watch?v=" + vid);
+}
+
+bool BerryWatchUrlRequestsFullPage(const GURL& url) {
+  if (access("/accounts/1000/shared/misc/berry-youtube-fullwatch.enable",
+             F_OK) == 0)
+    return true;
+  for (net::QueryIterator it(url); !it.IsAtEnd(); it.Advance()) {
+    if (it.GetKey() == "berry_full" && it.GetValue() == "1")
+      return true;
+  }
+  const std::string spec = url.spec();
+  return spec.find("berry_full=1") != std::string::npos;
+}
+
+bool BerryShouldUseYoutubeWatchShim(const net::URLRequest* req,
+                                    int resource_type) {
+  if (resource_type != 0 || !req)
+    return false;
+  if (access("/accounts/1000/shared/misc/berry-youtube-shim.disable", F_OK) ==
+      0)
+    return false;
+  const GURL& url = req->url();
+  if (!url.is_valid() || url.host().find("youtube.com") == std::string::npos)
+    return false;
+  if (url.path() != "/watch" && url.path() != "/watch/")
+    return false;
+  if (BerryWatchUrlRequestsFullPage(url))
+    return false;
+  return !BerryExtractYoutubeVideoId(url).empty();
+}
+
+std::string BerryWatchFullPageFallbackUrl(const std::string& watch_url_spec) {
+  if (watch_url_spec.find('?') != std::string::npos)
+    return watch_url_spec + "&berry_full=1";
+  return watch_url_spec + "?berry_full=1";
+}
+
+void BerryScrubWatchShimResponseHeaders(mojom::URLResponseHead* response,
+                                        size_t shim_body_size,
+                                        const GURL& url) {
+  if (!response || !response->headers)
+    return;
+  // Zero-C++ fallback if parsed-header regen ever fails: extract 'nonce-…' from
+  // the real CSP header before removal and stamp <script nonce="…"> on the shim
+  // body — strict-dynamic + a valid nonce lets inline script run under YouTube's
+  // policy without weakening it.
+  static const char* kRemove[] = {
+      "Content-Security-Policy",
+      "Content-Security-Policy-Report-Only",
+      "Content-Encoding",
+      "Transfer-Encoding",
+      "Cross-Origin-Opener-Policy",
+      "Cross-Origin-Embedder-Policy",
+  };
+  for (const char* name : kRemove)
+    response->headers->RemoveHeader(name);
+  response->headers->SetHeader("Content-Type", "text/html; charset=utf-8");
+  response->headers->SetHeader("Content-Length",
+                               base::NumberToString(shim_body_size));
+  response->mime_type = "text/html";
+  response->charset = "utf-8";
+  response->content_length = static_cast<int64_t>(shim_body_size);
+  // Blink reads CSP from parsed_headers, not the raw header list. Regenerate
+  // after scrub so content_security_policy (and COOP/COEP we stripped) match.
+  response->parsed_headers =
+      network::PopulateParsedHeaders(response->headers.get(), url);
+}
+
+std::string BerryBuildWatchShimHtml(const GURL& watch_url,
+                                    const std::string& video_id) {
+  const GURL canonical = BerryCanonicalizeYoutubeWatchUrl(watch_url);
+  const std::string canonical_spec = canonical.spec();
+  const std::string safe_vid = BerryHtmlEscape(video_id);
+  const std::string full_url_raw =
+      BerryWatchFullPageFallbackUrl(canonical_spec);
+  const std::string full_url_href = BerryHtmlEscape(full_url_raw);
+  return std::string(
+             "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+             "<meta name=\"viewport\" content=\"width=device-width\">"
+             "<title>Loading...</title>"
+             "<style>"
+             "body{font-family:sans-serif;background:#111;color:#eee;margin:0;"
+             "padding:12px}"
+             "#title{font-size:1.2em;margin:0 0 8px}"
+             "video{width:100%;max-width:960px;background:#000}"
+             "#status{color:#888;font-size:0.9em;margin:8px 0}"
+             "a{color:#6af}</style></head><body>"
+             "<h1 id=\"title\">Loading...</h1>"
+             "<p id=\"status\">Fetching stream...</p>"
+             "<video id=\"v\" controls autoplay playsinline></video>"
+             "<p><a href=\"") +
+         full_url_href +
+         "\">Open full YouTube page</a></p>"
+         "<script>"
+         "(function(){"
+         "try{fetch('/generate_204?berry_js_alive=1',{credentials:'include',"
+         "mode:'no-cors'});console.log('WatchShim js-alive');}catch(e){}"
+         "var vid=\"" +
+         safe_vid +
+         "\",retries=0;"
+         "function pickUrl(j){"
+         "var f=j&&j.streamingData&&j.streamingData.formats;if(!f)return null;"
+         "var i;for(i=0;i<f.length;i++)if(f[i].itag===18&&f[i].url)return f[i].url;"
+         "for(i=0;i<f.length;i++)if(f[i].mimeType&&f[i].mimeType.indexOf("
+         "'video/mp4')>=0&&f[i].url)return f[i].url;"
+         "for(i=0;i<f.length;i++)if(f[i].url)return f[i].url;return null;}"
+         "function setTitle(j){"
+         "var t=j&&j.videoDetails&&j.videoDetails.title;if(!t)return;"
+         "document.title=t;document.getElementById('title').textContent=t;}"
+         "function fail(){if(retries++<2)return load();"
+         "document.getElementById('status').textContent='Could not load video';}"
+         "function load(){"
+         "document.getElementById('status').textContent='Fetching stream...';"
+         "var body={context:{client:{clientName:'WEB',clientVersion:"
+         "'2.20250101.01.00',hl:'en',gl:'US',timeZone:'America/New_York',"
+         "utcOffsetMinutes:-300,clientScreen:'WATCH'}},videoId:vid,"
+         "racyCheckOk:true,contentCheckOk:true,playbackContext:"
+         "{contentPlaybackContext:{html5Preference:'HTML5_PREF_WANTS'}}};"
+         "fetch('/youtubei/v1/player?prettyPrint=false',{method:'POST',"
+         "headers:{'Content-Type':'application/json'},credentials:'include',"
+         "body:JSON.stringify(body)}).then(function(r){return r.json();})"
+         ".then(function(j){"
+         "setTitle(j);var url=pickUrl(j);if(!url){fail();return;}"
+         "document.getElementById('status').textContent='Playing';"
+         "var v=document.getElementById('v');v.src=url;if(v.play)v.play();"
+         "}).catch(fail);}"
+         "load();})();"
+         "</script></body></html>";
+}
+#endif
 
 std::unique_ptr<net::UploadDataStream> CreateUploadDataStream(
     ResourceRequestBody* body,
@@ -576,11 +1410,18 @@ URLLoader::URLLoader(
   }
   receiver_.set_disconnect_handler(
       base::BindOnce(&URLLoader::OnMojoDisconnect, base::Unretained(this)));
+  GURL effective_url = request.url;
+  std::string effective_method = request.method;
+#if defined(__QNX__) || defined(__QNXNTO__)
+  qnx_skip_request_body_ =
+      BerryPrepareYoutubeUrlAndMethod(&effective_url, &effective_method,
+                                      request.request_body.get());
+#endif
   url_request_ = url_request_context_->CreateRequest(
-      GURL(request.url), request.priority, this, traffic_annotation,
+      effective_url, request.priority, this, traffic_annotation,
       /*is_for_websockets=*/false, request.net_log_create_info);
 
-  url_request_->set_method(request.method);
+  url_request_->set_method(effective_method);
   url_request_->set_site_for_cookies(request.site_for_cookies);
   if (ShouldForceIgnoreSiteForCookies(request))
     url_request_->set_force_ignore_site_for_cookies(true);
@@ -629,6 +1470,10 @@ URLLoader::URLLoader(
   // before URLLoaders are created.
   DCHECK(AreRequestHeadersSafe(merged_headers));
   url_request_->SetExtraRequestHeaders(merged_headers);
+
+#if defined(__QNX__) || defined(__QNXNTO__)
+  BerryMaybeFixYoutubeEmbedReferer(url_request_.get());
+#endif
 
   url_request_->SetUserData(kUserDataKey,
                             std::make_unique<UnownedPointer>(this));
@@ -716,7 +1561,7 @@ URLLoader::URLLoader(
       net::CookieSettingOverride::kStorageAccessGrantEligible));
 
   // Resolve elements from request_body and prepare upload data.
-  if (request.request_body.get()) {
+  if (request.request_body.get() && !qnx_skip_request_body_) {
     OpenFilesForUpload(request);
     return;
   }
@@ -828,14 +1673,18 @@ class URLLoader::FileOpenerForUpload {
 };
 
 void URLLoader::OpenFilesForUpload(const ResourceRequest& request) {
+  ResourceRequest upload_request = request;
+#if defined(__QNX__) || defined(__QNXNTO__)
+  BerryMaybeSpoofYoutubeInnertube(&upload_request, url_request_.get());
+#endif
   std::vector<base::FilePath> paths;
-  for (const auto& element : *request.request_body.get()->elements()) {
+  for (const auto& element : *upload_request.request_body.get()->elements()) {
     if (element.type() == mojom::DataElementDataView::Tag::kFile) {
       paths.push_back(element.As<network::DataElementFile>().path());
     }
   }
   if (paths.empty()) {
-    SetUpUpload(request, net::OK, std::vector<base::File>());
+    SetUpUpload(upload_request, net::OK, std::vector<base::File>());
     return;
   }
   if (!network_context_client_) {
@@ -853,7 +1702,8 @@ void URLLoader::OpenFilesForUpload(const ResourceRequest& request) {
   file_opener_for_upload_ = std::make_unique<FileOpenerForUpload>(
       std::move(paths), this, factory_params_->process_id,
       network_context_client_,
-      base::BindOnce(&URLLoader::SetUpUpload, base::Unretained(this), request));
+      base::BindOnce(&URLLoader::SetUpUpload, base::Unretained(this),
+                     upload_request));
 }
 
 void URLLoader::SetUpUpload(const ResourceRequest& request,
@@ -1049,7 +1899,8 @@ void URLLoader::ScheduleStart() {
 #if defined(__QNX__) || defined(__QNXNTO__)
   if (resource_type_ == 0) {
     QNX_NAV_LOG_FMT(
-        "BerryNav: URLReqStart url=\"%s\" ms=%lld abs=%lld\n",
+        "BerryNav: URLReqStart loader=%p url=\"%s\" ms=%lld abs=%lld\n",
+        this,
         url_request_ ? url_request_->url().spec().substr(0, 120).c_str()
                        : "null",
         url_request_ && url_request_->creation_time().is_null() == false
@@ -1079,6 +1930,11 @@ void URLLoader::ScheduleStart() {
     url_request_->LogBlockedBy("ResourceScheduler");
     QNX_TRACE_MSG("QNX:UL:Deferred!\n");
   } else {
+#if defined(__QNX__) || defined(__QNXNTO__)
+    if (BerryShouldUseYoutubeWatchShim(url_request_.get(), resource_type_)) {
+      QnxPrepareYoutubeWatchShim();
+    }
+#endif
     QNX_TRACE_MSG("QNX:UL:Starting!\n");
     url_request_->Start();
   }
@@ -1647,6 +2503,33 @@ void URLLoader::OnResponseStarted(net::URLRequest* url_request, int net_error) {
   }
 
   response_ = BuildResponseHead();
+#if defined(__QNX__) || defined(__QNXNTO__)
+  if (qnx_youtube_watch_shim_buffer_ && response_ && response_->headers) {
+    const int http_code = response_->headers->response_code();
+    if (http_code == 200 && !qnx_youtube_watch_shim_html_.empty()) {
+      BerryScrubWatchShimResponseHeaders(response_.get(),
+                                         qnx_youtube_watch_shim_html_.size(),
+                                         url_request_->url());
+      qnx_watch_shim_scrubbed_ = true;
+      qnx_watch_shim_response_ready_ = true;
+      const size_t csp_count =
+          response_->parsed_headers
+              ? response_->parsed_headers->content_security_policy.size()
+              : 0;
+      QNX_NAV_LOG_FMT(
+          "BerryNav: WatchShim head scrubbed loader=%p code=%d shim_bytes=%zu "
+          "csp=%zu\n",
+          this, http_code, qnx_youtube_watch_shim_html_.size(), csp_count);
+    } else {
+      QNX_NAV_LOG_FMT(
+          "BerryNav: WatchShim head skip loader=%p code=%d html=%zu\n", this,
+          http_code, qnx_youtube_watch_shim_html_.size());
+      qnx_youtube_watch_shim_buffer_ = false;
+      qnx_youtube_watch_shim_active_ = false;
+      qnx_youtube_watch_shim_html_.clear();
+    }
+  }
+#endif
   DispatchOnRawResponse();
 
   // Parse and remove the Trust Tokens response headers, if any are expected,
@@ -1697,9 +2580,166 @@ void URLLoader::MaybeSendTrustTokenOperationResultToDevTools() {
                                                 std::move(operation_result));
 }
 
+bool BerryPlayerResponseLooksLikeError(const std::string& body) {
+  if (body.size() < 4096)
+    return true;
+  if (body.find("streamingData") == std::string::npos &&
+      body.find("playabilityStatus") == std::string::npos)
+    return true;
+  if (body.find("\"status\":\"ERROR\"") != std::string::npos ||
+      body.find("\"status\":\"UNPLAYABLE\"") != std::string::npos ||
+      body.find("\"status\":\"LOGIN_REQUIRED\"") != std::string::npos)
+    return true;
+  return false;
+}
+
+void BerryLogPlayerFormatSummary(const std::string& body) {
+  if (body.empty())
+    return;
+  size_t itag18 = 0;
+  size_t progressive = 0;
+  size_t pos = 0;
+  while ((pos = body.find("\"itag\":", pos)) != std::string::npos) {
+    pos += 7;
+    while (pos < body.size() && (body[pos] == ' ' || body[pos] == '\t'))
+      ++pos;
+    if (pos + 2 < body.size() && body.compare(pos, 2, "18") == 0 &&
+        (body[pos + 2] == ',' || body[pos + 2] == '}'))
+      ++itag18;
+  }
+  pos = 0;
+  while ((pos = body.find("\"url\":\"https://", pos)) != std::string::npos) {
+    ++progressive;
+    pos += 6;
+  }
+  QNX_NAV_LOG_FMT(
+      "BerryNav: PlayerFormats itag18=%zu progressive_urls=%zu bytes=%zu\n",
+      itag18, progressive, body.size());
+}
+
+#if defined(__QNX__) || defined(__QNXNTO__)
+bool URLLoader::QnxWriteBodyToNewDataPipe(const std::string& body,
+                                          const char* log_tag) {
+  if (body.empty())
+    return false;
+
+  MojoCreateDataPipeOptions options;
+  options.struct_size = sizeof(MojoCreateDataPipeOptions);
+  options.flags = MOJO_CREATE_DATA_PIPE_FLAG_NONE;
+  options.element_num_bytes = 1;
+  const size_t body_len = body.size();
+  options.capacity_num_bytes = static_cast<uint32_t>(
+      std::max(body_len + 4096,
+               static_cast<size_t>(network::features::GetDataPipeDefaultAllocationSize(
+                   features::DataPipeAllocationSize::kLargerSizeIfPossible))));
+  if (mojo::CreateDataPipe(&options, response_body_stream_, consumer_handle_) !=
+      MOJO_RESULT_OK) {
+    QNX_NAV_LOG_FMT("BerryNav: %s pipe_fail loader=%p\n", log_tag, this);
+    return false;
+  }
+
+  size_t offset = 0;
+  while (offset < body.size() && response_body_stream_.is_valid()) {
+    uint32_t num_bytes = static_cast<uint32_t>(body.size() - offset);
+    MojoResult result = response_body_stream_->WriteData(
+        body.data() + offset, &num_bytes, MOJO_WRITE_DATA_FLAG_NONE);
+    if (result == MOJO_RESULT_OK) {
+      offset += num_bytes;
+      continue;
+    }
+    if (result == MOJO_RESULT_SHOULD_WAIT) {
+      base::PlatformThread::Sleep(base::Milliseconds(2));
+      continue;
+    }
+    QNX_NAV_LOG_FMT("BerryNav: %s partial loader=%p wrote=%zu/%zu\n", log_tag,
+                    this, offset, body.size());
+    break;
+  }
+  total_written_bytes_ = offset;
+  if (response_)
+    response_->content_length = static_cast<int64_t>(body.size());
+  response_body_stream_.reset();
+  const char* url_snip = url_request_ ? url_request_->url().spec().c_str()
+                                      : "(null-req)";
+  QNX_NAV_LOG_FMT("BerryNav: %s loader=%p bytes=%zu url=\"%.80s\"\n", log_tag,
+                  this, body.size(), url_snip);
+  return offset == body.size();
+}
+
+void URLLoader::QnxFlushBufferedYoutubePlayerBody() {
+  if (qnx_youtube_player_body_.empty())
+    return;
+  BerryCacheVisitorDataFromPlayerResponse(qnx_youtube_player_body_);
+  const std::string original = qnx_youtube_player_body_;
+  if (BerryPlayerResponseLooksLikeError(original)) {
+    QNX_NAV_LOG_FMT(
+        "BerryNav: PlayerResponseError skip_strip bytes=%zu preview=\"%.200s\" "
+        "url=\"%.80s\"\n",
+        original.size(), original.c_str(), url_request_->url().spec().c_str());
+  } else {
+    BerryStripSabrFromYoutubePlayerResponse(url_request_->url(),
+                                          &qnx_youtube_player_body_);
+    if (BerryPlayerResponseLooksLikeError(qnx_youtube_player_body_)) {
+      qnx_youtube_player_body_ = original;
+      QNX_NAV_LOG_FMT(
+          "BerryNav: PlayerResponseRevert bytes=%zu url=\"%.80s\"\n",
+          original.size(), url_request_->url().spec().c_str());
+    }
+  }
+
+  if (!QnxWriteBodyToNewDataPipe(qnx_youtube_player_body_, "PlayerResponseFlush"))
+    return;
+  BerryRegisterGooglevideoAllowlist(qnx_youtube_player_body_);
+  BerryLogPlayerFormatSummary(qnx_youtube_player_body_);
+}
+
+void URLLoader::QnxPrepareYoutubeWatchShim() {
+  qnx_youtube_watch_shim_active_ = true;
+  qnx_youtube_watch_shim_buffer_ = true;
+  qnx_watch_shim_response_ready_ = false;
+  qnx_watch_shim_scrubbed_ = false;
+  qnx_youtube_watch_page_sniff_.clear();
+  const GURL canonical_watch =
+      BerryCanonicalizeYoutubeWatchUrl(url_request_->url());
+  qnx_youtube_video_id_ = BerryExtractYoutubeVideoId(canonical_watch);
+  if (qnx_youtube_video_id_.empty()) {
+    qnx_youtube_watch_shim_active_ = false;
+    qnx_youtube_watch_shim_buffer_ = false;
+    return;
+  }
+
+  BerryClearGooglevideoAllowlist();
+  qnx_youtube_watch_shim_html_ =
+      BerryBuildWatchShimHtml(canonical_watch, qnx_youtube_video_id_);
+  QNX_NAV_LOG_FMT(
+      "BerryNav: WatchShim start loader=%p v=%s url=\"%.80s\" canon=\"%.80s\" "
+      "(body-swap)\n",
+      this, qnx_youtube_video_id_.c_str(), url_request_->url().spec().c_str(),
+      canonical_watch.spec().c_str());
+  QNX_NAV_LOG_FMT("BerryNav: WatchShim html loader=%p bytes=%zu\n", this,
+                  qnx_youtube_watch_shim_html_.size());
+}
+
+void URLLoader::QnxFlushWatchShimBody() {
+  if (qnx_youtube_watch_shim_html_.empty())
+    return;
+  QnxWriteBodyToNewDataPipe(qnx_youtube_watch_shim_html_, "WatchShimFlush");
+}
+#endif
+
 void URLLoader::ContinueOnResponseStarted() {
 #if defined(__QNX__)
   QNX_TRACE_MSG("QNX:UL:ContOnResp\n");
+#endif
+#if defined(__QNX__) || defined(__QNXNTO__)
+  {
+    const std::string spec = url_request_->url().spec();
+    if (BerryShouldBufferYoutubeResponse(url_request_->url())) {
+      qnx_youtube_player_buffer_ = true;
+      QNX_NAV_LOG_FMT("BerryNav: PlayerResponseBuffer url=\"%.80s\"\n",
+                      spec.c_str());
+    }
+  }
 #endif
   MojoCreateDataPipeOptions options;
   options.struct_size = sizeof(MojoCreateDataPipeOptions);
@@ -1708,17 +2748,30 @@ void URLLoader::ContinueOnResponseStarted() {
   options.capacity_num_bytes =
       network::features::GetDataPipeDefaultAllocationSize(
           features::DataPipeAllocationSize::kLargerSizeIfPossible);
-  MojoResult result =
-      mojo::CreateDataPipe(&options, response_body_stream_, consumer_handle_);
-  if (result != MOJO_RESULT_OK) {
+  if (!qnx_youtube_player_buffer_ && !qnx_youtube_watch_shim_buffer_) {
+    MojoResult result =
+        mojo::CreateDataPipe(&options, response_body_stream_, consumer_handle_);
+    if (result != MOJO_RESULT_OK) {
 #if defined(__QNX__)
-    QNX_TRACE_MSG("QNX:UL:DataPipeFail!\n");
+      QNX_TRACE_MSG("QNX:UL:DataPipeFail!\n");
 #endif
-    NotifyCompleted(net::ERR_INSUFFICIENT_RESOURCES);
-    return;
+      NotifyCompleted(net::ERR_INSUFFICIENT_RESOURCES);
+      return;
+    }
+    DCHECK(response_body_stream_.is_valid());
+    DCHECK(consumer_handle_.is_valid());
+
+    peer_closed_handle_watcher_.Watch(
+        response_body_stream_.get(), MOJO_HANDLE_SIGNAL_PEER_CLOSED,
+        base::BindRepeating(&URLLoader::OnResponseBodyStreamConsumerClosed,
+                            base::Unretained(this)));
+    peer_closed_handle_watcher_.ArmOrNotify();
+
+    writable_handle_watcher_.Watch(
+        response_body_stream_.get(), MOJO_HANDLE_SIGNAL_WRITABLE,
+        base::BindRepeating(&URLLoader::OnResponseBodyStreamReady,
+                            base::Unretained(this)));
   }
-  DCHECK(response_body_stream_.is_valid());
-  DCHECK(consumer_handle_.is_valid());
 
   // Do not account header bytes when reporting received body bytes to client.
   reported_total_encoded_bytes_ = url_request_->GetTotalReceivedBytes();
@@ -1727,17 +2780,6 @@ void URLLoader::ContinueOnResponseStarted() {
     upload_progress_tracker_->OnUploadCompleted();
     upload_progress_tracker_ = nullptr;
   }
-
-  peer_closed_handle_watcher_.Watch(
-      response_body_stream_.get(), MOJO_HANDLE_SIGNAL_PEER_CLOSED,
-      base::BindRepeating(&URLLoader::OnResponseBodyStreamConsumerClosed,
-                          base::Unretained(this)));
-  peer_closed_handle_watcher_.ArmOrNotify();
-
-  writable_handle_watcher_.Watch(
-      response_body_stream_.get(), MOJO_HANDLE_SIGNAL_WRITABLE,
-      base::BindRepeating(&URLLoader::OnResponseBodyStreamReady,
-                          base::Unretained(this)));
 
   // Enforce the Cross-Origin-Resource-Policy (CORP) header.
   const CrossOriginEmbedderPolicy kEmpty;
@@ -1813,6 +2855,25 @@ void URLLoader::ReadMore() {
   QNX_TRACE_MSG("QNX:UL:ReadMore\n");
 #endif
   DCHECK(!read_in_progress_);
+#if defined(__QNX__) || defined(__QNXNTO__)
+  if (qnx_youtube_player_buffer_ || qnx_youtube_watch_shim_buffer_) {
+    if (should_pause_reading_body_) {
+      paused_reading_body_ = true;
+      return;
+    }
+    if (!qnx_youtube_read_buffer_.get()) {
+      qnx_youtube_read_buffer_ =
+          base::MakeRefCounted<net::IOBufferWithSize>(65536);
+    }
+    read_in_progress_ = true;
+    int bytes_read = url_request_->Read(qnx_youtube_read_buffer_.get(),
+                                        qnx_youtube_read_buffer_->size());
+    if (bytes_read != net::ERR_IO_PENDING) {
+      DidRead(bytes_read, true);
+    }
+    return;
+  }
+#endif
   // Once the MIME type is sniffed, all data is sent as soon as it is read from
   // the network.
   DCHECK(consumer_handle_.is_valid() || !pending_write_);
@@ -1867,6 +2928,38 @@ void URLLoader::DidRead(int num_bytes, bool completed_synchronously) {
 #endif
   DCHECK(read_in_progress_);
   read_in_progress_ = false;
+
+#if defined(__QNX__) || defined(__QNXNTO__)
+  if (qnx_youtube_player_buffer_ || qnx_youtube_watch_shim_buffer_) {
+    if (num_bytes > 0 && qnx_youtube_player_buffer_) {
+      qnx_youtube_player_body_.append(qnx_youtube_read_buffer_->data(),
+                                      num_bytes);
+    }
+    if (num_bytes > 0 && qnx_youtube_watch_shim_buffer_) {
+      if (qnx_youtube_watch_page_sniff_.size() < 512 * 1024) {
+        const size_t room =
+            512 * 1024 - qnx_youtube_watch_page_sniff_.size();
+        const size_t take = std::min(room, static_cast<size_t>(num_bytes));
+        qnx_youtube_watch_page_sniff_.append(
+            qnx_youtube_read_buffer_->data(), take);
+        BerryTryCacheVisitorDataFromWatchHtml(qnx_youtube_watch_page_sniff_);
+      }
+    }
+    if (num_bytes > 0) {
+      if (completed_synchronously) {
+        base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+            FROM_HERE,
+            base::BindOnce(&URLLoader::ReadMore,
+                           weak_ptr_factory_.GetWeakPtr()));
+      } else {
+        ReadMore();
+      }
+      return;
+    }
+    NotifyCompleted(num_bytes);
+    return;
+  }
+#endif
 
   if (memory_cache_writer_ && pending_write_ && num_bytes > 0) {
     if (!memory_cache_writer_->OnDataRead(
@@ -1987,6 +3080,19 @@ void URLLoader::DidRead(int num_bytes, bool completed_synchronously) {
     // reads when there's a pending read), and to cover all TCP socket uses,
     // since the concern is the effect that entering suspend mode has on
     // sockets. See https://crbug.com/651120.
+#if defined(__QNX__) || defined(__QNXNTO__)
+    if (pending_write_ && pending_write_buffer_offset_ > 0) {
+      std::string body(pending_write_->buffer(),
+                       pending_write_buffer_offset_);
+      if (BerryStripSabrFromYoutubePlayerResponse(url_request_->url(),
+                                                 &body)) {
+        if (body.size() <= pending_write_->size()) {
+          memcpy(pending_write_->buffer(), body.data(), body.size());
+          pending_write_buffer_offset_ = body.size();
+        }
+      }
+    }
+#endif
     if (pending_write_)
       CompletePendingWrite(num_bytes == 0);
     NotifyCompleted(num_bytes);
@@ -2208,7 +3314,28 @@ void URLLoader::NotifyCompleted(int error_code) {
   }
 
   if (url_loader_client_.Get()) {
-    if (consumer_handle_.is_valid())
+#if defined(__QNX__) || defined(__QNXNTO__)
+    if (qnx_youtube_watch_shim_buffer_) {
+      if (error_code == net::OK && qnx_watch_shim_response_ready_ &&
+          qnx_watch_shim_scrubbed_ && response_ &&
+          !qnx_youtube_watch_shim_html_.empty()) {
+        QnxFlushWatchShimBody();
+      } else {
+        QNX_NAV_LOG_FMT(
+            "BerryNav: WatchShim skip flush loader=%p err=%d ready=%d scrub=%d "
+            "resp=%d\n",
+            this, error_code, qnx_watch_shim_response_ready_ ? 1 : 0,
+            qnx_watch_shim_scrubbed_ ? 1 : 0, response_ ? 1 : 0);
+        qnx_youtube_watch_shim_buffer_ = false;
+        qnx_youtube_watch_shim_active_ = false;
+        qnx_youtube_watch_shim_html_.clear();
+        consumer_handle_.reset();
+      }
+    } else if (qnx_youtube_player_buffer_ && !qnx_youtube_player_body_.empty()) {
+      QnxFlushBufferedYoutubePlayerBody();
+    }
+#endif
+    if (consumer_handle_.is_valid() && response_)
       SendResponseToClient();
 
     URLLoaderCompletionStatus status;
@@ -2245,7 +3372,12 @@ void URLLoader::NotifyCompleted(int error_code) {
       const bool is_spa_host = spec.find("twimg.com") != std::string::npos ||
                                spec.find("/client-web/") != std::string::npos ||
                                spec.find("x.com") != std::string::npos;
-      if ((is_js && is_spa_host) || error_code != 0) {
+      const bool is_googlevideo = spec.find("googlevideo.com") != std::string::npos;
+      const bool is_maps_tile = spec.find("khms") != std::string::npos ||
+                                spec.find("maps/vt") != std::string::npos ||
+                                spec.find("maps.googleapis.com") != std::string::npos;
+      if ((is_js && is_spa_host) || error_code != 0 || is_googlevideo ||
+          is_maps_tile) {
         std::string enc("(none)");
         std::string clen("(none)");
         int http_status = -1;
@@ -2254,10 +3386,15 @@ void URLLoader::NotifyCompleted(int error_code) {
           response_->headers->GetNormalizedHeader("Content-Length", &clen);
           http_status = response_->headers->response_code();
         }
+        const std::string err_str = net::ErrorToShortString(error_code);
+        const std::string& method = url_request_->method();
+        const long long sent_body =
+            (long long)url_request_->GetTotalSentBytes();
         QNX_NAV_LOG_FMT(
-            "BerryNav: ChunkDone err=%d http=%d enc=%s clen=%s "
-            "encBody=%lld decBody=%lld url=\"%.110s\"\n",
-            error_code, http_status, enc.c_str(), clen.c_str(),
+            "BerryNav: ChunkDone err=%d (%s) http=%d method=%s enc=%s clen=%s "
+            "sentBody=%lld encBody=%lld decBody=%lld url=\"%.110s\"\n",
+            error_code, err_str.c_str(), http_status, method.c_str(),
+            enc.c_str(), clen.c_str(), sent_body,
             (long long)status.encoded_body_length,
             (long long)status.decoded_body_length, spec.c_str());
       }
@@ -2311,6 +3448,15 @@ void URLLoader::SendResponseToClient() {
   QNX_TRACE_FMT("QNX:UL:SendResp handle=%d\n",
                      consumer_handle_.is_valid() ? 1 : 0);
 #endif
+#if defined(__QNX__) || defined(__QNXNTO__)
+  if (qnx_response_sent_to_client_)
+    return;
+  // Buffered YouTube player JSON: defer ResponseReceived until body is stripped
+  // and the data pipe is created (NotifyCompleted → QnxFlushBufferedYoutubePlayerBody).
+  if ((qnx_youtube_player_buffer_ || qnx_youtube_watch_shim_buffer_) &&
+      !consumer_handle_.is_valid())
+    return;
+#endif
   DCHECK_EQ(emitted_devtools_raw_request_, emitted_devtools_raw_response_);
   response_->emitted_extra_info = emitted_devtools_raw_request_;
 
@@ -2319,6 +3465,7 @@ void URLLoader::SendResponseToClient() {
   // reentrancy deadlocks. Main-frame navigations must not sit in the IO task
   // queue behind subresources — that added ~15–20s TTFB on BB10.
   if (resource_type_ != 0) {
+    qnx_response_sent_to_client_ = true;
     qnx_response_delivery_pending_ = true;
     network::mojom::URLResponseHeadPtr head = response_->Clone();
     mojo::ScopedDataPipeConsumerHandle body = std::move(consumer_handle_);
@@ -2349,6 +3496,9 @@ void URLLoader::SendResponseToClient() {
 
   url_loader_client_.Get()->OnReceiveResponse(
       response_->Clone(), std::move(consumer_handle_), absl::nullopt);
+#if defined(__QNX__) || defined(__QNXNTO__)
+  qnx_response_sent_to_client_ = true;
+#endif
 #if defined(__QNX__)
   QNX_TRACE_MSG("QNX:UL:SendRespDone\n");
 #endif
@@ -2815,7 +3965,13 @@ void URLLoader::StartReading() {
         response_->mime_type == "application/atom+xml") {
       response_->mime_type.assign("text/plain");
     }
+#if defined(__QNX__) || defined(__QNXNTO__)
+    if (!qnx_youtube_player_buffer_ && !qnx_youtube_watch_shim_buffer_) {
+      SendResponseToClient();
+    }
+#else
     SendResponseToClient();
+#endif
   }
 
   // Start reading...
