@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #endif
 
 #include "base/command_line.h"
@@ -329,7 +330,32 @@ bool BerryGooglevideoUrlIsAllowlisted(const std::string& spec) {
   return false;
 }
 
+void BerryPruneExpiredAllowlist() {
+  if (g_berry_googlevideo_allowlist.empty())
+    return;
+  const time_t now = time(nullptr);
+  std::vector<std::string> kept;
+  kept.reserve(g_berry_googlevideo_allowlist.size());
+  for (const std::string& url : g_berry_googlevideo_allowlist) {
+    const size_t exp = url.find("expire=");
+    if (exp == std::string::npos) {
+      kept.push_back(url);
+      continue;
+    }
+    char* end = nullptr;
+    const long long val = strtoll(url.c_str() + exp + 7, &end, 10);
+    if (val > static_cast<long long>(now) + 60)
+      kept.push_back(url);
+  }
+  if (kept.size() == g_berry_googlevideo_allowlist.size())
+    return;
+  QNX_NAV_LOG_FMT("BerryNav: AllowlistPrune before=%zu after=%zu\n",
+                  g_berry_googlevideo_allowlist.size(), kept.size());
+  g_berry_googlevideo_allowlist = std::move(kept);
+}
+
 void BerryRegisterGooglevideoAllowlist(const std::string& body) {
+  BerryPruneExpiredAllowlist();
   const size_t streaming = body.find("\"streamingData\"");
   if (streaming == std::string::npos)
     return;
@@ -934,12 +960,8 @@ void BerryScrubWatchShimResponseHeaders(mojom::URLResponseHead* response,
 
 std::string BerryBuildWatchShimHtml(const GURL& watch_url,
                                     const std::string& video_id) {
-  const GURL canonical = BerryCanonicalizeYoutubeWatchUrl(watch_url);
-  const std::string canonical_spec = canonical.spec();
+  (void)watch_url;
   const std::string safe_vid = BerryHtmlEscape(video_id);
-  const std::string full_url_raw =
-      BerryWatchFullPageFallbackUrl(canonical_spec);
-  const std::string full_url_href = BerryHtmlEscape(full_url_raw);
   return std::string(
              "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
              "<meta name=\"viewport\" content=\"width=device-width\">"
@@ -950,48 +972,78 @@ std::string BerryBuildWatchShimHtml(const GURL& watch_url,
              "#title{font-size:1.2em;margin:0 0 8px}"
              "video{width:100%;max-width:960px;background:#000}"
              "#status{color:#888;font-size:0.9em;margin:8px 0}"
-             "a{color:#6af}</style></head><body>"
+             "#status.tap{cursor:pointer;color:#6af;text-decoration:underline}"
+             "</style></head><body>"
              "<h1 id=\"title\">Loading...</h1>"
              "<p id=\"status\">Fetching stream...</p>"
              "<video id=\"v\" controls autoplay playsinline></video>"
-             "<p><a href=\"") +
-         full_url_href +
-         "\">Open full YouTube page</a></p>"
-         "<script>"
+             "<script>"
          "(function(){"
          "try{fetch('/generate_204?berry_js_alive=1',{credentials:'include',"
          "mode:'no-cors'});console.log('WatchShim js-alive');}catch(e){}"
          "var vid=\"" +
          safe_vid +
-         "\",retries=0;"
+         "\",innRetries=0,mediaRetries=0,savedTime=0;"
          "function pickUrl(j){"
          "var f=j&&j.streamingData&&j.streamingData.formats;if(!f)return null;"
          "var i;for(i=0;i<f.length;i++)if(f[i].itag===18&&f[i].url)return f[i].url;"
          "for(i=0;i<f.length;i++)if(f[i].mimeType&&f[i].mimeType.indexOf("
          "'video/mp4')>=0&&f[i].url)return f[i].url;"
          "for(i=0;i<f.length;i++)if(f[i].url)return f[i].url;return null;}"
+         "function unplayableMsg(j){"
+         "if(!j)return 'Could not load video';"
+         "var vd=j.videoDetails;"
+         "if(vd&&(vd.isLiveContent||vd.isLive))return "
+         "'Live streams are not supported in BerryBrowser.';"
+         "var ps=j.playabilityStatus;"
+         "if(ps){"
+         "if(ps.status==='LOGIN_REQUIRED')return ps.reason||'Sign in required.';"
+         "if(ps.status==='UNPLAYABLE'||ps.status==='ERROR')return "
+         "ps.reason||ps.status;"
+         "if(ps.reason)return ps.reason;}"
+         "if(!pickUrl(j))return 'No progressive download available for this "
+         "video.';return null;}"
          "function setTitle(j){"
          "var t=j&&j.videoDetails&&j.videoDetails.title;if(!t)return;"
          "document.title=t;document.getElementById('title').textContent=t;}"
-         "function fail(){if(retries++<2)return load();"
-         "document.getElementById('status').textContent='Could not load video';}"
-         "function load(){"
-         "document.getElementById('status').textContent='Fetching stream...';"
-         "var body={context:{client:{clientName:'WEB',clientVersion:"
-         "'2.20250101.01.00',hl:'en',gl:'US',timeZone:'America/New_York',"
-         "utcOffsetMinutes:-300,clientScreen:'WATCH'}},videoId:vid,"
-         "racyCheckOk:true,contentCheckOk:true,playbackContext:"
-         "{contentPlaybackContext:{html5Preference:'HTML5_PREF_WANTS'}}};"
-         "fetch('/youtubei/v1/player?prettyPrint=false',{method:'POST',"
-         "headers:{'Content-Type':'application/json'},credentials:'include',"
-         "body:JSON.stringify(body)}).then(function(r){return r.json();})"
-         ".then(function(j){"
-         "setTitle(j);var url=pickUrl(j);if(!url){fail();return;}"
-         "document.getElementById('status').textContent='Playing';"
-         "var v=document.getElementById('v');v.src=url;if(v.play)v.play();"
-         "}).catch(fail);}"
-         "load();})();"
-         "</script></body></html>";
+         "function showStatus(msg,tap){"
+         "var el=document.getElementById('status');"
+         "el.textContent=msg;el.className=tap?'tap':'';"
+         "el.onclick=tap?function(){innRetries=mediaRetries=0;savedTime=0;"
+         "load(false);}:null;}"
+         "function playerBody(){return{context:{client:{clientName:'WEB',"
+         "clientVersion:'2.20250101.01.00',hl:'en',gl:'US',"
+         "timeZone:'America/New_York',utcOffsetMinutes:-300,"
+         "clientScreen:'WATCH'}},videoId:vid,racyCheckOk:true,"
+         "contentCheckOk:true,playbackContext:{contentPlaybackContext:"
+         "{html5Preference:'HTML5_PREF_WANTS'}}}};}"
+         "function fetchPlayer(){return fetch('/youtubei/v1/player?"
+         "prettyPrint=false',{method:'POST',headers:{'Content-Type':"
+         "'application/json'},credentials:'include',body:JSON.stringify("
+         "playerBody())}).then(function(r){return r.json();});}"
+         "function bindVideo(v){"
+         "v.onerror=function(){"
+         "if(mediaRetries++<1){savedTime=v.currentTime||0;"
+         "showStatus('Refreshing stream URL...');load(true);return;}"
+         "showStatus('Playback failed — tap to reload',true);};}"
+         "function load(fromMediaErr){"
+         "if(!fromMediaErr){"
+         "if(innRetries>1){showStatus('Could not load video — tap to retry',"
+         "true);return;}"
+         "showStatus('Fetching stream...');}"
+         "fetchPlayer().then(function(j){"
+         "setTitle(j);var url=pickUrl(j);var msg=unplayableMsg(j);"
+         "if(!url){if(msg){showStatus(msg,true);return;}"
+         "if(innRetries++<1){load(false);return;}"
+         "showStatus(msg||'Could not load video',true);return;}"
+         "innRetries=0;showStatus('Playing');"
+         "var v=document.getElementById('v');bindVideo(v);v.src=url;"
+         "if(savedTime>0){try{v.currentTime=savedTime;}catch(e){}}"
+         "savedTime=0;if(v.play)v.play().catch(function(){});"
+         "}).catch(function(){if(innRetries++<1){load(false);return;}"
+         "showStatus('Network error — tap to retry',true);});}"
+         "load(false);})();"
+         "</script></body></html>");
 }
 #endif
 

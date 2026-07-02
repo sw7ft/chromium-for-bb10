@@ -6,7 +6,7 @@
 
     <name>BerryBrowserV3</name>
     <versionNumber>3.0.2</versionNumber>
-    <buildId>43</buildId>
+    <buildId>44</buildId>
     <description>Chromium content_shell browser for BlackBerry 10 (QNX, on-screen via qnx_screen). V3: balanced defaults (GPU on, 720, 45fps, low-end mode), in-app Settings, restart, custom landing page.</description>
     <author>sw7ft</author>
 
