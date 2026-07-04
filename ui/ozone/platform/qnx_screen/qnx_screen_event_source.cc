@@ -3,6 +3,7 @@
 #include <bps/event.h>
 #include <bps/navigator.h>
 #include <bps/screen.h>
+#include <bps/virtualkeyboard.h>
 #include <screen/screen.h>
 #include <sys/keycodes.h>
 #include <unistd.h>
@@ -24,6 +25,7 @@
 #include "ui/ozone/platform/qnx_screen/qnx_screen_repaint.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_window.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_window_manager.h"
+#include "ui/ozone/platform/qnx_screen/qnx_virtual_keyboard_controller.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkSurface.h"
 
@@ -64,11 +66,21 @@ QnxScreenEventSource::QnxScreenEventSource(screen_context_t ctx,
     QnxKbdLogf("KBD:screen_request_events FAILED\n");
   if (navigator_request_events(0) != BPS_SUCCESS)
     QnxKbdLogf("KBD:navigator_request_events FAILED\n");
+  if (virtualkeyboard_request_events(0) != BPS_SUCCESS)
+    QnxKbdLogf("KBD:virtualkeyboard_request_events FAILED\n");
+  if (navigator_set_keyboard_tracking(true) != BPS_SUCCESS)
+    QnxKbdLogf("KBD:navigator_set_keyboard_tracking FAILED\n");
   QnxKbdLogf("KBD:bps registered ok\n");
 
-  // Poll BPS/screen input at 2ms during touch/pinch so multitouch moves reach
-  // the gesture recognizer without waiting on a slow periodic tick (was 4ms).
-  poll_timer_.Start(FROM_HERE, base::Milliseconds(2),
+  // Poll BPS input at 1ms so keyboard/touch reach the page quickly. Tunable via
+  // QNX_INPUT_POLL_MS (1–10). Was 2ms; each extra ms adds jitter to keystrokes.
+  int poll_ms = 1;
+  if (const char* e = getenv("QNX_INPUT_POLL_MS")) {
+    const int v = atoi(e);
+    if (v >= 1 && v <= 10)
+      poll_ms = v;
+  }
+  poll_timer_.Start(FROM_HERE, base::Milliseconds(poll_ms),
                     base::BindRepeating(&QnxScreenEventSource::PollEvents,
                                         base::Unretained(this)));
 }
@@ -105,6 +117,8 @@ void QnxScreenEventSource::PollEvents() {
       QNX_TRACE_FMT("QNX:Evt: got screen event type=%d\n", type);
       QnxKbdLogf("KBD:evt type=%d\n", type);
       ProcessEvent(se);
+    } else if (domain == virtualkeyboard_get_domain()) {
+      QnxDispatchVirtualKeyboardBpsEvent(event);
     } else if (domain == navigator_get_domain()) {
       // We registered with navigator_request_events() so the hardware keyboard
       // is routed to us. That registration also makes us responsible for the
@@ -142,6 +156,10 @@ void QnxScreenEventSource::PollEvents() {
             cb(visible);
           break;
         }
+        case NAVIGATOR_KEYBOARD_STATE:
+        case NAVIGATOR_KEYBOARD_POSITION:
+          QnxDispatchVirtualKeyboardBpsEvent(event);
+          break;
         default:
           break;
       }

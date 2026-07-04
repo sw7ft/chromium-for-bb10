@@ -392,3 +392,107 @@ and restart button + Settings/Restart action tiles.
 
 Default resolution is now 1440² (launcher render default; native panel, no
 downscale). Override in Settings > Display (420/720/1440).
+
+## 18. BerryWhatsApp: WhatsApp Web as a standalone app (.bar)
+
+A separate, single-purpose package (`com.sw7ft.BerryWhatsApp`, display name
+"WhatsApp") that boots Chromium straight into https://web.whatsapp.com/ and acts
+like an installed web app. It REUSES the exact BerryBrowserV3 engine payload —
+no content_shell rebuild — because everything WhatsApp needs is already in the
+engine. Built by `deploy/build-whatsapp-bar.sh`; staged at
+`/accounts/1000/shared/downloads/BerryWhatsApp.bar` (install the same way as
+BerryBrowserV3).
+
+Why it works well without an engine change:
+- **Persistent, isolated login.** content_shell's startup window uses the
+  non-OTR `ShellBrowserContext` whose data dir is `$HOME/content_shell_data`
+  (shell_paths.cc, IS_QNX). Each .bar gets its own sandbox `$HOME`, so the
+  WhatsApp QR pairing / IndexedDB / Cache Storage persist across restarts and
+  are fully separate from BerryBrowser's profile. This is THE make-or-break for
+  WhatsApp (otherwise you'd re-scan the QR every launch).
+- **Desktop UA from the first byte.** WhatsApp Web refuses the mobile UA. The
+  launcher omits `--use-mobile-user-agent` (content_shell's default UA is desktop
+  Chrome 120), and the engine additionally pins the desktop UA + metadata for
+  `*.whatsapp.com` per-navigation (`Shell::DidStartNavigation` ->
+  `BerryHostPrefersDesktopUA`). Chrome 120 passes WhatsApp's browser gate.
+- **Adblock is safe here.** `kBlockedDomains` (berry_adblock.cc) is ads/trackers
+  only — no whatsapp.net/whatsapp.com/Meta functional hosts — so it stays on and
+  just trims stray telemetry.
+
+WhatsApp-specific launcher (`whatsapp-launcher.c`, deliberately marker-free so it
+behaves identically every launch and never reads BerryBrowser's settings):
+- **Service Worker ENABLED** (uses the SW-on `--disable-features` list): WhatsApp's
+  app shell + JS + media live in its SW Cache Storage, so warm launches bootstrap
+  locally instead of re-fetching.
+- **Real microphone ENABLED** for voice messages (no
+  `--use-fake-device-for-media-stream`; keeps `--use-fake-ui-for-media-stream` to
+  auto-grant without a prompt). The descriptor declares `record_audio` and bundles
+  `libasound.so.2` (QSA capture, QsaInputStream). No camera permission — the QR is
+  displayed by the page and scanned BY the phone, not captured on device.
+- **720² render** upscaled to the 1440 panel (sharp enough for the chat UI, ~4x
+  cheaper than 1440).
+- **Telemetry blackhole** for `crashlogs.whatsapp.net` (host-resolver-rules) so it
+  fails fast instead of competing for CPU/DNS/sockets during load.
+- Same proven-stable base as the main launcher: single-process, software
+  rendering (`--disable-gpu --disable-gpu-compositing`), `--ignore-certificate-errors`,
+  accessibility tree off, frame-rate limit off, `--ozone-platform=qnx_screen`.
+
+Chromeless full-screen "app mode" (implemented): the WhatsApp launcher sets
+`BERRY_APP_MODE=1`, which makes the QNX platform delegate skip creating the
+BerryBrowserChrome URL toolbar entirely (shell_platform_delegate_qnx.cc:
+`BerryAppModeNoChrome()` gates `CreatePlatformWindow`; `SetContents` sizes the
+RenderWidgetHostView to the FULL render window when there's no toolbar). All
+g_chrome accesses were already null-guarded (overlay paint, touch hit-test, key
+editing), so the page simply gets the whole screen and behaves like an installed
+app. The default browser path is unchanged (env unset -> toolbar as before), so
+this is backward-compatible with BerryBrowser/V3 sharing the same binary.
+WhatsApp auto-reconnects its websocket, so the dropped reload/back controls
+aren't needed for a single-site app.
+
+### 18a. Caching + CPU tuning (launcher flags, no rebuild)
+
+The engine already persists the HTTP cache (`profile/Cache`), the V8
+GeneratedCodeCache (`profile/Code Cache/{js,wasm}` — compiled bytecode, so JS/WASM
+isn't re-parsed/recompiled every launch), cookies, and SW Cache Storage; all under
+the WhatsApp app's own persistent sandbox profile. Two launcher-level levers push
+this further for WhatsApp specifically:
+
+- **Pinned 256 MB HTTP disk cache** (`--disk-cache-size=268435456`). The on-disk
+  cache size otherwise follows a free-space heuristic; pinning it guarantees
+  WhatsApp's multi-MB JS/WASM bundle + static assets stay resident across launches
+  rather than being evicted, so warm starts serve locally instead of
+  re-downloading. (Device has ~23 GB free; 256 MB is comfortable.)
+- **Liftoff-only WASM** (`--js-flags=--no-wasm-tier-up --wasm-lazy-validation`).
+  WhatsApp ships heavy WASM (Signal protocol / crypto). V8's default tier-up
+  re-compiles hot WASM with TurboFan on background threads — which pegs all four
+  Krait cores during/after bootstrap, exactly when the main thread needs them, so
+  the app sits loading at 100% CPU. Liftoff-only + lazy validation cut that compile
+  CPU dramatically, at a steady-state crypto cost that's invisible at chat volume.
+
+### 18b. Fix: device linking failed under Service Worker (adblock throttle)
+
+Symptom: WhatsApp "link a device" worked in BerryBrowser but failed in the
+WhatsApp app. Both share the engine; the differential is the WhatsApp app enables
+ServiceWorker. The app log showed repeated
+`url_loader_throttle.cc(47)] Check failed: false` -- i.e. the base
+`URLLoaderThrottle::DetachFromCurrentSequence()` NOTREACHED().
+
+Root cause: the synchronous load path (resource_request_sender.cc:404) moves all
+configured throttles onto a separate worker thread and calls
+`DetachFromCurrentSequence()` on each first. `BerryAdblockThrottle` didn't
+override it, so it inherited the NOTREACHED and aborted those sync loads. Service
+Workers use this sync path for sub-resource loads, so it only triggered with SW
+enabled (the WhatsApp app), never in the SW-off browser -- which is exactly why
+linking broke in one and not the other.
+
+Fix: `BerryAdblockThrottle::DetachFromCurrentSequence()` is now an explicit no-op
+(berry_adblock.cc). The throttle holds no sequence-bound state (it only reads the
+request URL and calls the delegate), so it is safe on any sequence -- same shape
+as MimeSniffingThrottle's override. This is a general correctness fix for adblock
++ Service Workers, not WhatsApp-specific.
+
+Expected behaviour: the FIRST launch after install is still a full cold load
+(download + compile + IndexedDB seed). Subsequent launches should bootstrap from
+the persisted HTTP/code/SW caches with far less network and CPU. (Profile is
+per-app-uid private, so it isn't inspectable over SSH as devuser; the cache code
+paths are verified in shell_content_browser_client.cc.)

@@ -6,6 +6,8 @@
 #include <sys/keycodes.h>
 #include <unistd.h>
 
+#include <cstdlib>
+
 #include "base/containers/contains.h"
 #include "base/qnx_hard_watchdog.h"
 #include "base/qnx_trace.h"
@@ -42,6 +44,20 @@ bool g_last_loading = false;
 bool g_last_can_back = false;
 bool g_last_can_forward = false;
 base::TimeTicks g_last_chrome_url_repaint;
+
+// "App mode": when BERRY_APP_MODE=1 the engine-drawn URL toolbar
+// (BerryBrowserChrome) is never created, so single-site web apps (e.g. the
+// WhatsApp .bar) render full-screen with no browser chrome -- the page gets the
+// whole window. All g_chrome accesses below are null-guarded, so a null toolbar
+// simply means no overlay paint, no toolbar hit-testing, and full-window web
+// content sizing (see CreatePlatformWindow / SetContents).
+bool BerryAppModeNoChrome() {
+  static const bool no_chrome = [] {
+    const char* e = getenv("BERRY_APP_MODE");
+    return e && e[0] == '1';
+  }();
+  return no_chrome;
+}
 
 void RepaintChrome() {
   ui::RequestQnxScreenRepaint();
@@ -316,7 +332,8 @@ void ShellPlatformDelegate::CreatePlatformWindow(
     int rw = initial_size.width() > 0 ? initial_size.width() : 720;
     int rh = initial_size.height() > 0 ? initial_size.height() : 720;
     ui::QnxScreenGetRenderSize(&rw, &rh);
-    g_chrome = std::make_unique<BerryBrowserChrome>(rw, rh);
+    if (!BerryAppModeNoChrome())
+      g_chrome = std::make_unique<BerryBrowserChrome>(rw, rh);
     g_url_bar_editing = false;
   }
 
@@ -351,10 +368,17 @@ void ShellPlatformDelegate::SetContents(Shell* shell) {
   content->Show();
   {
     base::AutoLock lock(g_chrome_lock);
-    if (g_chrome) {
-      auto* rwhv = shell->web_contents()->GetRenderWidgetHostView();
-      if (rwhv)
+    auto* rwhv = shell->web_contents()->GetRenderWidgetHostView();
+    if (rwhv) {
+      if (g_chrome) {
         rwhv->SetSize(g_chrome->GetWebContentBounds().size());
+      } else {
+        // App mode (no toolbar): give the page the full render window.
+        int rw = 0, rh = 0;
+        ui::QnxScreenGetRenderSize(&rw, &rh);
+        if (rw > 0 && rh > 0)
+          rwhv->SetSize(gfx::Size(rw, rh));
+      }
     }
   }
   shell->web_contents()->Focus();

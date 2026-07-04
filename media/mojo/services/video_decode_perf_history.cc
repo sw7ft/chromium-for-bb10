@@ -8,6 +8,7 @@
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
 #include "base/logging.h"
+#include "build/build_config.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/strings/stringprintf.h"
@@ -133,6 +134,19 @@ void VideoDecodePerfHistory::GetPerfInfo(mojom::PredictionFeaturesPtr features,
   DCHECK_NE(features->profile, VIDEO_CODEC_PROFILE_UNKNOWN);
   DCHECK_GT(features->frames_per_sec, 0);
   DCHECK(features->video_size.width() > 0 && features->video_size.height() > 0);
+
+#if BUILDFLAG(IS_QNX)
+  // BB10/QNX: leveldb-backed decode stats can hang or fail on the sandbox FS
+  // (see deploy/HARDENING.md). YouTube's player calls decodingInfo() before
+  // fetching googlevideo streams; never block that handshake on DB init.
+  // Cap smooth=true at ~480p so the stream picker prefers 360p/480p on Krait
+  // software decode; 720p+ still reports supported but not smooth.
+  const int h = features->video_size.height();
+  const int w = features->video_size.width();
+  const bool smooth = (h <= 480 && w <= 854);
+  std::move(got_info_cb).Run(smooth, smooth);
+  return;
+#endif
 
   if (db_init_status_ == FAILED) {
     // Optimistically claim perf is both smooth and power efficient.

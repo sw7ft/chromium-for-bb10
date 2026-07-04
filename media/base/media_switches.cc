@@ -378,9 +378,17 @@ BASE_FEATURE(kMacLoopbackAudioForScreenShare,
 
 // When enabled, MediaCapabilities will check with GPU Video Accelerator
 // Factories to determine isPowerEfficient = true/false.
+#if BUILDFLAG(IS_QNX)
+// QNX has no HW video decode; querying GPU factories makes decodingInfo report
+// powerEfficient=false and can stall YouTube's stream picker on first launch.
+BASE_FEATURE(kMediaCapabilitiesQueryGpuFactories,
+             "MediaCapabilitiesQueryGpuFactories",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+#else
 BASE_FEATURE(kMediaCapabilitiesQueryGpuFactories,
              "MediaCapabilitiesQueryGpuFactories",
              base::FEATURE_ENABLED_BY_DEFAULT);
+#endif
 
 // Enable Media Capabilities with finch-parameters.
 BASE_FEATURE(kMediaCapabilitiesWithParameters,

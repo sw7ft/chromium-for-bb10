@@ -5,7 +5,11 @@
 #include "content/shell/browser/shell_permission_manager.h"
 
 #include "base/command_line.h"
+#include "build/build_config.h"
 #include "base/functional/callback.h"
+#if BUILDFLAG(IS_QNX)
+#include "content/shell/browser/berry_geolocation_qnx.h"
+#endif
 #include "components/permissions/features.h"
 #include "components/permissions/permission_util.h"
 #include "content/public/browser/permission_controller.h"
@@ -96,6 +100,10 @@ void ShellPermissionManager::RequestPermissions(
   }
   std::vector<blink::mojom::PermissionStatus> result;
   for (const auto& permission : request_description.permissions) {
+#if BUILDFLAG(IS_QNX)
+    if (permission == PermissionType::GEOLOCATION)
+      BerryOptIntoGeolocationServices();
+#endif
     result.push_back(IsAllowlistedPermissionType(permission)
                          ? blink::mojom::PermissionStatus::GRANTED
                          : blink::mojom::PermissionStatus::DENIED);
@@ -122,6 +130,10 @@ void ShellPermissionManager::RequestPermissionsFromCurrentDocument(
   }
   std::vector<blink::mojom::PermissionStatus> result;
   for (const auto& permission : request_description.permissions) {
+#if BUILDFLAG(IS_QNX)
+    if (permission == PermissionType::GEOLOCATION)
+      BerryOptIntoGeolocationServices();
+#endif
     result.push_back(IsAllowlistedPermissionType(permission)
                          ? blink::mojom::PermissionStatus::GRANTED
                          : blink::mojom::PermissionStatus::DENIED);

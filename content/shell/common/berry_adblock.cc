@@ -72,6 +72,16 @@ class BerryAdblockThrottle : public blink::URLLoaderThrottle {
   BerryAdblockThrottle(const BerryAdblockThrottle&) = delete;
   BerryAdblockThrottle& operator=(const BerryAdblockThrottle&) = delete;
 
+  // Required for the synchronous load path (resource_request_sender.cc), which
+  // moves throttles onto a separate worker thread and calls this on each one
+  // first. The base implementation is NOTREACHED(); inheriting it crashed the
+  // sync path. This throttle holds no sequence-bound state (it only reads the
+  // request URL and calls the delegate), so it is safe to run on any sequence
+  // -- a no-op override is sufficient. This path is exercised by Service Worker
+  // sync sub-resource loads (e.g. WhatsApp Web's SW), which is why it only
+  // surfaced once ServiceWorker was enabled.
+  void DetachFromCurrentSequence() override {}
+
   void WillStartRequest(network::ResourceRequest* request,
                         bool* /*defer*/) override {
     MaybeBlock(request->url);

@@ -9,6 +9,30 @@ import("//net/features.gni")
 import("//services/network/public/cpp/features.gni")
 import("//testing/libfuzzer/fuzzer_test.gni")
 
+action("gen_watch_shim_header") {
+  script = "qnx/gen_shim_header.py"
+  inputs = [ "qnx/watch_shim.js" ]
+  outputs = [ "$target_gen_dir/watch_shim_script.h" ]
+  args = [
+    rebase_path("qnx/watch_shim.js", root_build_dir),
+    rebase_path("$target_gen_dir/watch_shim_script.h", root_build_dir),
+  ]
+}
+
+action("gen_search_shim_header") {
+  script = "qnx/gen_shim_header.py"
+  inputs = [ "qnx/watch_shim_search.js" ]
+  outputs = [ "$target_gen_dir/search_shim_script.h" ]
+  args = [
+    rebase_path("qnx/watch_shim_search.js", root_build_dir),
+    rebase_path("$target_gen_dir/search_shim_script.h", root_build_dir),
+    "__BERRY_SEARCH_QUERY__",
+    "me at the zoo",
+    "kBerrySearchShimScript",
+    "BERRY_YT_SEARCH",
+  ]
+}
+
 component("network_service") {
   sources = [
     "ad_heuristic_cookie_overrides.cc",
@@ -308,7 +332,11 @@ component("network_service") {
 
   configs += [ "//build/config/compiler:wexit_time_destructors" ]
 
+  include_dirs = [ "$target_gen_dir" ]
+
   deps = [
+    ":gen_search_shim_header",
+    ":gen_watch_shim_header",
     "//base",
     "//build:chromecast_buildflags",
     "//build:chromeos_buildflags",

@@ -2,52 +2,39 @@
 <html>
 <head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
 <body style="font-family:sans-serif">
-<h2>MSE diag</h2>
-<video id="v" controls autoplay playsinline style="width:320px;height:240px;background:#000"></video>
+<h2>MSE fMP4 diag</h2>
+<video id="v" controls playsinline style="width:320px;height:240px;background:#000"></video>
 <script>
 function L(m){ console.log('MSE: ' + m); }
-L('start; MediaSource in window=' + ('MediaSource' in window));
-
-var v = document.getElementById('v');
-var MIME = 'video/mp4; codecs="avc1.42c01e, mp4a.40.2"';
-var URL_FRAG = 'https://nickdesaulniers.github.io/netfix/demo/frag_bunny.mp4';
-L('isTypeSupported(' + MIME + ') = ' + MediaSource.isTypeSupported(MIME));
-
-['loadedmetadata','loadeddata','canplay','play','playing','waiting','stalled','error','ended'].forEach(function(ev){
-  v.addEventListener(ev, function(){
-    var m = 'video ' + ev + ' rs=' + v.readyState + ' t=' + v.currentTime.toFixed(2);
-    if (v.error) m += ' MEDIA_ERR code=' + v.error.code + ' ' + v.error.message;
-    L(m);
-  });
-});
-
+L('start');
+if (!('MediaSource' in window)) { L('MediaSource missing'); throw 0; }
+var mime = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"';
+L('isTypeSupported: ' + MediaSource.isTypeSupported(mime));
 var ms = new MediaSource();
-v.src = window.URL.createObjectURL(ms);
+var v = document.getElementById('v');
+v.src = URL.createObjectURL(ms);
 ms.addEventListener('sourceopen', function(){
   L('sourceopen');
   var sb;
-  try { sb = ms.addSourceBuffer(MIME); }
-  catch(e){ L('addSourceBuffer THREW ' + e); return; }
-  sb.addEventListener('error', function(){ L('SourceBuffer ERROR event'); });
+  try { sb = ms.addSourceBuffer(mime); } catch(e){ L('addSourceBuffer threw: ' + e); return; }
+  sb.addEventListener('error', function(){ L('sb error'); });
   sb.addEventListener('updateend', function(){
-    var b = sb.buffered.length ? sb.buffered.end(0).toFixed(2) : 'none';
-    L('updateend buffered_end=' + b);
-    try { ms.endOfStream(); } catch(e){ L('endOfStream threw ' + e); }
-    v.play().then(function(){L('play() resolved');}).catch(function(e){L('play() rejected ' + e);});
+    L('updateend rs=' + v.readyState + ' t=' + v.currentTime.toFixed(2));
+    if (v.readyState >= 2 && v.paused) {
+      v.play().then(function(){ L('play ok'); }).catch(function(e){ L('play fail ' + e); });
+    }
   });
-  L('fetching frag mp4...');
-  fetch(URL_FRAG)
-    .then(function(r){ L('fetch status ' + r.status); return r.arrayBuffer(); })
-    .then(function(buf){ L('fetched bytes=' + buf.byteLength + '; appending'); sb.appendBuffer(new Uint8Array(buf)); })
-    .catch(function(e){ L('fetch/append error ' + e); });
+  fetch('https://www.w3schools.com/html/mov_bbb.mp4')
+    .then(function(r){ L('fetch status=' + r.status); return r.arrayBuffer(); })
+    .then(function(buf){
+      L('append ' + buf.byteLength + ' bytes');
+      sb.appendBuffer(buf);
+    })
+    .catch(function(e){ L('fetch fail ' + e); });
 });
-
-var n = 0;
-var iv = setInterval(function(){
-  n++;
-  L('tick#' + n + ' t=' + v.currentTime.toFixed(2) + ' rs=' + v.readyState + ' paused=' + v.paused);
-  if (n >= 15) clearInterval(iv);
-}, 2000);
+v.addEventListener('error', function(){
+  if (v.error) L('video MEDIA_ERR code=' + v.error.code);
+});
 </script>
 </body>
 </html>

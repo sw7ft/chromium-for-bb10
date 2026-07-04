@@ -16,6 +16,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <atomic>
+#include "watch_shim_script.h"
+#include "search_shim_script.h"
 #endif
 
 #include "base/command_line.h"
@@ -30,6 +33,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/ranges/algorithm.h"
 #include "base/sequence_checker.h"
+#include "base/strings/escape.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/task/sequenced_task_runner.h"
@@ -748,7 +752,8 @@ void BerryMaybeSpoofYoutubeInnertube(ResourceRequest* request,
   if (!url.is_valid() || url.host().find("youtube.com") == std::string::npos)
     return;
   const std::string spec = url.spec();
-  if (spec.find("/youtubei/v1/player") == std::string::npos)
+  if (spec.find("/youtubei/v1/player") == std::string::npos &&
+      spec.find("/youtubei/v1/search") == std::string::npos)
     return;
   if (!request->request_body)
     return;
@@ -852,6 +857,31 @@ std::string BerryHtmlEscape(const std::string& input) {
   return out;
 }
 
+std::string BerryJsStringEscape(const std::string& input) {
+  std::string out;
+  out.reserve(input.size() + 16);
+  for (char c : input) {
+    switch (c) {
+      case '\\':
+        out += "\\\\";
+        break;
+      case '"':
+        out += "\\\"";
+        break;
+      case '\n':
+        out += "\\n";
+        break;
+      case '\r':
+        out += "\\r";
+        break;
+      default:
+        out += c;
+        break;
+    }
+  }
+  return out;
+}
+
 std::string BerryExtractYoutubeVideoId(const GURL& url) {
   if (!url.is_valid())
     return std::string();
@@ -921,10 +951,148 @@ bool BerryShouldUseYoutubeWatchShim(const net::URLRequest* req,
   return !BerryExtractYoutubeVideoId(url).empty();
 }
 
+std::string BerryExtractYoutubeSearchQuery(const GURL& url) {
+  if (!url.is_valid())
+    return std::string();
+  for (net::QueryIterator it(url); !it.IsAtEnd(); it.Advance()) {
+    if (it.GetKey() == "search_query" && !it.GetValue().empty())
+      return std::string(it.GetValue());
+  }
+  return std::string();
+}
+
+bool BerryShouldUseYoutubeSearchShim(const net::URLRequest* req,
+                                     int resource_type) {
+  if (resource_type != 0 || !req)
+    return false;
+  if (access("/accounts/1000/shared/misc/berry-youtube-shim.disable", F_OK) ==
+      0)
+    return false;
+  const GURL& url = req->url();
+  if (!url.is_valid() || url.host().find("youtube.com") == std::string::npos)
+    return false;
+  if (url.path() != "/results" && url.path() != "/results/")
+    return false;
+  return !BerryExtractYoutubeSearchQuery(url).empty();
+}
+
+bool BerryUrlIsSearchShimTarget(const GURL& url) {
+  if (!url.is_valid() || url.host().find("youtube.com") == std::string::npos)
+    return false;
+  if (url.path() != "/results" && url.path() != "/results/")
+    return false;
+  if (access("/accounts/1000/shared/misc/berry-youtube-shim.disable", F_OK) == 0)
+    return false;
+  return !BerryExtractYoutubeSearchQuery(url).empty();
+}
+
+bool BerryUrlIsGoogleSorryPath(const GURL& url) {
+  if (!url.is_valid())
+    return false;
+  if (url.host().find("google.") == std::string::npos)
+    return false;
+  const std::string& path = url.path();
+  return path == "/sorry" || path == "/sorry/" ||
+         base::StartsWith(path, "/sorry/", base::CompareCase::SENSITIVE);
+}
+
+bool BerryShouldUseGoogleSorryBounce(const net::URLRequest* req,
+                                      int resource_type) {
+  if (resource_type != 0 || !req)
+    return false;
+  if (access("/accounts/1000/shared/misc/berry-google-sorry-shim.disable",
+              F_OK) == 0)
+    return false;
+  return BerryUrlIsGoogleSorryPath(req->url());
+}
+
+bool BerryUrlIsGoogleSorryBounceTarget(const GURL& url) {
+  if (access("/accounts/1000/shared/misc/berry-google-sorry-shim.disable",
+              F_OK) == 0)
+    return false;
+  return BerryUrlIsGoogleSorryPath(url);
+}
+
+std::string BerryExtractGoogleSearchQueryFromSorryUrl(const GURL& url) {
+  if (!url.is_valid())
+    return std::string();
+  for (net::QueryIterator it(url); !it.IsAtEnd(); it.Advance()) {
+    if (it.GetKey() != "continue" || it.GetValue().empty())
+      continue;
+    std::string continue_str(it.GetValue());
+    GURL continue_url(continue_str);
+    if (!continue_url.is_valid()) {
+      continue_str = base::UnescapeURLComponent(
+          continue_str,
+          base::UnescapeRule::SPACES | base::UnescapeRule::PATH_SEPARATORS |
+              base::UnescapeRule::URL_SPECIAL_CHARS_EXCEPT_PATH_SEPARATORS);
+      continue_url = GURL(continue_str);
+    }
+    if (!continue_url.is_valid())
+      continue;
+    for (net::QueryIterator qit(continue_url); !qit.IsAtEnd(); qit.Advance()) {
+      if (qit.GetKey() == "q" && !qit.GetValue().empty())
+        return std::string(qit.GetValue());
+    }
+  }
+  return std::string();
+}
+
 std::string BerryWatchFullPageFallbackUrl(const std::string& watch_url_spec) {
   if (watch_url_spec.find('?') != std::string::npos)
     return watch_url_spec + "&berry_full=1";
   return watch_url_spec + "?berry_full=1";
+}
+
+// Tripwire: log if shim HTML was served but berry_js_alive never arrives.
+std::atomic<uint64_t> g_berry_shim_flush_gen{0};
+std::atomic<bool> g_berry_shim_js_alive{false};
+
+void BerryCheckWatchShimJsAlive(uint64_t gen, std::string video_id) {
+  if (gen != g_berry_shim_flush_gen.load(std::memory_order_relaxed))
+    return;
+  if (g_berry_shim_js_alive.load(std::memory_order_relaxed))
+    return;
+  QNX_NAV_LOG_FMT(
+      "BerryNav: WatchShimJsAlive MISSING gen=%llu v=\"%.20s\" "
+      "(no berry_js_alive within 5s — script dead?)\n",
+      static_cast<unsigned long long>(gen), video_id.c_str());
+}
+
+void BerryOnWatchShimFlushed(const std::string& video_id) {
+  const uint64_t gen =
+      g_berry_shim_flush_gen.fetch_add(1, std::memory_order_relaxed) + 1;
+  g_berry_shim_js_alive.store(false, std::memory_order_relaxed);
+  base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
+      FROM_HERE,
+      base::BindOnce(&BerryCheckWatchShimJsAlive, gen, video_id),
+      base::Seconds(5));
+}
+
+void BerryMaybeMarkWatchShimJsAlive(const GURL& url) {
+  if (!url.is_valid())
+    return;
+  if (url.spec().find("berry_js_alive=1") == std::string::npos)
+    return;
+  g_berry_shim_js_alive.store(true, std::memory_order_relaxed);
+  QNX_NAV_LOG_FMT("BerryNav: WatchShimJsAlive OK url=\"%.80s\"\n",
+                  url.spec().c_str());
+}
+
+void BerryCancelWatchShimJsAliveTripwire() {
+  g_berry_shim_flush_gen.fetch_add(1, std::memory_order_relaxed);
+}
+
+bool BerryUrlIsWatchShimTarget(const GURL& url) {
+  if (!url.is_valid() || url.host().find("youtube.com") == std::string::npos)
+    return false;
+  if (url.path() != "/watch" && url.path() != "/watch/")
+    return false;
+  if (access("/accounts/1000/shared/misc/berry-youtube-shim.disable", F_OK) == 0)
+    return false;
+  if (BerryWatchUrlRequestsFullPage(url))
+    return false;
+  return !BerryExtractYoutubeVideoId(url).empty();
 }
 
 void BerryScrubWatchShimResponseHeaders(mojom::URLResponseHead* response,
@@ -958,10 +1126,21 @@ void BerryScrubWatchShimResponseHeaders(mojom::URLResponseHead* response,
       network::PopulateParsedHeaders(response->headers.get(), url);
 }
 
+void BerryScrubSorryBounceResponseHeaders(mojom::URLResponseHead* response,
+                                          size_t shim_body_size,
+                                          const GURL& url) {
+  BerryScrubWatchShimResponseHeaders(response, shim_body_size, url);
+  if (response && response->headers)
+    response->headers->ReplaceStatusLine("HTTP/1.1 200 OK");
+}
+
 std::string BerryBuildWatchShimHtml(const GURL& watch_url,
                                     const std::string& video_id) {
   (void)watch_url;
+  std::string script = network::kBerryWatchShimScript;
   const std::string safe_vid = BerryHtmlEscape(video_id);
+  base::ReplaceSubstringsAfterOffset(&script, 0, "__BERRY_VIDEO_ID__",
+                                     safe_vid);
   return std::string(
              "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
              "<meta name=\"viewport\" content=\"width=device-width\">"
@@ -977,73 +1156,101 @@ std::string BerryBuildWatchShimHtml(const GURL& watch_url,
              "<h1 id=\"title\">Loading...</h1>"
              "<p id=\"status\">Fetching stream...</p>"
              "<video id=\"v\" controls autoplay playsinline></video>"
-             "<script>"
-         "(function(){"
-         "try{fetch('/generate_204?berry_js_alive=1',{credentials:'include',"
-         "mode:'no-cors'});console.log('WatchShim js-alive');}catch(e){}"
-         "var vid=\"" +
-         safe_vid +
-         "\",innRetries=0,mediaRetries=0,savedTime=0;"
-         "function pickUrl(j){"
-         "var f=j&&j.streamingData&&j.streamingData.formats;if(!f)return null;"
-         "var i;for(i=0;i<f.length;i++)if(f[i].itag===18&&f[i].url)return f[i].url;"
-         "for(i=0;i<f.length;i++)if(f[i].mimeType&&f[i].mimeType.indexOf("
-         "'video/mp4')>=0&&f[i].url)return f[i].url;"
-         "for(i=0;i<f.length;i++)if(f[i].url)return f[i].url;return null;}"
-         "function unplayableMsg(j){"
-         "if(!j)return 'Could not load video';"
-         "var vd=j.videoDetails;"
-         "if(vd&&(vd.isLiveContent||vd.isLive))return "
-         "'Live streams are not supported in BerryBrowser.';"
-         "var ps=j.playabilityStatus;"
-         "if(ps){"
-         "if(ps.status==='LOGIN_REQUIRED')return ps.reason||'Sign in required.';"
-         "if(ps.status==='UNPLAYABLE'||ps.status==='ERROR')return "
-         "ps.reason||ps.status;"
-         "if(ps.reason)return ps.reason;}"
-         "if(!pickUrl(j))return 'No progressive download available for this "
-         "video.';return null;}"
-         "function setTitle(j){"
-         "var t=j&&j.videoDetails&&j.videoDetails.title;if(!t)return;"
-         "document.title=t;document.getElementById('title').textContent=t;}"
-         "function showStatus(msg,tap){"
-         "var el=document.getElementById('status');"
-         "el.textContent=msg;el.className=tap?'tap':'';"
-         "el.onclick=tap?function(){innRetries=mediaRetries=0;savedTime=0;"
-         "load(false);}:null;}"
-         "function playerBody(){return{context:{client:{clientName:'WEB',"
-         "clientVersion:'2.20250101.01.00',hl:'en',gl:'US',"
-         "timeZone:'America/New_York',utcOffsetMinutes:-300,"
-         "clientScreen:'WATCH'}},videoId:vid,racyCheckOk:true,"
-         "contentCheckOk:true,playbackContext:{contentPlaybackContext:"
-         "{html5Preference:'HTML5_PREF_WANTS'}}}};}"
-         "function fetchPlayer(){return fetch('/youtubei/v1/player?"
-         "prettyPrint=false',{method:'POST',headers:{'Content-Type':"
-         "'application/json'},credentials:'include',body:JSON.stringify("
-         "playerBody())}).then(function(r){return r.json();});}"
-         "function bindVideo(v){"
-         "v.onerror=function(){"
-         "if(mediaRetries++<1){savedTime=v.currentTime||0;"
-         "showStatus('Refreshing stream URL...');load(true);return;}"
-         "showStatus('Playback failed — tap to reload',true);};}"
-         "function load(fromMediaErr){"
-         "if(!fromMediaErr){"
-         "if(innRetries>1){showStatus('Could not load video — tap to retry',"
-         "true);return;}"
-         "showStatus('Fetching stream...');}"
-         "fetchPlayer().then(function(j){"
-         "setTitle(j);var url=pickUrl(j);var msg=unplayableMsg(j);"
-         "if(!url){if(msg){showStatus(msg,true);return;}"
-         "if(innRetries++<1){load(false);return;}"
-         "showStatus(msg||'Could not load video',true);return;}"
-         "innRetries=0;showStatus('Playing');"
-         "var v=document.getElementById('v');bindVideo(v);v.src=url;"
-         "if(savedTime>0){try{v.currentTime=savedTime;}catch(e){}}"
-         "savedTime=0;if(v.play)v.play().catch(function(){});"
-         "}).catch(function(){if(innRetries++<1){load(false);return;}"
-         "showStatus('Network error — tap to retry',true);});}"
-         "load(false);})();"
-         "</script></body></html>");
+             "<script>") +
+         script + "</script></body></html>";
+}
+
+std::string BerryBuildSearchShimHtml(const GURL& results_url,
+                                     const std::string& search_query) {
+  (void)results_url;
+  std::string script = network::kBerrySearchShimScript;
+  const std::string safe_query = BerryJsStringEscape(search_query);
+  base::ReplaceSubstringsAfterOffset(&script, 0, "__BERRY_SEARCH_QUERY__",
+                                     safe_query);
+  const std::string title = BerryHtmlEscape(search_query);
+  return std::string(
+             "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+             "<meta name=\"viewport\" content=\"width=device-width\">"
+             "<title>") +
+         title +
+         std::string(
+             " — YouTube Search</title>"
+             "<style>"
+             "body{font-family:sans-serif;background:#111;color:#eee;margin:0;"
+             "padding:12px}"
+             "form{display:flex;gap:8px;margin:0 0 12px}"
+             "input{flex:1;font-size:18px;padding:10px;border-radius:8px;"
+             "border:1px solid #333;background:#0b0f14;color:#fff}"
+             "button{font-size:18px;padding:10px 16px;border:none;border-radius:8px;"
+             "background:#cc0000;color:#fff;font-weight:700}"
+             "#status{color:#888;font-size:0.9em;margin:8px 0}"
+             "#status.tap{cursor:pointer;color:#6af;text-decoration:underline}"
+             "#list{display:grid;gap:10px}"
+             "a.row{display:flex;gap:10px;text-decoration:none;color:#eee;"
+             "padding:8px;border-radius:8px;background:#1a1a1a}"
+             "a.row:active{background:#252525}"
+             "img{width:120px;height:68px;object-fit:cover;background:#000;"
+             "border-radius:4px;flex-shrink:0}"
+             ".meta{flex:1;min-width:0}"
+             ".t{font-size:1em;font-weight:600;margin:0 0 4px}"
+             ".c{font-size:0.85em;color:#aaa}"
+             ".d{font-size:0.85em;color:#888;align-self:flex-start}"
+             "</style></head><body>"
+             "<form id=\"searchForm\"><input id=\"q\" type=\"search\" "
+             "value=\"") +
+         title +
+         std::string(
+             "\" autocomplete=\"off\"><button type=\"submit\">Search</button>"
+             "</form>"
+             "<p id=\"status\">Searching...</p>"
+             "<div id=\"list\"></div>"
+             "<script>") +
+         script + "</script></body></html>";
+}
+
+std::string BerryBuildSorryBounceHtml(const GURL& sorry_url,
+                                      const std::string& search_query) {
+  (void)sorry_url;
+  const std::string q_enc = base::EscapeQueryParamValue(search_query, false);
+  const std::string ddg_url =
+      "https://html.duckduckgo.com/html/?q=" + q_enc;
+  const std::string google_url =
+      "https://www.google.com/search?q=" + q_enc;
+  const std::string q_label =
+      search_query.empty() ? std::string("your search")
+                           : BerryHtmlEscape(search_query);
+  return std::string(
+             "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+             "<meta name=\"viewport\" content=\"width=device-width\">"
+             "<title>Google blocked this search</title>"
+             "<style>"
+             "body{font-family:sans-serif;background:#111;color:#eee;margin:0;"
+             "padding:16px;max-width:640px}"
+             "h1{font-size:1.25em;margin:0 0 12px;line-height:1.3}"
+             "p{color:#aaa;font-size:0.95em;margin:0 0 16px;line-height:1.4}"
+             ".q{color:#fff;font-weight:600;word-break:break-word}"
+             ".actions{display:flex;flex-direction:column;gap:10px}"
+             "a.btn{display:block;text-align:center;padding:14px 16px;"
+             "border-radius:10px;text-decoration:none;font-size:1.05em;"
+             "font-weight:700}"
+             "a.primary{background:#58a6ff;color:#111}"
+             "a.secondary{background:#333;color:#eee;border:1px solid #555}"
+             "a:active{opacity:0.85}"
+             "</style></head><body>"
+             "<h1>Google thinks we're a robot</h1>"
+             "<p>Search blocked for: <span class=\"q\">") +
+         q_label +
+         std::string(
+             "</span>. You can try Google again (it often works on retry) or "
+             "search DuckDuckGo instead.</p>"
+             "<div class=\"actions\">"
+             "<a class=\"btn primary\" href=\"") +
+         ddg_url +
+         std::string("\">Search DuckDuckGo</a>"
+                     "<a class=\"btn secondary\" href=\"") +
+         google_url +
+         std::string("\">Try Google again</a>"
+                     "</div></body></html>");
 }
 #endif
 
@@ -1950,6 +2157,13 @@ void URLLoader::ScheduleStart() {
                  url_request_ ? url_request_->url().spec().c_str() : "null");
 #if defined(__QNX__) || defined(__QNXNTO__)
   if (resource_type_ == 0) {
+    if (url_request_) {
+      BerryMaybeMarkWatchShimJsAlive(url_request_->url());
+      if (!BerryUrlIsWatchShimTarget(url_request_->url()) &&
+          !BerryUrlIsSearchShimTarget(url_request_->url()) &&
+          !BerryUrlIsGoogleSorryBounceTarget(url_request_->url()))
+        BerryCancelWatchShimJsAliveTripwire();
+    }
     QNX_NAV_LOG_FMT(
         "BerryNav: URLReqStart loader=%p url=\"%s\" ms=%lld abs=%lld\n",
         this,
@@ -1985,6 +2199,12 @@ void URLLoader::ScheduleStart() {
 #if defined(__QNX__) || defined(__QNXNTO__)
     if (BerryShouldUseYoutubeWatchShim(url_request_.get(), resource_type_)) {
       QnxPrepareYoutubeWatchShim();
+    } else if (BerryShouldUseYoutubeSearchShim(url_request_.get(),
+                                               resource_type_)) {
+      QnxPrepareYoutubeSearchShim();
+    } else if (BerryShouldUseGoogleSorryBounce(url_request_.get(),
+                                               resource_type_)) {
+      QnxPrepareGoogleSorryBounce();
     }
 #endif
     QNX_TRACE_MSG("QNX:UL:Starting!\n");
@@ -2558,26 +2778,43 @@ void URLLoader::OnResponseStarted(net::URLRequest* url_request, int net_error) {
 #if defined(__QNX__) || defined(__QNXNTO__)
   if (qnx_youtube_watch_shim_buffer_ && response_ && response_->headers) {
     const int http_code = response_->headers->response_code();
-    if (http_code == 200 && !qnx_youtube_watch_shim_html_.empty()) {
-      BerryScrubWatchShimResponseHeaders(response_.get(),
-                                         qnx_youtube_watch_shim_html_.size(),
-                                         url_request_->url());
+    const bool code_ok =
+        qnx_google_sorry_bounce_
+            ? (http_code == 429 || http_code == 200 || http_code == 403)
+            : (http_code == 200);
+    if (code_ok && !qnx_youtube_watch_shim_html_.empty()) {
+      if (qnx_google_sorry_bounce_) {
+        BerryScrubSorryBounceResponseHeaders(response_.get(),
+                                             qnx_youtube_watch_shim_html_.size(),
+                                             url_request_->url());
+        QNX_NAV_LOG_FMT(
+            "BerryNav: SorryBounce head scrubbed loader=%p code=%d shim_bytes=%zu "
+            "url=\"%.80s\"\n",
+            this, http_code, qnx_youtube_watch_shim_html_.size(),
+            url_request_->url().spec().c_str());
+      } else {
+        BerryScrubWatchShimResponseHeaders(response_.get(),
+                                           qnx_youtube_watch_shim_html_.size(),
+                                           url_request_->url());
+        const size_t csp_count =
+            response_->parsed_headers
+                ? response_->parsed_headers->content_security_policy.size()
+                : 0;
+        QNX_NAV_LOG_FMT(
+            "BerryNav: WatchShim head scrubbed loader=%p code=%d shim_bytes=%zu "
+            "csp=%zu\n",
+            this, http_code, qnx_youtube_watch_shim_html_.size(), csp_count);
+      }
       qnx_watch_shim_scrubbed_ = true;
       qnx_watch_shim_response_ready_ = true;
-      const size_t csp_count =
-          response_->parsed_headers
-              ? response_->parsed_headers->content_security_policy.size()
-              : 0;
-      QNX_NAV_LOG_FMT(
-          "BerryNav: WatchShim head scrubbed loader=%p code=%d shim_bytes=%zu "
-          "csp=%zu\n",
-          this, http_code, qnx_youtube_watch_shim_html_.size(), csp_count);
     } else {
       QNX_NAV_LOG_FMT(
-          "BerryNav: WatchShim head skip loader=%p code=%d html=%zu\n", this,
+          "BerryNav: %s head skip loader=%p code=%d html=%zu\n",
+          qnx_google_sorry_bounce_ ? "SorryBounce" : "WatchShim", this,
           http_code, qnx_youtube_watch_shim_html_.size());
       qnx_youtube_watch_shim_buffer_ = false;
       qnx_youtube_watch_shim_active_ = false;
+      qnx_google_sorry_bounce_ = false;
       qnx_youtube_watch_shim_html_.clear();
     }
   }
@@ -2746,6 +2983,7 @@ void URLLoader::QnxFlushBufferedYoutubePlayerBody() {
 }
 
 void URLLoader::QnxPrepareYoutubeWatchShim() {
+  qnx_google_sorry_bounce_ = false;
   qnx_youtube_watch_shim_active_ = true;
   qnx_youtube_watch_shim_buffer_ = true;
   qnx_watch_shim_response_ready_ = false;
@@ -2772,10 +3010,61 @@ void URLLoader::QnxPrepareYoutubeWatchShim() {
                   qnx_youtube_watch_shim_html_.size());
 }
 
+void URLLoader::QnxPrepareYoutubeSearchShim() {
+  qnx_google_sorry_bounce_ = false;
+  qnx_youtube_watch_shim_active_ = true;
+  qnx_youtube_watch_shim_buffer_ = true;
+  qnx_watch_shim_response_ready_ = false;
+  qnx_watch_shim_scrubbed_ = false;
+  qnx_youtube_watch_page_sniff_.clear();
+  const std::string search_query =
+      BerryExtractYoutubeSearchQuery(url_request_->url());
+  qnx_youtube_video_id_ = search_query;
+  if (search_query.empty()) {
+    qnx_youtube_watch_shim_active_ = false;
+    qnx_youtube_watch_shim_buffer_ = false;
+    return;
+  }
+
+  qnx_youtube_watch_shim_html_ =
+      BerryBuildSearchShimHtml(url_request_->url(), search_query);
+  QNX_NAV_LOG_FMT(
+      "BerryNav: SearchShim start loader=%p q=\"%.80s\" url=\"%.80s\" "
+      "(body-swap)\n",
+      this, search_query.c_str(), url_request_->url().spec().c_str());
+  QNX_NAV_LOG_FMT("BerryNav: SearchShim html loader=%p bytes=%zu\n", this,
+                  qnx_youtube_watch_shim_html_.size());
+}
+
+void URLLoader::QnxPrepareGoogleSorryBounce() {
+  qnx_google_sorry_bounce_ = true;
+  qnx_youtube_watch_shim_active_ = true;
+  qnx_youtube_watch_shim_buffer_ = true;
+  qnx_watch_shim_response_ready_ = false;
+  qnx_watch_shim_scrubbed_ = false;
+  qnx_youtube_watch_page_sniff_.clear();
+  const std::string search_query =
+      BerryExtractGoogleSearchQueryFromSorryUrl(url_request_->url());
+  qnx_youtube_video_id_ = search_query;
+  qnx_youtube_watch_shim_html_ =
+      BerryBuildSorryBounceHtml(url_request_->url(), search_query);
+  QNX_NAV_LOG_FMT(
+      "BerryNav: SorryBounce start loader=%p q=\"%.80s\" url=\"%.80s\" "
+      "(body-swap)\n",
+      this, search_query.c_str(), url_request_->url().spec().c_str());
+  QNX_NAV_LOG_FMT("BerryNav: SorryBounce html loader=%p bytes=%zu\n", this,
+                  qnx_youtube_watch_shim_html_.size());
+}
+
 void URLLoader::QnxFlushWatchShimBody() {
   if (qnx_youtube_watch_shim_html_.empty())
     return;
-  QnxWriteBodyToNewDataPipe(qnx_youtube_watch_shim_html_, "WatchShimFlush");
+  const char* log_tag =
+      qnx_google_sorry_bounce_ ? "SorryBounceFlush" : "WatchShimFlush";
+  if (QnxWriteBodyToNewDataPipe(qnx_youtube_watch_shim_html_, log_tag) &&
+      !qnx_google_sorry_bounce_) {
+    BerryOnWatchShimFlushed(qnx_youtube_video_id_);
+  }
 }
 #endif
 
@@ -3038,29 +3327,27 @@ void URLLoader::DidRead(int num_bytes, bool completed_synchronously) {
   }
 
 #if defined(__QNX__)
-  if (!qnx_captcha_probe_logged_ && num_bytes > 0 && pending_write_) {
+  if (base::QnxDecodeProbeEnabled() && !qnx_captcha_probe_logged_ &&
+      num_bytes > 0 && pending_write_) {
+    qnx_captcha_probe_logged_ = true;
     const std::string spec = url_request_->url().spec();
-    if (spec.find("/recaptcha/") != std::string::npos ||
-        spec.find("/sorry") != std::string::npos) {
-      qnx_captcha_probe_logged_ = true;
-      std::string enc("(none)");
-      std::string ctype("(none)");
-      if (response_ && response_->headers) {
-        response_->headers->GetNormalizedHeader("Content-Encoding", &enc);
-        response_->headers->GetNormalizedHeader("Content-Type", &ctype);
-      }
-      const char* body = pending_write_->buffer() + new_data_offset;
-      int n = num_bytes < 24 ? num_bytes : 24;
-      char hex[80];
-      int o = 0;
-      for (int i = 0; i < n && o < static_cast<int>(sizeof(hex)) - 3; ++i) {
-        o += snprintf(hex + o, sizeof(hex) - o, "%02x",
-                      static_cast<unsigned char>(body[i]));
-      }
-      QNX_NAV_LOG_FMT(
-          "BerryNav: CaptchaBody enc=%s ctype=%s n=%d hex=%s url=\"%.90s\"\n",
-          enc.c_str(), ctype.c_str(), num_bytes, hex, spec.c_str());
+    std::string enc("(none)");
+    std::string ctype("(none)");
+    if (response_ && response_->headers) {
+      response_->headers->GetNormalizedHeader("Content-Encoding", &enc);
+      response_->headers->GetNormalizedHeader("Content-Type", &ctype);
     }
+    const char* body = pending_write_->buffer() + new_data_offset;
+    int n = num_bytes < 24 ? num_bytes : 24;
+    char hex[80];
+    int o = 0;
+    for (int i = 0; i < n && o < static_cast<int>(sizeof(hex)) - 3; ++i) {
+      o += snprintf(hex + o, sizeof(hex) - o, "%02x",
+                    static_cast<unsigned char>(body[i]));
+    }
+    QNX_DECODE_PROBE_FMT(
+        "BerryNav: DecodeProbe body enc=%s ctype=%s n=%d hex=%s url=\"%.90s\"\n",
+        enc.c_str(), ctype.c_str(), num_bytes, hex, spec.c_str());
   }
 #endif
 
@@ -3374,12 +3661,14 @@ void URLLoader::NotifyCompleted(int error_code) {
         QnxFlushWatchShimBody();
       } else {
         QNX_NAV_LOG_FMT(
-            "BerryNav: WatchShim skip flush loader=%p err=%d ready=%d scrub=%d "
+            "BerryNav: %s skip flush loader=%p err=%d ready=%d scrub=%d "
             "resp=%d\n",
-            this, error_code, qnx_watch_shim_response_ready_ ? 1 : 0,
+            qnx_google_sorry_bounce_ ? "SorryBounce" : "WatchShim", this,
+            error_code, qnx_watch_shim_response_ready_ ? 1 : 0,
             qnx_watch_shim_scrubbed_ ? 1 : 0, response_ ? 1 : 0);
         qnx_youtube_watch_shim_buffer_ = false;
         qnx_youtube_watch_shim_active_ = false;
+        qnx_google_sorry_bounce_ = false;
         qnx_youtube_watch_shim_html_.clear();
         consumer_handle_.reset();
       }

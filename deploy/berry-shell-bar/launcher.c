@@ -374,7 +374,7 @@ int main(int argc, char** argv) {
       setenv("QNX_GPU_PROBE", "0", 1);
   }
 
-  fprintf(stderr, "BerryShell: BerryBrowserV3 build 44\n");
+  fprintf(stderr, "BerryShell: BerryBrowserV3 build 49\n");
   fprintf(stderr, "BerryShell: app dir = %s\n", dir);
   fprintf(stderr, "BerryShell: work dir (cwd) = %s\n", work);
   fprintf(stderr, "BerryShell: %s\n",

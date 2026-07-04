@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YouTube Search — BerryBrowser</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; min-height: 100%;
+    font-family: -apple-system, "Slate Pro", Arial, sans-serif;
+    color: #e8eef5;
+    background: #0e131a;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 24px 18px 40px; }
+  h1 { font-size: 26px; margin: 0 0 8px; }
+  .sub { color: #8fa0b3; font-size: 15px; line-height: 1.5; margin: 0 0 24px; }
+  form { display: flex; gap: 10px; margin-bottom: 18px; }
+  #q { flex: 1; font-size: 22px; padding: 16px 18px; border-radius: 14px;
+    border: 2px solid #2b3744; background: #0b0f14; color: #fff; outline: none; }
+  #q:focus { border-color: #4aa3ff; }
+  #go { font-size: 20px; padding: 0 22px; border: none; border-radius: 14px;
+    background: #cc0000; color: #fff; font-weight: 800; }
+  .box { background: #161f2b; border: 1px solid #243140; border-radius: 14px;
+    padding: 18px; margin-bottom: 18px; }
+  .box h2 { font-size: 16px; margin: 0 0 10px; color: #4aa3ff; }
+  .box p { margin: 0 0 10px; font-size: 15px; line-height: 1.45; color: #cdd8e4; }
+  .box p:last-child { margin-bottom: 0; }
+  .links { display: grid; gap: 12px; margin-top: 20px; }
+  a.btn { display: block; text-align: center; text-decoration: none;
+    padding: 16px; border-radius: 12px; font-weight: 700; font-size: 17px; }
+  a.primary { background: #cc0000; color: #fff; }
+  a.secondary { background: #1e2a3a; color: #cfe0f3; border: 1px solid #2c3e54; }
+  a.home { background: #18222e; color: #cdd8e4; border: 1px solid #27333f; }
+  a:active { filter: brightness(1.12); }
+  .warn { color: #ffb347; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>YouTube Search</h1>
+    <p class="sub">Search YouTube with BerryBrowser's lightweight player — no kevlar, no broken previews.</p>
+
+    <form id="searchForm">
+      <input id="q" type="search" inputmode="search" autocomplete="off"
+             autocapitalize="off" spellcheck="false" placeholder="Search YouTube">
+      <button id="go" type="submit">Search</button>
+    </form>
+
+    <div class="box">
+      <h2>What to avoid</h2>
+      <p class="warn"><strong>Do not open youtube.com home</strong> — the full desktop site is slow and preview thumbnails will not play here.</p>
+      <p class="warn"><strong>Do not search Google for YouTube</strong> — Google often shows a CAPTCHA on this device.</p>
+    </div>
+
+    <div class="links">
+      <a class="btn primary" href="https://www.youtube.com/watch?v=jNQXAC9IVRw">Play test video</a>
+      <a class="btn secondary" href="https://html.duckduckgo.com/html/?q=youtube">DuckDuckGo HTML search</a>
+      <a class="btn home" href="home.html">Back to home</a>
+    </div>
+  </div>
+  <script>
+    document.getElementById('searchForm').onsubmit = function(e) {
+      e.preventDefault();
+      var q = document.getElementById('q').value.trim();
+      if (!q) return false;
+      window.location.href =
+        'https://www.youtube.com/results?search_query=' + encodeURIComponent(q);
+      return false;
+    };
+  </script>
+</body>
+</html>

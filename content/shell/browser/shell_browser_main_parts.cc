@@ -28,7 +28,7 @@
 #include "components/performance_manager/embedder/graph_features.h"
 #include "components/performance_manager/embedder/performance_manager_lifetime.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/devtools_agent_host.h"
+#include "content/public/browser/device_service.h"
 #include "content/public/browser/first_party_sets_handler.h"
 #include "content/public/browser/network_service_instance.h"
 #include "content/public/browser/storage_partition.h"
@@ -36,6 +36,7 @@
 #include "content/public/common/result_codes.h"
 #include "content/public/common/url_constants.h"
 #include "content/shell/android/shell_descriptors.h"
+#include "content/shell/browser/berry_geolocation_qnx.h"
 #include "content/shell/browser/qnx_berry_daemon_host.h"
 #include "base/qnx_berry_daemon.h"
 #include "content/shell/browser/shell_browser_context.h"
@@ -271,6 +272,7 @@ int ShellBrowserMainParts::PreMainMessageLoopRun() {
 #if BUILDFLAG(IS_QNX)
   if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kProcessType)) {
+    BerryOptIntoGeolocationServices();
     WarmupNetworkStackBeforeFirstNavigation(browser_context_.get());
   }
 #endif

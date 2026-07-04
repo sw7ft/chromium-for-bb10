@@ -1,5 +1,9 @@
 # Google CAPTCHA / "I'm Not a Robot" — QNX/BB10 Investigation Log
 
+> **Decision (2026-07-03): TABLED.** Route around Google (YT Search shim + DuckDuckGo HTML).
+> See `/root/berry-agent-handoff-google-captcha.md` for mechanism-vs-adversary framing,
+> hard-stop on desktop-UA A/B, and `berry-decode.debug` probe usage.
+
 ## Symptom
 On Google search, Berry gets redirected to `/sorry/index` (HTTP 429), shows reCAPTCHA
 checkbox, user taps it, spinner runs forever. Same on headless and interactive.

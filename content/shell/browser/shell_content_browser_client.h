@@ -151,6 +151,10 @@ class ShellContentBrowserClient : public ContentBrowserClient {
   TtsPlatform* GetTtsPlatform() override;
 #endif  // BUILDFLAG(IS_QNX)
   device::GeolocationManager* GetGeolocationManager() override;
+#if BUILDFLAG(IS_QNX)
+  std::unique_ptr<device::LocationProvider> OverrideSystemLocationProvider()
+      override;
+#endif  // BUILDFLAG(IS_QNX)
   void ConfigureNetworkContextParams(
       BrowserContext* context,
       bool in_memory,

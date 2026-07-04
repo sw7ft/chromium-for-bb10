@@ -42,7 +42,9 @@ inline bool QnxNavLogEnabled() {
     if (getenv("QNX_NAV_DEBUG"))
       return true;
     return access("/accounts/1000/shared/misc/berry-nav.debug", F_OK) == 0 ||
-           access("/accounts/1000/shared/misc/berry-kbd.debug", F_OK) == 0;
+           access("/accounts/1000/shared/misc/berry-kbd.debug", F_OK) == 0 ||
+           access("/accounts/1000/shared/misc/berry-video.debug", F_OK) == 0 ||
+           access("/accounts/1000/shared/misc/berry-decode.debug", F_OK) == 0;
   }();
   return on;
 }
@@ -67,6 +69,14 @@ inline bool QnxFpsLogEnabled() {
       return true;
     return access("/accounts/1000/shared/misc/berry-fps.enable", F_OK) == 0;
   }();
+  return on;
+}
+
+// One-shot post-decode body/header probe for "transport vs gatekeeping" diagnosis.
+// touch /accounts/1000/shared/misc/berry-decode.debug
+inline bool QnxDecodeProbeEnabled() {
+  static const bool on =
+      access("/accounts/1000/shared/misc/berry-decode.debug", F_OK) == 0;
   return on;
 }
 }  // namespace base
@@ -111,6 +121,16 @@ inline bool QnxFpsLogEnabled() {
     }                                          \
   } while (0)
 
+#define QNX_DECODE_PROBE_FMT(fmt, ...)           \
+  do {                                           \
+    if (base::QnxDecodeProbeEnabled()) {         \
+      char _qd[512];                             \
+      int _ql = snprintf(_qd, sizeof(_qd), fmt, __VA_ARGS__); \
+      if (_ql > 0)                               \
+        ::write(2, _qd, _ql);                    \
+    }                                            \
+  } while (0)
+
 #define QNX_GL_LOG(fmt, ...)                     \
   do {                                           \
     if (base::QnxGlLogEnabled()) {               \
@@ -131,6 +151,7 @@ inline bool QnxFpsLogEnabled() {
 #define QNX_TRACE_THEN(msg, result) (result)
 #define QNX_NAV_LOG(msg) ((void)0)
 #define QNX_NAV_LOG_FMT(fmt, ...) ((void)0)
+#define QNX_DECODE_PROBE_FMT(fmt, ...) ((void)0)
 #define QNX_GL_LOG(fmt, ...) ((void)0)
 #define QNX_GL_LOG_MSG(msg) ((void)0)
 

@@ -10,7 +10,7 @@
 #include "base/no_destructor.h"
 #include "base/qnx_trace.h"
 #include "ui/base/cursor/cursor_factory.h"
-#include "ui/base/ime/input_method_minimal.h"
+#include "ui/ozone/platform/qnx_screen/qnx_input_method.h"
 #include "ui/display/display.h"
 #include "ui/display/display_list.h"
 #include "ui/display/display_observer.h"
@@ -157,7 +157,7 @@ class OzonePlatformQnxScreen : public OzonePlatform {
   std::unique_ptr<InputMethod> CreateInputMethod(
       ImeKeyEventDispatcher* dispatcher,
       gfx::AcceleratedWidget widget) override {
-    return std::make_unique<InputMethodMinimal>(dispatcher);
+    return std::make_unique<QnxInputMethod>(dispatcher);
   }
 
   // Creates window_manager_ + surface_factory_ exactly once, regardless of

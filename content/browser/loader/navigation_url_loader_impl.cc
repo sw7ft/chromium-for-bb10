@@ -879,19 +879,17 @@ void NavigationURLLoaderImpl::OnReceiveResponse(
                                    .InMilliseconds()),
         base::QnxNowMs());
   }
-  if (head && head->headers &&
-      (url_.spec().find("recaptcha") != std::string::npos ||
-       url_.spec().find("google.com/sorry") != std::string::npos)) {
+  if (head && head->headers && base::QnxDecodeProbeEnabled()) {
     std::string encoding;
     std::string ctype;
     const bool has_encoding =
         head->headers->GetNormalizedHeader("content-encoding", &encoding);
     const bool has_type =
         head->headers->GetNormalizedHeader("content-type", &ctype);
-    QNX_NAV_LOG_FMT(
-        "BerryNav: CaptchaResp code=%d enc=%s type=%s url=\"%s\"\n",
+    QNX_DECODE_PROBE_FMT(
+        "BerryNav: DecodeProbe head code=%d enc=%s type=%s url=\"%.80s\"\n",
         head->headers->response_code(), has_encoding ? encoding.c_str() : "(none)",
-        has_type ? ctype.c_str() : "(none)", url_.spec().substr(0, 80).c_str());
+        has_type ? ctype.c_str() : "(none)", url_.spec().c_str());
   }
 #endif
   DCHECK(!cached_metadata);

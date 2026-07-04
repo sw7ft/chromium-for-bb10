@@ -4,9 +4,11 @@
 
 Tap the **gear (⚙)** on the landing page, or type **`berry.settings`** in the URL
 bar. This opens a Settings screen rendered by the engine where you can toggle
-everything with on/off switches — resolution (420/720/**1440 default**), dark
-mode, block images, disable JS, ad/tracker block, desktop site, custom
-user-agent, GPU, low-end mode, Service Workers, QUIC, and the start page.
+everything with on/off switches — **device profile** (Passport/Q10/Z10/etc.),
+resolution tier (420/**720 default**/1440), frame
+rate (60/15/12/Lite), dark mode, block images, disable JS, ad/tracker block,
+desktop site, custom user-agent, GPU (default on), low-end mode (default on),
+Service Workers, QUIC, and the start page.
 
 The page writes the marker files for you (web pages can't, but the engine can),
 so no SSH or file manager is needed. Most settings are applied at startup, so tap
@@ -77,20 +79,57 @@ them tap **Restart** (or relaunch the app) to apply.
 
 Note: a custom `berry-ua` overrides `berry-desktop.enable`.
 
+## Device profile
+
+Pick the phone model in **Settings → Device**. This sets the physical panel
+size, screen rotation, and default render aspect ratio so **touch coordinates
+map correctly** and the window fills the display.
+
+| Marker / setting | Effect |
+|------------------|--------|
+| `berry-device` (text file) | Device id: `passport`, `classic`, `q10`, `q5`, `z10`, `z30`, `z3`, `leap` |
+| `berry-device-rotation` (text, optional) | Override rotation: `0`, `90`, `180`, or `270` |
+
+Launcher env vars set from the profile:
+
+| Env var | Purpose |
+|---------|---------|
+| `QNX_SCREEN_OUTPUT_WIDTH/HEIGHT` | Physical panel (touch mapping) |
+| `QNX_SCREEN_WIDTH/HEIGHT` | Chromium render viewport |
+| `QNX_SCREEN_ROTATION` | Navigator compositor correction |
+
+Default render sizes per device (before resolution tier scaling):
+
+| Device | Panel | Default render |
+|--------|-------|----------------|
+| Passport | 1440×1440 | 720×720 |
+| Classic / Q10 / Q5 | 720×720 | 540×540 |
+| Z10 | 768×1280 | 384×640 |
+| Z30 / Z3 / Leap | 720×1280 | 360×640 |
+
+Resolution tiers (420 / 540 / 720 / 1440) scale the device default
+proportionally (720 = profile default, 1440 = 2×, 420 = lightweight).
+
 ## Performance & screen
 
 | Marker | Effect |
 |--------|--------|
 | `berry-x-lite.enable` | Load-reduction profile: 420² render + 12 fps + 2 raster threads |
 | `berry-x-420.enable` | 420² render (lightest, fastest) |
-| `berry-x-720.enable` | 720² render (default/balanced) |
+| `berry-x-540.enable` | 540² render (**default** when no res marker) |
+| `berry-x-720.enable` | 720² render |
 | `berry-x-1440.enable` | 1440² render = native panel, no downscale (sharpest, heaviest) |
 | `berry-x-540.enable` | 540² render |
-| `berry-x-slow10/12/15.enable` | Cap frame rate to 10/12/15 fps |
+| `berry-x-fullfps.enable` | Uncapped frame rate (~60 fps) |
+| `berry-x-slow10/12/15/45.enable` | Cap frame rate to 10/12/15/45 fps (**45 default**) |
 | `berry-x-1thread.enable` / `berry-x-2thread.enable` | Raster thread count |
-| `berry-lowend.enable` | Chromium low-end device heuristics (smaller heap/caches) |
-| `berry-gpu.enable` / `berry-gpu.disable` | Force GPU (EGL) / software rendering (default: software) |
-| `berry-sw.enable` | Keep Service Workers enabled (PWA app-shell caching) |
+| `berry-lowend.disable` | Turn **off** low-end device mode (on by default) |
+| `berry-gpu.disable` | Force software rendering (GPU/EGL **on by default**) |
+| `berry-gpu.enable` | Legacy; redundant (GPU is default on) |
+| `berry-lowend.enable` | Legacy; redundant (low-end is default on) |
+| `berry-sw.disable` | Turn **off** Service Workers (on by default for YouTube/PWA caching) |
+| `berry-sw.enable` | Legacy; redundant (SW is default on) |
+| `berry-video.debug` | Verbose media logging (`--enable-logging=stderr --v=1`) |
 | `berry-quic.enable` | Enable HTTP/3 (QUIC) |
 | `berry-mp.enable` | Multi-process mode (experimental) |
 | `berry-jsflags` (text file) | Extra V8 flags, e.g. `--liftoff-only --wasm-lazy-validation` |

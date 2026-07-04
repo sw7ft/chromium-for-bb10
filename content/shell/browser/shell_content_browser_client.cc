@@ -65,6 +65,7 @@
 #include "content/public/common/content_switches.h"
 #if BUILDFLAG(IS_QNX)
 #include "base/qnx_trace.h"
+#include "content/shell/browser/shell_fixed_location_provider.h"
 #include "content/public/browser/tts_platform.h"
 #include "gpu/config/gpu_switches.h"
 #include "ui/display/display_switches.h"
@@ -651,6 +652,13 @@ device::GeolocationManager* ShellContentBrowserClient::GetGeolocationManager() {
   return nullptr;
 #endif
 }
+
+#if BUILDFLAG(IS_QNX)
+std::unique_ptr<device::LocationProvider>
+ShellContentBrowserClient::OverrideSystemLocationProvider() {
+  return CreateShellFixedLocationProvider();
+}
+#endif  // BUILDFLAG(IS_QNX)
 
 std::string ShellContentBrowserClient::GetAcceptLangs(BrowserContext* context) {
   return GetShellLanguage();

@@ -48,3 +48,12 @@ source "$BBNDK_ENV" >/dev/null 2>&1 || true
 
 ls -la "$BAR_OUT"
 echo "Done: $BAR_OUT"
+
+if [ "${BERRY_SMOKE:-}" = "1" ] || [ "${1:-}" = "--smoke" ]; then
+  echo ""
+  echo "=== YouTube shim smoke test ==="
+  echo "Install $BAR_OUT on Passport, force-kill BerryBrowserV3,"
+  echo "open home -> YouTube tile, wait ~30s for playback, then press Enter."
+  read -r
+  "$SCRIPT_DIR/smoke-youtube-shim.sh"
+fi
