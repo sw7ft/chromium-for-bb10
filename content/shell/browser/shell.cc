@@ -13,6 +13,9 @@
 #include <utility>
 
 #if BUILDFLAG(IS_QNX)
+#include <bps/bps.h>
+#include <bps/navigator.h>
+#include <bps/navigator_invoke.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <cstring>
@@ -1123,45 +1126,45 @@ std::string BerryBuildSettingsHtml() {
   std::string h;
   h += "<!DOCTYPE html><html><head><meta charset='utf-8'>";
   h += "<meta name='viewport' content='width=device-width,initial-scale=1'>";
-  h += "<title>Settings</title><style>";
+  h += "<title>Berry Browser Settings</title><style>";
   h += "*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}";
-  h += "html,body{margin:0;padding:0;background:#0e1218;color:#e8eef5;"
+  h += "html,body{margin:0;padding:0;background:#1a0012;color:#f3e6ef;"
        "font-family:-apple-system,'Slate Pro',Arial,sans-serif;}";
   h += ".wrap{max-width:720px;margin:0 auto;padding:20px 18px 40px;}";
   h += ".top{display:flex;align-items:center;gap:12px;margin:6px 0 18px;}";
   h += ".top h1{font-size:30px;margin:0;font-weight:700;}";
-  h += ".top a.home{margin-left:auto;font-size:18px;color:#9fb2c6;"
-       "text-decoration:none;border:1px solid #2b3744;padding:8px 14px;"
+  h += ".top a.home{margin-left:auto;font-size:18px;color:#f3e6ef;"
+       "text-decoration:none;border:1px solid #5e2750;padding:8px 14px;"
        "border-radius:10px;}";
   h += ".sec{font-size:14px;letter-spacing:.08em;text-transform:uppercase;"
-       "color:#6b7a8c;margin:22px 4px 8px;}";
-  h += ".card{background:#161d26;border:1px solid #232f3c;border-radius:14px;"
+       "color:#a08098;margin:22px 4px 8px;}";
+  h += ".card{background:#2c001e;border:1px solid #5e2750;border-radius:14px;"
        "overflow:hidden;}";
   h += ".row{display:flex;align-items:center;padding:14px 16px;"
-       "border-top:1px solid #1f2a35;}";
+       "border-top:1px solid #5e2750;}";
   h += ".card .row:first-child{border-top:none;}";
   h += ".lbl{display:flex;flex-direction:column;gap:2px;}";
   h += ".lbl b{font-size:19px;font-weight:600;}";
-  h += ".lbl i{font-size:13px;color:#7e8c9c;font-style:normal;}";
+  h += ".lbl i{font-size:13px;color:#c4a0b8;font-style:normal;}";
   h += ".sw{margin-left:auto;width:58px;height:32px;border-radius:18px;"
-       "position:relative;flex:none;background:#2a3643;transition:.15s;}";
+       "position:relative;flex:none;background:#3c0836;transition:.15s;}";
   h += ".sw span{position:absolute;top:3px;left:3px;width:26px;height:26px;"
-       "border-radius:50%;background:#cdd8e4;transition:.15s;}";
-  h += ".sw.on{background:#3ba55d;}.sw.on span{left:29px;background:#fff;}";
+       "border-radius:50%;background:#e8d0e0;transition:.15s;}";
+  h += ".sw.on{background:#77216f;}.sw.on span{left:29px;background:#fff;}";
   h += ".resrow{display:flex;gap:10px;padding:14px 16px;flex-wrap:wrap;}";
   h += ".res{flex:1;text-align:center;padding:14px 0;border-radius:10px;"
-       "background:#1d2733;color:#cdd8e4;text-decoration:none;font-size:18px;"
-       "border:1px solid #2a3643;min-width:140px;}";
-  h += ".res.cur{background:#2563b6;color:#fff;border-color:#2563b6;}";
+       "background:#3c0836;color:#e8d0e0;text-decoration:none;font-size:18px;"
+       "border:1px solid #5e2750;min-width:140px;}";
+  h += ".res.cur{background:#77216f;color:#fff;border-color:#e95420;}";
   h += "form.tx{display:flex;gap:8px;padding:12px 16px;}";
   h += "form.tx input{flex:1;font-size:17px;padding:12px;border-radius:10px;"
-       "border:1px solid #2b3744;background:#0b0f14;color:#fff;outline:none;}";
+       "border:1px solid #5e2750;background:#1a0012;color:#fff;outline:none;}";
   h += "form.tx button{font-size:17px;padding:0 18px;border:none;"
-       "border-radius:10px;background:#2563b6;color:#fff;font-weight:600;}";
+       "border-radius:10px;background:#77216f;color:#fff;font-weight:600;}";
   h += ".apply{display:block;margin:26px 0 0;text-align:center;font-size:22px;"
-       "font-weight:700;padding:18px;border-radius:14px;background:#e8554e;"
+       "font-weight:700;padding:18px;border-radius:14px;background:#e95420;"
        "color:#fff;text-decoration:none;}";
-  h += ".note{text-align:center;color:#7e8c9c;font-size:14px;margin:14px 4px 0;}";
+  h += ".note{text-align:center;color:#c4a0b8;font-size:14px;margin:14px 4px 0;}";
   h += "</style></head><body><div class='wrap'>";
   h += "<div class='top'><h1>Settings</h1>"
        "<a class='home' href='https://berry.settings/'>\u21bb</a>"
@@ -1270,6 +1273,28 @@ std::string BerryBuildSettingsHtml() {
               BerryHasMarker("berry-kbd.debug"));
   h += "</div>";
 
+  h += "<div class='sec'>Home screen shortcuts</div><div class='card'>";
+  h += "<div class='row'><div class='lbl'><b>Add to Home Screen</b>"
+       "<i>Puts a web link on the BB10 desktop. Tapping it opens that site "
+       "in Berry Browser. Other apps can also Open http/https links here.</i>"
+       "</div></div>";
+  h += "<form class='tx' action='https://berry.pin/' method='get'>"
+       "<input name='title' placeholder='Shortcut name'>"
+       "<input name='url' placeholder='https://...'>"
+       "<button type='submit'>Pin</button></form>";
+  h += "</div>";
+
+  h += "<div class='sec'>Share &amp; system</div><div class='card'>";
+  h += "<div class='row'><div class='lbl'><b>Share last page</b>"
+       "<i>Opens the BB10 Share card with the last website you visited "
+       "(Messages, Remember, email, and other share targets).</i></div></div>";
+  h += "<div class='resrow'><a class='res' href='https://berry.share/'>"
+       "Share last page</a></div>";
+  h += "<div class='row'><div class='lbl'><b>Active Frame</b>"
+       "<i>Minimized card shows the Berry icon plus the current site name. "
+       "mailto, tel, and sms links open the matching BB10 app.</i></div></div>";
+  h += "</div>";
+
   h += "<div class='sec'>Start page</div><div class='card'>";
   h += "<form class='tx' action='https://berry.set/' method='get'>"
        "<input type='hidden' name='k' value='home'>"
@@ -1284,6 +1309,168 @@ std::string BerryBuildSettingsHtml() {
        "restart.</div>";
   h += "</div></body></html>";
   return h;
+}
+
+std::string BerryNativeDir() {
+  char exe[2048];
+  exe[0] = '\0';
+  int fd = open("/proc/self/exefile", O_RDONLY);
+  if (fd >= 0) {
+    ssize_t r = read(fd, exe, sizeof(exe) - 1);
+    close(fd);
+    if (r > 0) {
+      exe[r] = '\0';
+      while (r > 0 && (exe[r - 1] == '\n' || exe[r - 1] == '\r' ||
+                       exe[r - 1] == ' ' || exe[r - 1] == '\0'))
+        exe[--r] = '\0';
+    }
+  }
+  if (exe[0]) {
+    char* slash = strrchr(exe, '/');
+    if (slash)
+      *slash = '\0';
+  }
+  return std::string(exe);
+}
+
+bool BerryCopyFile(const char* src, const char* dst) {
+  FILE* in = fopen(src, "rb");
+  if (!in)
+    return false;
+  FILE* out = fopen(dst, "wb");
+  if (!out) {
+    fclose(in);
+    return false;
+  }
+  char buf[4096];
+  size_t n;
+  while ((n = fread(buf, 1, sizeof(buf), in)) > 0)
+    fwrite(buf, 1, n, out);
+  fclose(in);
+  fclose(out);
+  return true;
+}
+
+std::string BerrySanitizeShortcutTitle(std::string t) {
+  for (char& c : t) {
+    if (c == '\n' || c == '\r' || c == '\t')
+      c = ' ';
+  }
+  while (!t.empty() && t.front() == ' ')
+    t.erase(t.begin());
+  while (!t.empty() && t.back() == ' ')
+    t.pop_back();
+  if (t.size() > 32)
+    t.resize(32);
+  return t;
+}
+
+bool BerryAddHomeScreenShortcut(const std::string& title,
+                                const std::string& url) {
+  const std::string label = BerrySanitizeShortcutTitle(title);
+  GURL g(url);
+  if (label.empty() || !g.is_valid() ||
+      !(g.SchemeIsHTTPOrHTTPS() || g.SchemeIsFile())) {
+    QNX_NAV_LOG_FMT("BerryNav: pin reject title=\"%s\" url=\"%s\"\n",
+                    label.c_str(), url.c_str());
+    return false;
+  }
+  const std::string dir = BerryNativeDir();
+  std::string src = dir + "/pin-icon.png";
+  if (access(src.c_str(), R_OK) != 0)
+    src = dir + "/icon.png";
+  const char* shared = "/accounts/1000/shared/misc/berry-pin-icon.png";
+  if (access(shared, R_OK) != 0)
+    BerryCopyFile(src.c_str(), shared);
+  const char* icon =
+      (access(shared, R_OK) == 0) ? shared : src.c_str();
+  const std::string invoke =
+      "berrybrowser://open?u=" +
+      base::EscapeQueryParamValue(g.spec(), /*use_plus=*/false) + "&win=1";
+
+  char* err = nullptr;
+  int rc = navigator_add_uri(icon, label.c_str(), "", invoke.c_str(), &err);
+  if (rc != BPS_SUCCESS) {
+    if (err) {
+      bps_free(err);
+      err = nullptr;
+    }
+    rc = navigator_add_uri(icon, label.c_str(), "media", invoke.c_str(), &err);
+  }
+  QNX_NAV_LOG_FMT("BerryNav: pin rc=%d title=\"%s\" invoke=\"%s\" err=%s\n", rc,
+                  label.c_str(), invoke.c_str(), err ? err : "");
+  if (err)
+    bps_free(err);
+  return rc == BPS_SUCCESS;
+}
+
+void BerryShowPinResult(Shell* shell,
+                        bool ok,
+                        const std::string& title,
+                        const std::string& url) {
+  std::string h =
+      "<!doctype html><html><head><meta charset='utf-8'>"
+      "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+      "<title>Home screen</title><style>"
+      "body{margin:0;font-family:sans-serif;background:#1a0012;color:#f3e6ef;"
+      "padding:28px 20px;}"
+      "h1{font-size:26px;margin:0 0 10px;}"
+      "p{color:#c4a0b8;font-size:16px;line-height:1.45;}"
+      "a{display:block;margin-top:18px;text-align:center;padding:16px;"
+      "border-radius:12px;text-decoration:none;font-weight:700;}"
+      ".ok{background:#77216f;color:#fff;}"
+      ".home{background:#3c0836;color:#e8d0e0;}"
+      "</style></head><body>";
+  if (ok) {
+    h += "<h1>Pinned</h1><p><b>";
+    h += BerryHtmlEscape(title);
+    h += "</b> is on the BB10 home screen. Swipe to an empty tile to find it. "
+         "Tap the icon to open ";
+    h += BerryHtmlEscape(url);
+    h += " in Berry Browser.</p>";
+  } else {
+    h += "<h1>Could not pin</h1><p>The shortcut was not created. Check the "
+         "name and URL, then try Settings &rarr; Home screen shortcuts "
+         "again.</p>";
+  }
+  h += "<a class='ok' href='https://berry.home/'>Back to Home</a>";
+  h += "<a class='home' href='https://berry.settings/'>Settings</a>";
+  h += "</body></html>";
+  const std::string path = std::string(kBerryMiscDir) + ".berry-pin.html";
+  FILE* f = fopen(path.c_str(), "w");
+  if (f) {
+    fwrite(h.data(), 1, h.size(), f);
+    fclose(f);
+  }
+  GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&Shell::LoadURL, base::Unretained(shell),
+                                GURL("file://" + path)));
+}
+
+void BerryHandlePin(Shell* shell, const GURL& url) {
+  base::StringPairs pairs;
+  base::SplitStringIntoKeyValuePairs(url.query(), '=', '&', &pairs);
+  std::string title, dest;
+  for (const auto& p : pairs) {
+    std::string val = p.second;
+    std::string dec;
+    dec.reserve(val.size());
+    for (char c : val)
+      dec += (c == '+') ? ' ' : c;
+    dec = base::UnescapeBinaryURLComponent(dec);
+    if (p.first == "title")
+      title = dec;
+    else if (p.first == "url")
+      dest = dec;
+  }
+  if (!dest.empty() && dest.find("://") == std::string::npos)
+    dest = "https://" + dest;
+  if (title.empty()) {
+    GURL g(dest);
+    title = g.is_valid() && !g.host().empty() ? g.host() : "Berry Browser";
+  }
+  const bool ok = BerryAddHomeScreenShortcut(title, dest);
+  BerryShowPinResult(shell, ok, title, dest);
 }
 
 // Load the bundled landing page (the quick-links + Settings tile home), used by
@@ -1444,7 +1631,126 @@ void BerryHandleSet(Shell* shell, const GURL& url) {
 
   BerryShowSettings(shell);
 }
+
+std::string g_berry_last_http_url;
+
+bool BerryUrlIsShareable(const GURL& url) {
+  return url.is_valid() && url.SchemeIsHTTPOrHTTPS() &&
+         url.host() != "berry.share" && url.host() != "berry.pin" &&
+         url.host() != "berry.set" && url.host() != "berry.settings" &&
+         url.host() != "berry.home" && url.host() != "berry.restart";
+}
+
+void BerryNavigatorInvokeUri(const std::string& uri, const char* action) {
+  navigator_invoke_invocation_t* inv = nullptr;
+  if (navigator_invoke_invocation_create(&inv) != BPS_SUCCESS)
+    return;
+  if (action && action[0])
+    navigator_invoke_invocation_set_action(inv, action);
+  navigator_invoke_invocation_set_uri(inv, uri.c_str());
+  const int rc = navigator_invoke_invocation_send(inv);
+  navigator_invoke_invocation_destroy(inv);
+  QNX_NAV_LOG_FMT("BerryNav: invoke uri=\"%s\" action=%s rc=%d\n", uri.c_str(),
+                  action ? action : "", rc);
+}
+
+void BerryNavigatorShareImpl(const std::string& url) {
+  GURL g(url);
+  std::string share = url;
+  if (!BerryUrlIsShareable(g))
+    share = g_berry_last_http_url;
+  if (share.empty()) {
+    QNX_NAV_LOG_FMT("%s", "BerryNav: share skipped (no url)\n");
+    return;
+  }
+  navigator_invoke_invocation_t* inv = nullptr;
+  if (navigator_invoke_invocation_create(&inv) != BPS_SUCCESS)
+    return;
+  navigator_invoke_invocation_set_action(inv, "bb.action.SHARE");
+  navigator_invoke_invocation_set_type(inv, "text/plain");
+  navigator_invoke_invocation_set_data(inv, share.data(),
+                                       static_cast<int>(share.size()));
+  const int rc = navigator_invoke_invocation_send(inv);
+  navigator_invoke_invocation_destroy(inv);
+  QNX_NAV_LOG_FMT("BerryNav: share rc=%d url=\"%s\"\n", rc, share.c_str());
+}
+
+void BerryUpdateWindowCoverImpl(const GURL& url) {
+  std::string label;
+  if (url.SchemeIsFile() &&
+      url.path().find("home.html") != std::string::npos) {
+    label = "Berry Browser";
+  } else if (url.host() == "berry.settings" ||
+             url.path().find(".berry-settings") != std::string::npos) {
+    label = "Settings";
+  } else if (!url.host().empty()) {
+    label = url.host();
+    if (label.size() > 4 && label.compare(0, 4, "www.") == 0)
+      label = label.substr(4);
+  } else {
+    label = "Berry Browser";
+  }
+  if (label.size() > 28)
+    label.resize(28);
+
+  navigator_window_cover_attribute_t* attr = nullptr;
+  if (navigator_window_cover_attribute_create(&attr) != BPS_SUCCESS)
+    return;
+  const std::string dir = BerryNativeDir();
+  const std::string icon = dir + "/icon.png";
+  if (!dir.empty() && access(icon.c_str(), R_OK) == 0)
+    navigator_window_cover_attribute_set_file(attr, icon.c_str());
+  navigator_window_cover_label_t* lab = nullptr;
+  if (navigator_window_cover_attribute_add_label(attr, label.c_str(), &lab) ==
+          BPS_SUCCESS &&
+      lab) {
+    navigator_window_cover_label_set_color(lab, 233, 84, 32);
+    navigator_window_cover_label_set_size(lab, 10);
+  }
+  const int rc = navigator_window_cover_update(attr);
+  if (lab)
+    navigator_window_cover_label_destroy(lab);
+  navigator_window_cover_attribute_destroy(attr);
+  QNX_NAV_LOG_FMT("BerryNav: cover rc=%d label=\"%s\"\n", rc, label.c_str());
+}
+
+void BerryStayOnCurrentPage(Shell* shell, const GURL& blocked) {
+  if (!shell || !shell->web_contents())
+    return;
+  GURL stay = shell->web_contents()->GetLastCommittedURL();
+  if (!stay.is_valid() || stay == blocked || stay.IsAboutBlank()) {
+    BerryShowHome(shell);
+    return;
+  }
+  GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&Shell::LoadURL, base::Unretained(shell), stay));
+}
+
+void BerryHandleShare(Shell* shell, const GURL& url) {
+  base::StringPairs pairs;
+  base::SplitStringIntoKeyValuePairs(url.query(), '=', '&', &pairs);
+  std::string dest;
+  for (const auto& p : pairs) {
+    if (p.first != "url")
+      continue;
+    std::string dec;
+    dec.reserve(p.second.size());
+    for (char c : p.second)
+      dec += (c == '+') ? ' ' : c;
+    dest = base::UnescapeBinaryURLComponent(dec);
+  }
+  BerryNavigatorShareImpl(dest);
+  BerryStayOnCurrentPage(shell, url);
+}
 }  // namespace
+
+void BerryUpdateWindowCover(const GURL& url) {
+  BerryUpdateWindowCoverImpl(url);
+}
+
+void BerryNavigatorShare(const std::string& url) {
+  BerryNavigatorShareImpl(url);
+}
 #endif
 
 void Shell::DidStartNavigation(NavigationHandle* navigation_handle) {
@@ -1484,6 +1790,24 @@ void Shell::DidStartNavigation(NavigationHandle* navigation_handle) {
   if (!navigation_handle->IsSameDocument() && url.host() == "berry.home") {
     QNX_NAV_LOG_FMT("%s", "BerryNav: open home\n");
     BerryShowHome(this);
+    return;
+  }
+  if (!navigation_handle->IsSameDocument() && url.host() == "berry.pin") {
+    QNX_NAV_LOG_FMT("%s", "BerryNav: pin to home screen\n");
+    BerryHandlePin(this, url);
+    return;
+  }
+  if (!navigation_handle->IsSameDocument() && url.host() == "berry.share") {
+    QNX_NAV_LOG_FMT("%s", "BerryNav: share\n");
+    BerryHandleShare(this, url);
+    return;
+  }
+  if (!navigation_handle->IsSameDocument() &&
+      (url.SchemeIs("mailto") || url.SchemeIs("tel") || url.SchemeIs("sms") ||
+       url.SchemeIs("mmsto"))) {
+    QNX_NAV_LOG_FMT("BerryNav: handoff \"%s\"\n", url.spec().c_str());
+    BerryNavigatorInvokeUri(url.spec(), "bb.action.OPEN");
+    BerryStayOnCurrentPage(this, url);
     return;
   }
   if (!navigation_handle->IsSameDocument() && url.scheme() == "intent") {
@@ -1576,6 +1900,9 @@ void Shell::DidFinishNavigation(NavigationHandle* navigation_handle) {
       BerryScheduleMapsGeolocationRetries(web_contents_.get());
       QNX_NAV_LOG_FMT("%s", "BerryNav: Maps geolocation re-applied post-nav\n");
     }
+    if (!navigation_handle->IsErrorPage() && url.SchemeIsHTTPOrHTTPS() &&
+        BerryUrlIsShareable(url))
+      g_berry_last_http_url = url.spec();
   }
 #endif
   MaybeArmDumpTimeout(navigation_handle);

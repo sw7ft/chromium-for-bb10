@@ -30,6 +30,20 @@ using QnxScreenVisibilityCallback = void (*)(bool visible);
 void SetQnxScreenVisibilityCallback(QnxScreenVisibilityCallback cb);
 QnxScreenVisibilityCallback GetQnxScreenVisibilityCallback();
 
+// Fired when the Navigator delivers an invocation (NAVIGATOR_INVOKE_TARGET),
+// e.g. the user tapped a pinned home-screen shortcut created with
+// navigator_add_uri(). |uri| is the raw invocation URI (berrybrowser://...).
+using QnxScreenInvokeUriCallback = void (*)(const char* uri);
+void SetQnxScreenInvokeUriCallback(QnxScreenInvokeUriCallback cb);
+QnxScreenInvokeUriCallback GetQnxScreenInvokeUriCallback();
+
+// Fired when Navigator reports WINDOW_ACTIVE / WINDOW_STATE for a group.
+// |group| may be null for the main card. |visible| is true when that card
+// is fullscreen.
+using QnxScreenActiveGroupCallback = void (*)(const char* group, bool visible);
+void SetQnxScreenActiveGroupCallback(QnxScreenActiveGroupCallback cb);
+QnxScreenActiveGroupCallback GetQnxScreenActiveGroupCallback();
+
 }  // namespace ui
 
 #endif

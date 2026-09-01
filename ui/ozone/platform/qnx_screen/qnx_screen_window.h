@@ -29,6 +29,7 @@ class QnxScreenWindow : public PlatformWindow, public PlatformEventDispatcher {
 
   screen_window_t screen_window() const { return window_; }
   screen_context_t screen_context() const { return ctx_; }
+  const char* group_name() const { return group_name_; }
 
   // PlatformWindow:
   gfx::Rect GetBoundsInPixels() const override;

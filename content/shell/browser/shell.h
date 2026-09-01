@@ -282,6 +282,12 @@ class Shell : public WebContentsDelegate, public WebContentsObserver {
   static base::OnceCallback<void(Shell*)> shell_created_callback_;
 };
 
+#if BUILDFLAG(IS_QNX)
+// Active Frame thumbnail + hostname label. Share current URL via BB10 Share.
+void BerryUpdateWindowCover(const GURL& url);
+void BerryNavigatorShare(const std::string& url);
+#endif
+
 }  // namespace content
 
 #endif  // CONTENT_SHELL_BROWSER_SHELL_H_

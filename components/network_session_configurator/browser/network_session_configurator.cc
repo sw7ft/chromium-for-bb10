@@ -800,8 +800,14 @@ net::URLRequestContextBuilder::HttpCacheParams::Type ChooseCacheType() {
   // muddles the experiment data, but as this was written to be considered for
   // backport, having it behave differently than in stable would be a bigger
   // problem. TODO: Does this work in later macOS releases?
+  // QNX (BB10): use the Simple backend too. The blockfile fallback resets the
+  // ENTIRE cache whenever it detects an unclean shutdown, and on BB10 the
+  // Navigator terminates the app with SIGKILL as the *normal* exit path — so
+  // the 256MB disk cache was being thrown away between sessions. Simple is
+  // one-file-per-entry, rebuilds its index after a crash, and is the default
+  // on Android-class flash storage.
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || \
-    BUILDFLAG(IS_MAC)
+    BUILDFLAG(IS_MAC) || BUILDFLAG(IS_QNX)
   return net::URLRequestContextBuilder::HttpCacheParams::DISK_SIMPLE;
 #else
   return net::URLRequestContextBuilder::HttpCacheParams::DISK_BLOCKFILE;

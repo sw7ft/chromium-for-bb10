@@ -1,0 +1,123 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Berry Remote</title>
+<style>
+html,body{margin:0;background:#111;color:#ddd;font-family:sans-serif;height:100%}
+#bar{padding:6px;background:#1d1d1f}
+#bar input{width:55%;padding:7px;border:1px solid #444;background:#000;color:#fff}
+#bar button{padding:7px 12px;border:0;background:#2563eb;color:#fff}
+#wrap{text-align:center;padding:8px}
+#screen{background:#000;max-width:100%;height:auto;cursor:crosshair;border:1px solid #333}
+#hint{font-size:12px;color:#888;text-align:center;padding:4px}
+</style></head><body>
+<div id="bar">
+<button id="reload">Reload</button>
+<input id="url" placeholder="https://..." value="%%START_URL%%">
+<button id="go">Go</button>
+<button id="kb">Keyboard</button>
+</div>
+<div id="wrap"><img id="screen" src="/stream" draggable="false"></div>
+<div id="hint">Click / drag / scroll on the screen. "Keyboard" focuses a hidden field so you can type into the page. Add ?poll=1 to the URL if the picture never appears (old browsers without MJPEG).</div>
+<input id="kbin" style="position:absolute;left:-1000px" autocomplete="off">
+<script>
+// Deliberately ES5-only (var, XHR, onXXX handlers, keyCode fallbacks): the
+// whole point is that ancient browsers (BB10 stock, Android 4.x, old WebKit)
+// can be the display for the modern engine.
+var img = document.getElementById("screen");
+function post(p, b) {
+  try {
+    var x = new XMLHttpRequest();
+    x.open("POST", p, true);
+    x.setRequestHeader("Content-Type", "application/json");
+    x.send(JSON.stringify(b));
+  } catch (e) {}
+}
+// ---- frame transport: MJPEG stream, or timer-polled stills (?poll=1) ----
+var polling = window.location.search.indexOf("poll") >= 0;
+function startPoll() {
+  var next = function () {
+    var i = new Image();
+    i.onload = function () { img.src = i.src; setTimeout(next, 150); };
+    i.onerror = function () { setTimeout(next, 1000); };
+    i.src = "/frame.jpg?t=" + new Date().getTime();
+  };
+  next();
+}
+if (polling) startPoll();
+function rel(e) {
+  var r = img.getBoundingClientRect();
+  var cx = (e.touches && e.touches.length ? e.touches[0].clientX : e.clientX) - r.left;
+  var cy = (e.touches && e.touches.length ? e.touches[0].clientY : e.clientY) - r.top;
+  return { fx: Math.max(0, Math.min(1, cx / r.width)),
+           fy: Math.max(0, Math.min(1, cy / r.height)) };
+}
+var down = false;
+function send(kind, e) { var c = rel(e); c.kind = kind; c.buttons = down ? 1 : 0; post("/input", c); }
+function prevent(e) { if (e.preventDefault) e.preventDefault(); else e.returnValue = false; }
+img.onmousedown = function (e) { e = e || window.event; down = true; send("down", e); prevent(e); };
+document.onmouseup = function (e) { e = e || window.event; if (down) { down = false; send("up", e); } };
+var lastMove = 0;
+img.onmousemove = function (e) {
+  e = e || window.event;
+  var t = new Date().getTime();
+  if (t - lastMove < 40) return;
+  lastMove = t; send("move", e);
+};
+function onWheel(e) {
+  e = e || window.event;
+  var c = rel(e); c.kind = "wheel";
+  c.dx = e.deltaX || 0;
+  c.dy = (e.deltaY !== undefined) ? e.deltaY : (e.wheelDelta ? -e.wheelDelta : 0);
+  post("/input", c); prevent(e);
+}
+if ("onwheel" in img) img.onwheel = onWheel; else img.onmousewheel = onWheel;
+// touch (old-WebKit safe: plain handlers, no addEventListener options)
+img.ontouchstart = function (e) { down = true; send("down", e); prevent(e); };
+img.ontouchmove = function (e) { send("move", e); prevent(e); };
+img.ontouchend = function (e) {
+  if (down) { down = false; post("/input", { fx: 0, fy: 0, kind: "up", buttons: 0 }); }
+  prevent(e);
+};
+// ---- keyboard: e.key when present, keyCode-derived fallback otherwise ----
+var kbin = document.getElementById("kbin");
+document.getElementById("kb").onclick = function () { kbin.focus(); };
+var NAMES = { 8: "Backspace", 9: "Tab", 13: "Enter", 16: "Shift", 17: "Control",
+  18: "Alt", 27: "Escape", 32: " ", 33: "PageUp", 34: "PageDown", 35: "End",
+  36: "Home", 37: "ArrowLeft", 38: "ArrowUp", 39: "ArrowRight", 40: "ArrowDown",
+  46: "Delete" };
+function keyName(e) {
+  if (e.key !== undefined) return e.key;
+  var kc = e.keyCode || e.which;
+  return NAMES[kc] || String.fromCharCode(kc);
+}
+kbin.onkeydown = function (e) {
+  e = e || window.event;
+  var k = keyName(e), kc = e.keyCode || e.which;
+  post("/key", { type: "keyDown", key: k, code: e.code, keyCode: kc,
+                 text: (k.length === 1 ? k : undefined) });
+  if (k === "Enter" || k === "Backspace" || k === "Tab") prevent(e);
+};
+kbin.onkeyup = function (e) {
+  e = e || window.event;
+  post("/key", { type: "keyUp", key: keyName(e), code: e.code,
+                 keyCode: e.keyCode || e.which });
+};
+// old browsers only deliver printable chars reliably via keypress
+kbin.onkeypress = function (e) {
+  e = e || window.event;
+  if (e.key !== undefined) return;
+  var cc = e.charCode || e.keyCode;
+  if (cc >= 32) post("/key", { type: "char", text: String.fromCharCode(cc) });
+};
+document.getElementById("go").onclick = function () {
+  post("/nav", { url: document.getElementById("url").value });
+};
+document.getElementById("url").onkeydown = function (e) {
+  e = e || window.event;
+  if ((e.keyCode || e.which) === 13) post("/nav", { url: document.getElementById("url").value });
+};
+document.getElementById("reload").onclick = function () {
+  post("/nav", { url: document.getElementById("url").value });
+};
+</script></body></html>

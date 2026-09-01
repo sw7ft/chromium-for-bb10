@@ -304,6 +304,18 @@ var server = http.createServer(function (req, res) {
     return;
   }
 
+  // Single-frame endpoint for browsers without multipart/x-mixed-replace
+  // support (old ES5-era engines): the viewer polls this on a timer.
+  if (u === '/frame.jpg') {
+    if (!lastFrame) { res.writeHead(503); res.end(); return; }
+    res.writeHead(200, {
+      'Content-Type': 'image/jpeg', 'Content-Length': lastFrame.length,
+      'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache'
+    });
+    res.end(lastFrame);
+    return;
+  }
+
   if (u === '/status') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
@@ -317,63 +329,20 @@ var server = http.createServer(function (req, res) {
 });
 
 // ---------------------------------------------------------------------------
-// Browser UI (kept inline so the service is a single self-contained file).
+// Browser UI. Lives in berry-viewer.html beside this script. It used to be a
+// big inline string literal, but the experimental QNX ARM32 node build
+// SIGBUSes while (background-)compiling this file with the full UI inlined --
+// loading it as data at runtime sidesteps that and keeps the UI editable.
 // ---------------------------------------------------------------------------
-var PAGE_HTML = [
-'<!doctype html><html><head><meta charset="utf-8">',
-'<meta name="viewport" content="width=device-width,initial-scale=1">',
-'<title>Berry Remote</title>',
-'<style>',
-'html,body{margin:0;background:#111;color:#ddd;font-family:sans-serif;height:100%}',
-'#bar{display:flex;gap:6px;padding:6px;background:#1d1d1f;align-items:center}',
-'#bar input{flex:1;padding:7px;border-radius:6px;border:1px solid #444;background:#000;color:#fff}',
-'#bar button{padding:7px 12px;border-radius:6px;border:0;background:#2563eb;color:#fff}',
-'#wrap{display:flex;justify-content:center;align-items:flex-start;padding:8px}',
-'#screen{background:#000;max-width:100%;height:auto;touch-action:none;cursor:crosshair;',
-'image-rendering:auto;border:1px solid #333;border-radius:8px}',
-'#hint{font-size:12px;color:#888;text-align:center;padding:4px}',
-'</style></head><body>',
-'<div id="bar">',
-'<button id="reload">Reload</button>',
-'<input id="url" placeholder="https://..." value="' + START_URL + '">',
-'<button id="go">Go</button>',
-'<button id="kb">Keyboard</button>',
-'</div>',
-'<div id="wrap"><img id="screen" src="/stream" draggable="false"></div>',
-'<div id="hint">Click / drag / scroll on the screen. "Keyboard" focuses a hidden field so you can type into the page.</div>',
-'<input id="kbin" style="position:fixed;left:-1000px" autocomplete="off">',
-'<script>',
-'var img=document.getElementById("screen");',
-'function rel(e){var r=img.getBoundingClientRect();',
-'var cx=(e.touches?e.touches[0].clientX:e.clientX)-r.left;',
-'var cy=(e.touches?e.touches[0].clientY:e.clientY)-r.top;',
-'return{fx:Math.max(0,Math.min(1,cx/r.width)),fy:Math.max(0,Math.min(1,cy/r.height))};}',
-'function post(p,b){try{fetch(p,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});}catch(e){}}',
-'var down=false;',
-'function send(kind,e){var c=rel(e);c.kind=kind;c.buttons=down?1:0;post("/input",c);}',
-'img.addEventListener("mousedown",function(e){down=true;send("down",e);e.preventDefault();});',
-'window.addEventListener("mouseup",function(e){if(down){down=false;send("up",e);}});',
-'var lastMove=0;',
-'img.addEventListener("mousemove",function(e){var t=Date.now();if(t-lastMove<40)return;lastMove=t;send("move",e);});',
-'img.addEventListener("wheel",function(e){var c=rel(e);c.kind="wheel";c.dx=e.deltaX;c.dy=e.deltaY;post("/input",c);e.preventDefault();},{passive:false});',
-// touch
-'img.addEventListener("touchstart",function(e){down=true;send("down",e);e.preventDefault();},{passive:false});',
-'img.addEventListener("touchmove",function(e){send("move",e);e.preventDefault();},{passive:false});',
-'img.addEventListener("touchend",function(e){if(down){down=false;var c={fx:0,fy:0,kind:"up",buttons:0};post("/input",c);}e.preventDefault();},{passive:false});',
-// keyboard
-'var kbin=document.getElementById("kbin");',
-'document.getElementById("kb").addEventListener("click",function(){kbin.focus();});',
-'kbin.addEventListener("keydown",function(e){',
-'  var code=e.key.length===1?undefined:e.key;',
-'  post("/key",{type:"keyDown",key:e.key,code:e.code,keyCode:e.keyCode,text:(e.key.length===1?e.key:undefined)});',
-'  if(e.key==="Enter"||e.key==="Backspace"||e.key==="Tab")e.preventDefault();',
-'});',
-'kbin.addEventListener("keyup",function(e){post("/key",{type:"keyUp",key:e.key,code:e.code,keyCode:e.keyCode});});',
-'document.getElementById("go").addEventListener("click",function(){post("/nav",{url:document.getElementById("url").value});});',
-'document.getElementById("url").addEventListener("keydown",function(e){if(e.key==="Enter")post("/nav",{url:e.target.value});});',
-'document.getElementById("reload").addEventListener("click",function(){post("/nav",{url:document.getElementById("url").value});});',
-'</script></body></html>'
-].join('');
+var PAGE_HTML;
+try {
+  PAGE_HTML = fs.readFileSync(path.join(__dirname, 'berry-viewer.html'), 'utf8')
+      .split('%%START_URL%%').join(START_URL);
+} catch (e) {
+  PAGE_HTML = '<!doctype html><html><body style="background:#111;color:#ddd">' +
+      '<p>berry-viewer.html missing next to berry-remote.js</p>' +
+      '<img src="/stream"></body></html>';
+}
 
 // ---------------------------------------------------------------------------
 // Boot: attach to the page target, navigate, start screencast, listen.

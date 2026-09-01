@@ -13,10 +13,10 @@
   html, body {
     margin: 0; padding: 0; min-height: 100%;
     font-family: -apple-system, "Slate Pro", "Segoe UI", Arial, sans-serif;
-    color: #e8eef5;
+    color: #f3e6ef;
     background:
-      radial-gradient(900px 480px at 50% -8%, rgba(74, 163, 255, 0.14) 0%, transparent 55%),
-      linear-gradient(180deg, #121820 0%, #0a0e13 100%);
+      radial-gradient(900px 480px at 50% -8%, rgba(119, 33, 111, 0.45) 0%, transparent 55%),
+      linear-gradient(180deg, #2c001e 0%, #1a0012 100%);
   }
   .wrap { max-width: 700px; margin: 0 auto; padding: 18px 16px 32px; }
 
@@ -25,23 +25,22 @@
     margin-bottom: 24px;
   }
   .profile {
-    width: 46px; height: 46px; border-radius: 50%; flex-shrink: 0;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 22px; font-weight: 800; color: #fff;
-    background: #1a3a6e;
-    border: 2px solid rgba(255,255,255,0.1);
+    width: 46px; height: 46px; border-radius: 12px; flex-shrink: 0;
+    overflow: hidden; background: #5e2750;
+    border: 1px solid rgba(233,84,32,0.45);
   }
+  .profile img { width: 100%; height: 100%; display: block; }
   .headline { flex: 1; min-width: 0; }
   .headline h1 {
     margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.02em;
   }
-  .headline h1 span { color: #4aa3ff; }
-  .greeting { margin: 3px 0 0; font-size: 13px; color: #6b7d90; }
+  .headline h1 span { color: #e95420; }
+  .greeting { margin: 3px 0 0; font-size: 13px; color: #c4a0b8; }
   .fav-btn {
     flex-shrink: 0; padding: 10px 14px; border-radius: 12px;
-    font-size: 14px; font-weight: 700; color: #b8cce0;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.1);
+    font-size: 14px; font-weight: 700; color: #f3e6ef;
+    background: rgba(119,33,111,0.35);
+    border: 1px solid rgba(233,84,32,0.35);
     cursor: pointer;
   }
   .fav-btn:active { background: rgba(255,255,255,0.12); }
@@ -52,27 +51,27 @@
     display: flex; align-items: stretch;
     border: 2px solid rgba(255,255,255,0.1);
     border-radius: 14px; overflow: hidden;
-    background: #0c1018;
+    background: #1a0012;
   }
-  .search-bar:focus-within { border-color: #4aa3ff; }
+  .search-bar:focus-within { border-color: #e95420; }
   #omni {
     flex: 1; min-width: 0; border: none; outline: none;
     font-size: 18px; padding: 16px 18px;
     background: transparent; color: #fff;
   }
-  #omni::placeholder { color: #5a6a7a; }
+  #omni::placeholder { color: #8a6a80; }
   #go {
     border: none; border-left: 1px solid rgba(255,255,255,0.12);
     padding: 0 22px; font-size: 16px; font-weight: 600;
-    background: #1a73e8; color: #fff; cursor: pointer;
+    background: #77216f; color: #fff; cursor: pointer;
     white-space: nowrap;
   }
-  #go:active { background: #1558b0; }
-  .search-hint { margin: 8px 0 0 4px; font-size: 12px; color: #506070; }
+  #go:active { background: #5e2750; }
+  .search-hint { margin: 8px 0 0 4px; font-size: 12px; color: #8a6a80; }
 
   .sec {
     font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
-    color: #5a6d80; margin: 0 2px 12px; font-weight: 600;
+    color: #a08098; margin: 0 2px 12px; font-weight: 600;
   }
   .grid {
     display: grid; grid-template-columns: repeat(4, 1fr);
@@ -84,7 +83,7 @@
     padding: 14px 4px 12px; border-radius: 16px;
     background: rgba(255,255,255,0.03);
     border: 1px solid rgba(255,255,255,0.06);
-    color: #c8d6e4; font-size: 13px; font-weight: 600;
+    color: #e8d0e0; font-size: 13px; font-weight: 600;
   }
   .tile:active { background: rgba(255,255,255,0.08); }
   .tile .label {
@@ -124,8 +123,8 @@
     text-decoration: none; padding: 15px; border-radius: 14px;
     font-size: 15px; font-weight: 700;
   }
-  .act.set { background: rgba(255,255,255,0.04); color: #b8cce0;
-    border: 1px solid rgba(255,255,255,0.08); }
+  .act.set { background: rgba(119,33,111,0.28); color: #f3e6ef;
+    border: 1px solid rgba(233,84,32,0.28); }
   .act.res { background: rgba(222,88,51,0.12); color: #f0b8a8;
     border: 1px solid rgba(222,88,51,0.25); }
   .act:active { filter: brightness(1.12); }
@@ -135,11 +134,11 @@
     background: rgba(255,255,255,0.02);
     border: 1px solid rgba(255,255,255,0.05);
   }
-  .support p { margin: 0; font-size: 13px; color: #6a7a8a; }
-  .support a { color: #ff6b6b; font-weight: 600; text-decoration: none; }
+  .support p { margin: 0; font-size: 13px; color: #a08098; }
+  .support a { color: #e95420; font-weight: 600; text-decoration: none; }
   .diag { margin-top: 8px; font-size: 11px; }
-  .diag a { color: #4a5a6a; text-decoration: none; margin: 0 4px; }
-  .ver { margin-top: 8px; font-size: 11px; color: #3a4a5a; }
+  .diag a { color: #8a6a80; text-decoration: none; margin: 0 4px; }
+  .ver { margin-top: 8px; font-size: 11px; color: #6a4860; }
 
   /* favorites manager modal */
   .modal-bg {
@@ -150,7 +149,7 @@
   .modal-bg.open { display: flex; }
   .modal {
     width: 100%; max-width: 420px; max-height: 85vh; overflow: auto;
-    background: #151c28; border: 1px solid rgba(255,255,255,0.1);
+    background: #2c001e; border: 1px solid rgba(233,84,32,0.28);
     border-radius: 16px; padding: 18px;
   }
   .modal h2 { margin: 0 0 14px; font-size: 18px; }
@@ -164,24 +163,44 @@
   .add-row input {
     width: 100%; margin-bottom: 8px; padding: 12px; font-size: 15px;
     border-radius: 10px; border: 1px solid rgba(255,255,255,0.12);
-    background: #0c1018; color: #fff;
+    background: #1a0012; color: #fff;
   }
   .modal-btns { display: flex; gap: 10px; margin-top: 16px; }
   .modal-btns button {
     flex: 1; padding: 12px; border-radius: 10px; font-size: 15px;
     font-weight: 700; border: none; cursor: pointer;
   }
-  .btn-done { background: #1a73e8; color: #fff; }
-  .btn-reset { background: rgba(255,255,255,0.08); color: #b8cce0; }
+  .btn-done { background: #77216f; color: #fff; }
+  .btn-reset { background: rgba(255,255,255,0.08); color: #e8d0e0; }
   .btn-add { background: #2a6b3c; color: #fff; width: 100%; margin-top: 4px; }
+  .btn-pin {
+    flex: none; padding: 8px 10px; border-radius: 8px; font-size: 13px;
+    font-weight: 700; border: none; cursor: pointer;
+    background: #5e2750; color: #fff;
+  }
+  .pin-card {
+    margin-bottom: 20px; padding: 14px; border-radius: 14px;
+    background: rgba(94,39,80,0.18); border: 1px solid rgba(233,84,32,0.28);
+  }
+  .pin-card h2 { margin: 0 0 6px; font-size: 16px; }
+  .pin-card p { margin: 0 0 12px; font-size: 13px; color: #c4a0b8; }
+  .pin-card input {
+    width: 100%; margin-bottom: 8px; padding: 12px; font-size: 15px;
+    border-radius: 10px; border: 1px solid rgba(255,255,255,0.12);
+    background: #1a0012; color: #fff;
+  }
+  .pin-card button {
+    width: 100%; padding: 12px; border: none; border-radius: 10px;
+    font-size: 15px; font-weight: 700; background: #77216f; color: #fff;
+  }
 </style>
 </head>
 <body>
   <div class="wrap">
     <header class="top">
-      <div class="profile" aria-hidden="true">B</div>
+      <div class="profile" aria-hidden="true"><img src="icon.png" alt=""></div>
       <div class="headline">
-        <h1>Berry<span>Browser</span></h1>
+        <h1>Berry <span>Browser</span></h1>
         <p class="greeting" id="greet">Good morning</p>
       </div>
       <button type="button" class="fav-btn" id="fav-open">Favorites</button>
@@ -202,19 +221,29 @@
     <p class="sec">Favorites</p>
     <nav class="grid" id="fav-grid" aria-label="Quick links"></nav>
 
+    <section class="pin-card">
+      <h2>Add to Home Screen</h2>
+      <p>Puts a shortcut on the BB10 desktop. Tap it later to open that site in Berry Browser &mdash; same idea as pinning WhatsApp or Messenger next to your other apps.</p>
+      <form id="pin-form">
+        <input id="pin-name" type="text" placeholder="Shortcut name" autocapitalize="off">
+        <input id="pin-url" type="text" placeholder="https://..." autocapitalize="off">
+        <button type="submit">Pin to desktop</button>
+      </form>
+    </section>
+
     <div class="actions">
       <a class="act set" href="https://berry.settings/">Settings</a>
       <a class="act res" href="https://berry.restart/">Restart</a>
     </div>
 
     <footer class="support">
-      <p>Built by <strong style="color:#a8b8c8">sw7ft</strong>
+      <p>Built by <strong style="color:#f3e6ef">sw7ft</strong>
         &middot; <a href="https://www.patreon.com/sw7ft">Patreon</a></p>
       <p class="diag">
         <a href="file:///accounts/1000/shared/misc/diag.html">diag</a>
         <a href="file:///accounts/1000/shared/misc/diag_maps.html">maps</a>
       </p>
-      <div class="ver">BerryBrowserV3 &middot; v3.0.2 &middot; build 72</div>
+      <div class="ver">Berry Browser &middot; v3.0.2 &middot; build 82</div>
     </footer>
   </div>
 
@@ -309,9 +338,23 @@
         + '<input type="checkbox" id="chk-' + f.id + '" data-id="' + f.id + '"'
         + (f.on ? ' checked' : '') + '>'
         + '<label for="chk-' + f.id + '">' + f.label + '</label>'
+        + '<button type="button" class="btn-pin" data-pin-name="'
+        + f.label.replace(/"/g, '&quot;') + '" data-pin-url="'
+        + f.url.replace(/"/g, '&quot;') + '">Pin</button>'
         + '</div>';
     }
     box.innerHTML = html;
+    var pins = box.querySelectorAll('.btn-pin');
+    for (var p = 0; p < pins.length; p++) {
+      pins[p].addEventListener('click', function() {
+        var name = this.getAttribute('data-pin-name') || '';
+        var url = this.getAttribute('data-pin-url') || '';
+        if (url.indexOf('://') < 0 && url.indexOf('youtube-search') === 0)
+          url = location.href.replace(/[^/]*$/, url);
+        window.location.href = 'https://berry.pin/?title=' +
+          encodeURIComponent(name) + '&url=' + encodeURIComponent(url);
+      });
+    }
     var checks = box.querySelectorAll('input[type=checkbox]');
     for (var j = 0; j < checks.length; j++) {
       checks[j].addEventListener('change', function() {
@@ -365,6 +408,17 @@
     else if (h < 17) g.textContent = 'Good afternoon';
     else g.textContent = 'Good evening';
   }
+
+  document.getElementById('pin-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    var name = (document.getElementById('pin-name').value || '').trim();
+    var url = (document.getElementById('pin-url').value || '').trim();
+    if (!url) return;
+    if (!/^[a-z]+:\/\//i.test(url)) url = 'https://' + url;
+    if (!name) name = url.replace(/^https?:\/\//i, '').split('/')[0];
+    window.location.href = 'https://berry.pin/?title=' +
+      encodeURIComponent(name) + '&url=' + encodeURIComponent(url);
+  });
 
   document.getElementById('f').addEventListener('submit', function(e) {
     e.preventDefault();

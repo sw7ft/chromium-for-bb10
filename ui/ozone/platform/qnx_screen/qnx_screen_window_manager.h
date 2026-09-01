@@ -21,10 +21,15 @@ class QnxScreenWindowManager {
   void RemoveWindow(gfx::AcceleratedWidget widget);
   QnxScreenWindow* GetWindow(gfx::AcceleratedWidget widget);
   QnxScreenWindow* GetFirstWindow();
+  QnxScreenWindow* GetLastAddedWindow();
+  QnxScreenWindow* FindByGroup(const char* group);
 
  private:
   std::map<gfx::AcceleratedWidget, QnxScreenWindow*> windows_;
+  QnxScreenWindow* last_added_ = nullptr;
 };
+
+QnxScreenWindowManager* GetQnxScreenWindowManager();
 
 }  // namespace ui
 

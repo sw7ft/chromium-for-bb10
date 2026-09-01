@@ -4,10 +4,10 @@
          BerryShell/BerryBrowser app instead of replacing it. -->
     <id>com.sw7ft.BerryShellV3</id>
 
-    <name>BerryBrowserV3</name>
+    <name>Berry Browser</name>
     <versionNumber>3.0.2</versionNumber>
-    <buildId>72</buildId>
-    <description>Chromium content_shell browser for BlackBerry 10 (QNX, on-screen via qnx_screen). V3: balanced defaults (GPU on, 720, 45fps, low-end mode), in-app Settings, restart, custom landing page.</description>
+    <buildId>82</buildId>
+    <description>Chromium browser for BlackBerry 10. Pin web links to the home screen; other apps can Open http/https URLs here.</description>
     <author>sw7ft</author>
 
     <!-- Native entry point: a tiny launcher that sets LD_LIBRARY_PATH / CA
@@ -42,6 +42,23 @@
       <image>icon.png</image>
     </icon>
     <asset path="icons/icon.png">icon.png</asset>
+    <asset path="icons/pin-icon.png">pin-icon.png</asset>
+
+    <!-- Home-screen shortcuts (navigator_add_uri) and Open-with from other
+         BB10 apps. Incoming URIs arrive as NAVIGATOR_INVOKE_TARGET. -->
+    <invoke-target id="com.sw7ft.BerryShellV3">
+        <invoke-target-type>application</invoke-target-type>
+        <invoke-target-name>Berry Browser</invoke-target-name>
+        <icon>
+            <image>icon.png</image>
+        </icon>
+        <filter>
+            <action>bb.action.OPEN</action>
+            <action>bb.action.VIEW</action>
+            <mime-type>*</mime-type>
+            <property var="uris" value="berrybrowser:,http://,https://"/>
+        </filter>
+    </invoke-target>
 
     <initialWindow>
       <autoOrients>true</autoOrients>

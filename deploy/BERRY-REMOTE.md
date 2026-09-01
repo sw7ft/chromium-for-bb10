@@ -26,9 +26,16 @@ profile (so you link/log in to it independently).
 ## Components
 
 - `berry-remote.js` — the dependency-free Node service (CDP-pipe client + MJPEG
-  fan-out + input endpoints + inline browser UI).
+  fan-out + input endpoints). Must run with `--jitless`: the experimental QNX
+  ARM32 node build's JIT emits broken code and SIGBUSes once anything tiers up
+  (remote-start.sh passes the flag).
+- `berry-viewer.html` — the viewer UI, deliberately ES5-only (XHR, keyCode
+  fallbacks, no fetch/arrow functions) so ancient browsers — BB10 stock,
+  Android 4.x, old WebKit — can be the display for the modern engine. Browsers
+  without MJPEG support can append `?poll=1` to use timer-polled stills via
+  the `/frame.jpg` endpoint.
 - `remote-start.sh` / `remote-stop.sh` — start/stop helpers. Persistence without
-  `nohup`/`setsid` (absent on the device busybox) is done with `trap '' HUP`,
+  `nohup`/`setsid`/`killall` (absent on the device busybox; use QNX `slay`) is done with `trap '' HUP`,
   whose ignored-SIGHUP disposition is inherited by node across fork/exec, so the
   service survives the launching SSH session closing.
 - Runs from `/accounts/devuser/berry-deploy/berry-browser-bundle/` on the device
@@ -72,8 +79,9 @@ to navigate; click **Keyboard** to focus a hidden field and type into the page.
 
 ## Endpoints (for scripting)
 
-- `GET /` — the viewer UI
+- `GET /` — the viewer UI (ES5-safe; `?poll=1` for browsers without MJPEG)
 - `GET /stream` — MJPEG (`multipart/x-mixed-replace`)
+- `GET /frame.jpg` — latest frame as a plain JPEG (for polling clients)
 - `POST /input` — `{kind:'down|up|move|wheel', fx, fy, dx, dy}` (fx/fy normalized 0..1)
 - `POST /key` — `{type:'keyDown|keyUp|char', key, code, keyCode, text}`
 - `POST /nav` — `{url}`

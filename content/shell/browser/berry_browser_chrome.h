@@ -41,7 +41,18 @@ class BerryBrowserChrome {
   void ClearCommit() { url_committed_ = false; }
   const std::string& committed_url() const { return committed_url_; }
 
-  enum class HitResult { kNone, kBack, kForward, kReload, kUrlBar };
+  void SetWindowCount(int count);
+  int window_count() const { return window_count_; }
+
+  enum class HitResult {
+    kNone,
+    kBack,
+    kForward,
+    kReload,
+    kUrlBar,
+    kShare,
+    kWindows
+  };
   HitResult HitTest(int x, int y) const;
 
  private:
@@ -59,7 +70,9 @@ class BerryBrowserChrome {
   bool url_committed_ = false;
   bool replace_all_on_next_input_ = false;
 
-  gfx::Rect back_rect_, forward_rect_, reload_rect_, url_rect_;
+  int window_count_ = 1;
+  gfx::Rect back_rect_, forward_rect_, reload_rect_, url_rect_, share_rect_,
+      windows_rect_;
 };
 
 }  // namespace content

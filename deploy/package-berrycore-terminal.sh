@@ -63,7 +63,28 @@ sed 's/content_shell\.exe/content_shell/g' "$LAUNCHER_SRC" > "$LAUNCHER_TMP"
 sed -i 's/BerryShell:/BerryBrowser:/g' "$LAUNCHER_TMP"
 "$GCC" -O2 -o "$STAGING/bin/berry-browser" "$LAUNCHER_TMP"
 rm -f "$LAUNCHER_TMP"
-chmod +x "$STAGING/bin/content_shell" "$STAGING/bin/berry-browser"
+
+# Headless one-shot wrapper: no screen access needed, works from any shell
+# inside the Term49/BerryCore app perimeter (BB10 authman only allows exec
+# within an app sandbox — verified: even root cannot exec from shared or /tmp).
+cat > "$STAGING/bin/berry-headless" <<'HEADLESS'
+#!/bin/sh
+# Headless Chromium one-shot. Examples:
+#   berry-headless --dump-dom https://example.com
+#   berry-headless --remote-debugging-port=9222 https://example.com
+DIR="$(cd "$(dirname "$0")" && pwd)"
+export LD_LIBRARY_PATH="$DIR/../lib:$DIR:$LD_LIBRARY_PATH"
+PROFILE="$DIR/../share/berry-browser/headless-profile"
+mkdir -p "$PROFILE/tmp"
+export HOME="${HOME:-$PROFILE}"
+export TMPDIR="${TMPDIR:-$PROFILE/tmp}"
+exec "$DIR/content_shell" --no-sandbox --single-process --disable-gpu \
+  --ozone-platform=headless \
+  --content-shell-data-path="$PROFILE" \
+  "$@"
+HEADLESS
+chmod +x "$STAGING/bin/content_shell" "$STAGING/bin/berry-browser" \
+  "$STAGING/bin/berry-headless"
 
 if [ -f "$SCRIPT_DIR/berry-shell-bar/home.html" ]; then
   cp "$SCRIPT_DIR/berry-shell-bar/home.html" "$STAGING/share/berry-browser/"
@@ -103,7 +124,11 @@ berry-browser https://www.google.com
 berry-browser https://berry.settings/
 
 # Stop
-killall content_shell
+slay -f content_shell
+
+# Headless (no window; scriptable)
+berry-headless --dump-dom https://example.com > page.html
+berry-headless --remote-debugging-port=9222 https://example.com &
 \`\`\`
 
 ## Settings

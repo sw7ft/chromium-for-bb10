@@ -398,7 +398,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  fprintf(stderr, "BerryShell: BerryBrowserV3 build 72\n");
+  fprintf(stderr, "BerryShell: Berry Browser build 82\n");
   fprintf(stderr, "BerryShell: app dir = %s\n", dir);
   fprintf(stderr, "BerryShell: work dir (cwd) = %s\n", work);
   fprintf(stderr, "BerryShell: %s\n",
@@ -676,6 +676,13 @@ int main(int argc, char** argv) {
        * the Krait cores frees them for the single-threaded bootstrap JS that is
        * the real load bottleneck. */
       argv_buf[n++] = (char*)"--enable-gpu-rasterization";
+      /* A/B: berry-msaa0.enable disables MSAA during GPU raster. Trades a
+       * little edge smoothing on complex paths for Adreno 330 fill-rate /
+       * memory bandwidth. */
+      if (marker_exists("berry-msaa0.enable")) {
+        argv_buf[n++] = (char*)"--gpu-rasterization-msaa-sample-count=0";
+        fprintf(stderr, "BerryShell: gpu raster MSAA = 0 (berry-msaa0.enable)\n");
+      }
       argv_buf[n++] = raster_flag;
     } else {
       argv_buf[n++] = (char*)"--disable-gpu";

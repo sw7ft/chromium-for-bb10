@@ -2,6 +2,7 @@
 #include <bps/bps.h>
 #include <bps/event.h>
 #include <bps/navigator.h>
+#include <bps/navigator_invoke.h>
 #include <bps/screen.h>
 #include <bps/virtualkeyboard.h>
 #include <screen/screen.h>
@@ -142,24 +143,51 @@ void QnxScreenEventSource::PollEvents() {
             cb();
           break;
         }
+        case NAVIGATOR_WINDOW_ACTIVE:
         case NAVIGATOR_WINDOW_STATE: {
           // The app moved between foreground (FULLSCREEN), the multitask card
           // (THUMBNAIL), and fully covered (INVISIBLE). Only FULLSCREEN is
           // actually visible; thumbnail/invisible should throttle the page so
           // rAF/timers/compositing stop burning the Krait cores in the
-          // background. Forward as a simple visible/hidden bit.
+          // background. Forward as a simple visible/hidden bit. groupid is
+          // set when a shortcut opened a second Screen window.
           navigator_window_state_t st = navigator_event_get_window_state(event);
-          bool visible = (st == NAVIGATOR_WINDOW_FULLSCREEN);
+          bool visible = (st == NAVIGATOR_WINDOW_FULLSCREEN) ||
+                         (code == NAVIGATOR_WINDOW_ACTIVE);
+          const char* group = navigator_event_get_groupid(event);
           QnxKbdLogf("KBD:nav WINDOW_STATE st=%d visible=%d\n", (int)st,
                      visible ? 1 : 0);
           if (auto cb = GetQnxScreenVisibilityCallback())
             cb(visible);
+          if (auto cb = GetQnxScreenActiveGroupCallback())
+            cb(group, visible);
           break;
         }
         case NAVIGATOR_KEYBOARD_STATE:
         case NAVIGATOR_KEYBOARD_POSITION:
           QnxDispatchVirtualKeyboardBpsEvent(event);
           break;
+        case NAVIGATOR_INVOKE:
+        case NAVIGATOR_INVOKE_TARGET: {
+          // Home-screen shortcut (navigator_add_uri), Open-with from another
+          // app, or a cold-start URL invoke. INVOKE_TARGET carries a structured
+          // invocation; legacy NAVIGATOR_INVOKE puts the URL in event data.
+          const char* uri = nullptr;
+          if (code == NAVIGATOR_INVOKE_TARGET) {
+            const navigator_invoke_invocation_t* inv =
+                navigator_invoke_event_get_invocation(event);
+            uri = inv ? navigator_invoke_invocation_get_uri(inv) : nullptr;
+          }
+          if (!uri || !uri[0])
+            uri = navigator_event_get_data(event);
+          QnxKbdLogf("KBD:nav INVOKE code=%d uri=%s\n", code,
+                     uri && uri[0] ? uri : "(null)");
+          if (uri && uri[0]) {
+            if (auto cb = GetQnxScreenInvokeUriCallback())
+              cb(uri);
+          }
+          break;
+        }
         default:
           break;
       }

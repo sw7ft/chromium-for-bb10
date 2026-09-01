@@ -56,9 +56,15 @@ QnxScreenWindow::QnxScreenWindow(PlatformWindowDelegate* delegate,
   // composited (the page draws), but taps go nowhere. Create a window group so
   // the Navigator recognizes this as the app's main window and forwards input.
   // (This mirrors what Qt's/SDL's QNX backends do for top-level windows.)
+  // Qt's QBB backend: "navigator only supports one application window" per
+  // process. Extra SCREEN_APPLICATION_WINDOW groups do not become extra
+  // Active Frames — they stack in the same card. One group, many WebContents.
   snprintf(group_name_, sizeof(group_name_), "berryshell_%d", getpid());
   if (screen_create_window_group(window_, group_name_) != 0)
     QNX_TRACE_MSG("QNX:OzWin: screen_create_window_group failed\n");
+  screen_set_window_property_cv(window_, SCREEN_PROPERTY_ID_STRING,
+                                static_cast<int>(strlen(group_name_)),
+                                group_name_);
 
   // Touch delivery is gated by SENSITIVITY (set below), but keyboard delivery
   // is gated separately by SCREEN_PROPERTY_FOCUS: QNX only sends

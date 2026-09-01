@@ -330,6 +330,10 @@ bool BerryGooglevideoUrlIsAllowlisted(const std::string& spec) {
   for (const std::string& allowed : g_berry_googlevideo_allowlist) {
     if (spec == allowed)
       return true;
+    if (spec.size() > allowed.size() &&
+        spec.compare(0, allowed.size(), allowed) == 0 &&
+        spec[allowed.size()] == '&')
+      return true;
   }
   return false;
 }
@@ -385,6 +389,9 @@ void BerryRegisterGooglevideoAllowlist(const std::string& body) {
       continue;
     std::string url = formats_section.substr(pos, url_end - pos);
     pos = url_end + 1;
+    base::ReplaceSubstringsAfterOffset(&url, 0, "\\u0026", "&");
+    base::ReplaceSubstringsAfterOffset(&url, 0, "\\u003d", "=");
+    base::ReplaceSubstringsAfterOffset(&url, 0, "\\/", "/");
     if (url.rfind("https://", 0) != 0 ||
         url.find("googlevideo.com") == std::string::npos)
       continue;
@@ -546,12 +553,26 @@ void BerryMaybeFixYoutubeEmbedReferer(net::URLRequest* url_request) {
 
   if (is_googlevideo) {
     if (BerryGooglevideoUrlIsAllowlisted(spec)) {
-      static const char kAndroidVrUA[] =
-          "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android "
-          "12L; eureka-user Build/SQ3A.220605.009.A1) gzip";
-      url_request->SetExtraRequestHeaderByName("User-Agent", kAndroidVrUA, true);
-      url_request->RemoveRequestHeaderByName("Origin");
-      url_request->SetReferrer(std::string());
+      const bool use_vr =
+          access("/accounts/1000/shared/misc/berry-youtube-vr.enable", F_OK) ==
+          0;
+      if (use_vr) {
+        static const char kAndroidVrUA[] =
+            "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; "
+            "Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip";
+        url_request->SetExtraRequestHeaderByName("User-Agent", kAndroidVrUA,
+                                                 true);
+        url_request->RemoveRequestHeaderByName("Origin");
+        url_request->SetReferrer(std::string());
+      } else {
+        static const char kDesktopUA[] =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36";
+        url_request->SetExtraRequestHeaderByName("User-Agent", kDesktopUA, true);
+        url_request->SetReferrer("https://www.youtube.com/");
+        url_request->SetExtraRequestHeaderByName(
+            "Origin", "https://www.youtube.com", true);
+      }
       url_request->set_referrer_policy(net::ReferrerPolicy::NEVER_CLEAR);
       QNX_NAV_LOG_FMT("BerryNav: GooglevideoAllowlist UA url=\"%.100s\"\n",
                       spec.c_str());
@@ -581,40 +602,96 @@ void BerryMaybeFixYoutubeEmbedReferer(net::URLRequest* url_request) {
       spec.c_str(), ref.c_str());
 }
 
-// Rewrite youtubei/v1/player POST bodies from WEB_EMBEDDED_PLAYER (SABR-only,
-// 403 on content_shell) to ANDROID_VR 1.65.10 which still serves progressive
-// HTTPS formats (fmt=18) without PO tokens per yt-dlp client table.
-bool BerryRewriteYoutubePlayerJson(std::string* body) {
+// Innertube client for /youtubei/v1/player. ANDROID_VR 1.65.10 itag-18 URLs
+// started 403ing in Aug 2026 (GVS PO token). WEB_EMBEDDED_PLAYER still returns
+// a muxed progressive URL without a PO token (yt-dlp 2026.08).
+enum class BerryInnertubeKind {
+  kTv,
+  kWebEmbedded,
+  kAndroidVr,
+  kAndroid,
+  kIos
+};
+
+BerryInnertubeKind BerryPickInnertubeKind(const std::string& spec) {
+  if (spec.find("berry_client=ios") != std::string::npos ||
+      access("/accounts/1000/shared/misc/berry-youtube-ios.enable", F_OK) == 0)
+    return BerryInnertubeKind::kIos;
+  if (spec.find("berry_client=vr") != std::string::npos ||
+      access("/accounts/1000/shared/misc/berry-youtube-vr.enable", F_OK) == 0)
+    return BerryInnertubeKind::kAndroidVr;
+  if (spec.find("berry_client=android") != std::string::npos ||
+      access("/accounts/1000/shared/misc/berry-youtube-android.enable",
+             F_OK) == 0)
+    return BerryInnertubeKind::kAndroid;
+  if (spec.find("berry_client=embed") != std::string::npos)
+    return BerryInnertubeKind::kWebEmbedded;
+  if (spec.find("berry_client=tv") != std::string::npos)
+    return BerryInnertubeKind::kTv;
+  if (spec.find("/youtubei/v1/player") != std::string::npos)
+    return BerryInnertubeKind::kTv;
+  return BerryInnertubeKind::kAndroidVr;
+}
+
+bool BerryRewriteYoutubePlayerJson(std::string* body, BerryInnertubeKind kind) {
   if (!body)
     return false;
 
-  const bool use_ios =
-      access("/accounts/1000/shared/misc/berry-youtube-ios.enable", F_OK) == 0;
-  const char* kClient = use_ios ? "IOS" : "ANDROID_VR";
-  const char* kVersion = use_ios ? "19.45.4" : "1.65.10";
-  const char* kDeviceFields = use_ios
-      ? ",\"deviceMake\":\"Apple\",\"deviceModel\":\"iPhone14,3\","
-        "\"osName\":\"iPhone\",\"osVersion\":\"17.0\""
-      : ",\"deviceMake\":\"Oculus\",\"deviceModel\":\"Quest "
-        "3\",\"androidSdkVersion\":32,\"osName\":\"Android\","
-        "\"osVersion\":\"12L\"";
-
-  bool rewritten = false;
-  if (body->find("WEB_EMBEDDED") != std::string::npos) {
-    base::ReplaceSubstringsAfterOffset(body, 0, "WEB_EMBEDDED_PLAYER", kClient);
-    rewritten = true;
+  const char* kClient = "TVHTML5";
+  const char* kVersion = "7.20260707.07.00";
+  const char* kDeviceFields = "";
+  switch (kind) {
+    case BerryInnertubeKind::kIos:
+      kClient = "IOS";
+      kVersion = "21.26.4";
+      kDeviceFields =
+          ",\"deviceMake\":\"Apple\",\"deviceModel\":\"iPhone16,2\","
+          "\"osName\":\"iPhone\",\"osVersion\":\"18.3.2.22D82\"";
+      break;
+    case BerryInnertubeKind::kAndroidVr:
+      kClient = "ANDROID_VR";
+      kVersion = "1.65.10";
+      kDeviceFields =
+          ",\"deviceMake\":\"Oculus\",\"deviceModel\":\"Quest "
+          "3\",\"androidSdkVersion\":32,\"osName\":\"Android\","
+          "\"osVersion\":\"12L\"";
+      break;
+    case BerryInnertubeKind::kAndroid:
+      kClient = "ANDROID";
+      kVersion = "21.26.364";
+      kDeviceFields =
+          ",\"androidSdkVersion\":30,\"osName\":\"Android\",\"osVersion\":\"11\"";
+      break;
+    case BerryInnertubeKind::kWebEmbedded:
+      kClient = "WEB_EMBEDDED_PLAYER";
+      kVersion = "2.20260708.00.00";
+      kDeviceFields = "";
+      break;
+    case BerryInnertubeKind::kTv:
+      kClient = "TVHTML5";
+      kVersion = "7.20260707.07.00";
+      kDeviceFields = "";
+      break;
   }
 
-  static const char* kWebClients[] = {
-      "\"clientName\":\"WEB\"",
-      "\"clientName\":\"MWEB\"",
+  bool rewritten = false;
+  // Longest names first so ANDROID_VR / WEB_EMBEDDED_PLAYER are not sliced.
+  static const char* kFrom[] = {
+      "\"clientName\":\"WEB_EMBEDDED_PLAYER\"",
+      "\"clientName\":\"ANDROID_VR\"",
+      "\"clientName\":\"ANDROID\"",
+      "\"clientName\":\"TVHTML5\"",
+      "\"clientName\":\"IOS\"",
       "\"clientName\":\"WEB_REMIX\"",
       "\"clientName\":\"WEB_CREATOR\"",
+      "\"clientName\":\"MWEB\"",
+      "\"clientName\":\"WEB\"",
       "\"clientName\": \"WEB\"",
       "\"clientName\": \"MWEB\"",
   };
-  const std::string kClientJson = std::string("\"clientName\":\"") + kClient + "\"";
-  for (const char* from : kWebClients) {
+  const std::string kClientJson =
+      std::string("\"clientName\":\"") + kClient + "\"";
+  for (const char* from : kFrom) {
     if (body->find(from) != std::string::npos) {
       base::ReplaceSubstringsAfterOffset(body, 0, from, kClientJson);
       rewritten = true;
@@ -624,8 +701,7 @@ bool BerryRewriteYoutubePlayerJson(std::string* body) {
   if (!rewritten && body->find(kClient) == std::string::npos)
     return false;
 
-  const std::string kName = kClientJson;
-  size_t pos = body->find(kName);
+  const size_t pos = body->find(kClientJson);
   if (pos == std::string::npos)
     return rewritten;
 
@@ -639,7 +715,8 @@ bool BerryRewriteYoutubePlayerJson(std::string* body) {
     }
   }
 
-  if (body->find("\"deviceMake\":", pos) == std::string::npos) {
+  if (kDeviceFields[0] && body->find("\"deviceMake\":", pos) == std::string::npos &&
+      body->find("\"androidSdkVersion\":", pos) == std::string::npos) {
     size_t insert_at = body->find("\"clientVersion\":", pos);
     if (insert_at != std::string::npos) {
       insert_at = body->find('"', insert_at + 16);
@@ -647,6 +724,18 @@ bool BerryRewriteYoutubePlayerJson(std::string* body) {
         insert_at = body->find('"', insert_at + 1);
         if (insert_at != std::string::npos)
           body->insert(insert_at + 1, kDeviceFields);
+      }
+    }
+  }
+
+  if (kind == BerryInnertubeKind::kWebEmbedded &&
+      body->find("\"embedUrl\"") == std::string::npos) {
+    size_t ctx = body->find("\"context\":");
+    if (ctx != std::string::npos) {
+      size_t brace = body->find('{', ctx);
+      if (brace != std::string::npos) {
+        body->insert(brace + 1,
+                     "\"thirdParty\":{\"embedUrl\":\"https://www.reddit.com/\"},");
       }
     }
   }
@@ -767,8 +856,11 @@ void BerryMaybeSpoofYoutubeInnertube(ResourceRequest* request,
     if (element.type() != mojom::DataElementDataView::Tag::kBytes)
       continue;
     std::string json(element.As<DataElementBytes>().AsStringPiece());
-    const bool rewrote = BerryRewriteYoutubePlayerJson(&json);
-    const bool injected = BerryInjectVisitorDataIntoPlayerJson(&json);
+    const BerryInnertubeKind kind = BerryPickInnertubeKind(spec);
+    const bool rewrote = BerryRewriteYoutubePlayerJson(&json, kind);
+    // VR visitorData on WEB_EMBEDDED/TV makes YouTube return "Video unavailable".
+    const bool injected = (kind == BerryInnertubeKind::kAndroidVr) &&
+                          BerryInjectVisitorDataIntoPlayerJson(&json);
     if (!rewrote && !injected)
       continue;
     if (injected)
@@ -784,49 +876,69 @@ void BerryMaybeSpoofYoutubeInnertube(ResourceRequest* request,
     return;
 
   const std::string visitor_header = g_berry_youtube_visitor_data;
-  const bool use_ios =
-      access("/accounts/1000/shared/misc/berry-youtube-ios.enable", F_OK) == 0;
-  if (!use_ios) {
-    static const char kAndroidVrUA[] =
-        "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android "
-        "12L; eureka-user Build/SQ3A.220605.009.A1) gzip";
-    url_request->SetExtraRequestHeaderByName("User-Agent", kAndroidVrUA, true);
-    url_request->SetExtraRequestHeaderByName("X-Youtube-Client-Name", "28",
-                                             true);
-    url_request->SetExtraRequestHeaderByName("X-Youtube-Client-Version",
-                                             "1.65.10", true);
-    if (!visitor_header.empty()) {
-      url_request->SetExtraRequestHeaderByName("X-Goog-Visitor-Id",
-                                               visitor_header.c_str(), true);
-    }
-    QNX_NAV_LOG_FMT(
-        "BerryNav: InnertubeSpoof ANDROID_VR/1.65.10 body=%zu visitor=%s "
-        "hdrs=UA,ClientName,ClientVersion%s url=\"%.80s\"\n",
-        spoof_body_size,
-        visitor_injected ? "injected"
-                         : (visitor_header.empty() ? "none" : "cached"),
-        visitor_header.empty() ? "" : ",GoogVisitorId", spec.c_str());
-  } else {
-    static const char kIosUA[] =
-        "com.google.ios.youtube/19.45.4 (iPhone14,3; U; CPU iOS 17_0 like Mac "
-        "OS X) gzip";
-    url_request->SetExtraRequestHeaderByName("User-Agent", kIosUA, true);
-    url_request->SetExtraRequestHeaderByName("X-Youtube-Client-Name", "5",
-                                             true);
-    url_request->SetExtraRequestHeaderByName("X-Youtube-Client-Version",
-                                             "19.45.4", true);
-    if (!visitor_header.empty()) {
-      url_request->SetExtraRequestHeaderByName("X-Goog-Visitor-Id",
-                                               visitor_header.c_str(), true);
-    }
-    QNX_NAV_LOG_FMT(
-        "BerryNav: InnertubeSpoof IOS/19.45.4 body=%zu visitor=%s "
-        "hdrs=UA,ClientName,ClientVersion%s url=\"%.80s\"\n",
-        spoof_body_size,
-        visitor_injected ? "injected"
-                         : (visitor_header.empty() ? "none" : "cached"),
-        visitor_header.empty() ? "" : ",GoogVisitorId", spec.c_str());
+  const BerryInnertubeKind kind = BerryPickInnertubeKind(spec);
+  const char* ua = nullptr;
+  const char* client_name = nullptr;
+  const char* client_ver = nullptr;
+  const char* label = nullptr;
+  switch (kind) {
+    case BerryInnertubeKind::kIos:
+      ua = "com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like "
+           "Mac OS X;)";
+      client_name = "5";
+      client_ver = "21.26.4";
+      label = "IOS/21.26.4";
+      break;
+    case BerryInnertubeKind::kAndroid:
+      ua = "com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip";
+      client_name = "3";
+      client_ver = "21.26.364";
+      label = "ANDROID/21.26.364";
+      break;
+    case BerryInnertubeKind::kAndroidVr:
+      ua = "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; "
+           "Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip";
+      client_name = "28";
+      client_ver = "1.65.10";
+      label = "ANDROID_VR/1.65.10";
+      break;
+    case BerryInnertubeKind::kWebEmbedded:
+      ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+           "(KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36";
+      client_name = "56";
+      client_ver = "2.20260708.00.00";
+      label = "WEB_EMBEDDED/2.20260708";
+      break;
+    case BerryInnertubeKind::kTv:
+      ua = "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/25.lts.30.1034943-gold "
+           "(unlike Gecko), Unknown_TV_Unknown_0/Unknown (Unknown, Unknown)";
+      client_name = "7";
+      client_ver = "7.20260707.07.00";
+      label = "TVHTML5/7.20260707";
+      break;
   }
+  url_request->SetExtraRequestHeaderByName("User-Agent", ua, true);
+  url_request->SetExtraRequestHeaderByName("X-Youtube-Client-Name", client_name,
+                                           true);
+  url_request->SetExtraRequestHeaderByName("X-Youtube-Client-Version",
+                                           client_ver, true);
+  if (kind == BerryInnertubeKind::kAndroidVr && !visitor_header.empty()) {
+    url_request->SetExtraRequestHeaderByName("X-Goog-Visitor-Id",
+                                             visitor_header.c_str(), true);
+  }
+  QNX_NAV_LOG_FMT(
+      "BerryNav: InnertubeSpoof %s body=%zu visitor=%s "
+      "hdrs=UA,ClientName,ClientVersion%s url=\"%.80s\"\n",
+      label, spoof_body_size,
+      visitor_injected ? "injected"
+                       : ((kind == BerryInnertubeKind::kAndroidVr &&
+                           !visitor_header.empty())
+                              ? "cached"
+                              : "none"),
+      (kind == BerryInnertubeKind::kAndroidVr && !visitor_header.empty())
+          ? ",GoogVisitorId"
+          : "",
+      spec.c_str());
 }
 
 std::string BerryHtmlEscape(const std::string& input) {
@@ -3055,8 +3167,12 @@ bool URLLoader::QnxWriteBodyToNewDataPipe(const std::string& body,
     break;
   }
   total_written_bytes_ = offset;
-  if (response_)
+  if (response_) {
     response_->content_length = static_cast<int64_t>(body.size());
+    if (response_->headers)
+      response_->headers->SetHeader("Content-Length",
+                                    base::NumberToString(body.size()));
+  }
   response_body_stream_.reset();
   const char* url_snip = url_request_ ? url_request_->url().spec().c_str()
                                       : "(null-req)";
@@ -3070,11 +3186,18 @@ void URLLoader::QnxFlushBufferedYoutubePlayerBody() {
     return;
   BerryCacheVisitorDataFromPlayerResponse(qnx_youtube_player_body_);
   const std::string original = qnx_youtube_player_body_;
+  const bool has_progressive =
+      original.find("googlevideo.com/videoplayback") != std::string::npos &&
+      original.find("\"url\":\"") != std::string::npos;
   if (BerryPlayerResponseLooksLikeError(original)) {
     QNX_NAV_LOG_FMT(
         "BerryNav: PlayerResponseError skip_strip bytes=%zu preview=\"%.200s\" "
         "url=\"%.80s\"\n",
         original.size(), original.c_str(), url_request_->url().spec().c_str());
+  } else if (has_progressive) {
+    QNX_NAV_LOG_FMT(
+        "BerryNav: PlayerResponseKeepProgressive bytes=%zu url=\"%.80s\"\n",
+        original.size(), url_request_->url().spec().c_str());
   } else {
     BerryStripSabrFromYoutubePlayerResponse(url_request_->url(),
                                           &qnx_youtube_player_body_);
@@ -3201,6 +3324,12 @@ void URLLoader::ContinueOnResponseStarted() {
 #if defined(__QNX__) || defined(__QNXNTO__)
   {
     const std::string spec = url_request_->url().spec();
+    if (spec.find("googlevideo.com") != std::string::npos &&
+        spec.find("videoplayback") != std::string::npos) {
+      const int code = url_request_->GetResponseCode();
+      QNX_NAV_LOG_FMT("BerryNav: GooglevideoHTTP code=%d url=\"%.100s\"\n",
+                      code, spec.c_str());
+    }
     if (BerryShouldBufferYoutubeResponse(url_request_->url())) {
       qnx_youtube_player_buffer_ = true;
       QNX_NAV_LOG_FMT("BerryNav: PlayerResponseBuffer url=\"%.80s\"\n",

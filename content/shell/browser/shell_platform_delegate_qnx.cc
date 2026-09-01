@@ -3,18 +3,26 @@
 
 #include "content/shell/browser/shell_platform_delegate.h"
 
+#include <bps/navigator.h>
 #include <sys/keycodes.h>
 #include <unistd.h>
 
 #include <cstdlib>
+#include <map>
+
+#include "content/public/browser/browser_context.h"
 
 #include "base/containers/contains.h"
+#include "base/functional/bind.h"
 #include "base/qnx_hard_watchdog.h"
 #include "base/qnx_trace.h"
 #include "base/strings/escape.h"
+#include "base/strings/string_split.h"
 #include "base/synchronization/lock.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "content/public/browser/browser_task_traits.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/visibility.h"
 #include "content/public/browser/web_contents.h"
@@ -28,6 +36,8 @@
 #include "ui/ozone/platform/qnx_screen/qnx_screen_overlay_callback.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_repaint.h"
 #include "ui/ozone/platform/qnx_screen/qnx_screen_sizes.h"
+#include "ui/ozone/platform/qnx_screen/qnx_screen_window.h"
+#include "ui/ozone/platform/qnx_screen/qnx_screen_window_manager.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "url/gurl.h"
 
@@ -39,6 +49,7 @@ namespace {
 
 Shell* g_active_shell = nullptr;
 std::unique_ptr<BerryBrowserChrome> g_chrome;
+std::map<std::string, Shell*> g_group_to_shell;
 base::Lock g_chrome_lock;
 bool g_url_bar_editing = false;
 std::string g_last_chrome_url;
@@ -67,6 +78,186 @@ void RepaintChrome() {
 
 void RepaintChromeFull() {
   ui::RequestQnxScreenFullInvalidate();
+}
+
+GURL DecodeBerryInvokeUri(const char* raw, bool* new_window) {
+  if (new_window)
+    *new_window = false;
+  if (!raw || !raw[0])
+    return GURL();
+  GURL u(raw);
+  if (u.SchemeIsHTTPOrHTTPS() || u.SchemeIsFile())
+    return u;
+  if (u.scheme() == "berrybrowser") {
+    std::string dest;
+    base::StringPairs pairs;
+    base::SplitStringIntoKeyValuePairs(u.query(), '=', '&', &pairs);
+    for (const auto& p : pairs) {
+      if (p.first == "u")
+        dest = base::UnescapeBinaryURLComponent(p.second);
+      else if (p.first == "win" && p.second == "1" && new_window)
+        *new_window = true;
+    }
+    if (!dest.empty()) {
+      GURL g(dest);
+      if (g.is_valid())
+        return g;
+    }
+  }
+  return u;
+}
+
+bool BerryUrlLooksIdle(const GURL& u) {
+  if (!u.is_valid() || u.IsAboutBlank())
+    return true;
+  if (u.host() == "berry.home" || u.host() == "berry.settings" ||
+      u.host() == "berry.pin" || u.host() == "berry.set" ||
+      u.host() == "berry.share")
+    return true;
+  if (u.SchemeIsFile()) {
+    const std::string& p = u.path();
+    return p.find("home.html") != std::string::npos ||
+           p.find(".berry-") != std::string::npos;
+  }
+  return false;
+}
+
+bool BerryShellHoldsPlaceholder(Shell* shell) {
+  if (!shell || !shell->web_contents())
+    return true;
+  return BerryUrlLooksIdle(shell->web_contents()->GetLastCommittedURL()) &&
+         BerryUrlLooksIdle(shell->web_contents()->GetVisibleURL());
+}
+
+void BerryShowShell(Shell* target) {
+  if (!target)
+    return;
+  int n = 0;
+  for (Shell* s : Shell::windows()) {
+    ++n;
+    WebContents* wc = s->web_contents();
+    if (!wc)
+      continue;
+    aura::Window* view = wc->GetNativeView();
+    if (s == target) {
+      if (view)
+        view->Show();
+      wc->UpdateWebContentsVisibility(Visibility::VISIBLE);
+      wc->Focus();
+    } else {
+      if (view)
+        view->Hide();
+      wc->UpdateWebContentsVisibility(Visibility::HIDDEN);
+    }
+  }
+  {
+    base::AutoLock lock(g_chrome_lock);
+    g_active_shell = target;
+    if (g_chrome) {
+      g_chrome->SetWindowCount(n > 0 ? n : 1);
+      if (target->web_contents())
+        g_chrome->SetUrl(target->web_contents()->GetVisibleURL().spec());
+    }
+  }
+  QNX_NAV_LOG_FMT("BerryNav: show window %d/%d url=\"%s\"\n", n,
+                  static_cast<int>(Shell::windows().size()),
+                  target->web_contents()
+                      ? target->web_contents()->GetVisibleURL().spec().c_str()
+                      : "");
+  RepaintChromeFull();
+}
+
+void BerryCycleWindow() {
+  const std::vector<Shell*>& wins = Shell::windows();
+  if (wins.size() < 2)
+    return;
+  size_t i = 0;
+  for (; i < wins.size(); ++i) {
+    if (wins[i] == g_active_shell)
+      break;
+  }
+  if (i >= wins.size())
+    i = 0;
+  else
+    i = (i + 1) % wins.size();
+  BerryShowShell(wins[i]);
+}
+
+void BerryActivateShell(Shell* shell) {
+  BerryShowShell(shell);
+}
+
+void QnxActiveGroupCallback(const char* group, bool visible) {
+  if (!visible || !group || !group[0])
+    return;
+  auto it = g_group_to_shell.find(group);
+  if (it == g_group_to_shell.end())
+    return;
+  QNX_NAV_LOG_FMT("BerryNav: activate group=\"%s\"\n", group);
+  BerryActivateShell(it->second);
+}
+
+void QnxInvokeUriCallback(const char* uri) {
+  if (!uri || !uri[0])
+    return;
+  std::string raw(uri);
+  GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(
+                     [](std::string raw) {
+                       bool want_new = false;
+                       const GURL dest =
+                           DecodeBerryInvokeUri(raw.c_str(), &want_new);
+                       if (!dest.is_valid()) {
+                         QNX_NAV_LOG_FMT(
+                             "BerryNav: invoke drop raw=\"%s\"\n",
+                             raw.c_str());
+                         return;
+                       }
+                       // Home-screen pins (berrybrowser://…&win=1, or any
+                       // berrybrowser:// open) must NOT steal the existing
+                       // card — even if that card is still on home.html.
+                       // Only reuse a window already showing this exact URL.
+                       const bool force_new =
+                           want_new ||
+                           raw.find("berrybrowser://") == 0;
+                       Shell* reuse = nullptr;
+                       for (Shell* s : Shell::windows()) {
+                         if (!s->web_contents())
+                           continue;
+                         const GURL cur =
+                             s->web_contents()->GetLastCommittedURL();
+                         if (cur.is_valid() &&
+                             cur.EqualsIgnoringRef(dest)) {
+                           reuse = s;
+                           break;
+                         }
+                       }
+                       if (!force_new && !reuse) {
+                         for (Shell* s : Shell::windows()) {
+                           if (BerryShellHoldsPlaceholder(s)) {
+                             reuse = s;
+                             break;
+                           }
+                         }
+                       }
+                       QNX_NAV_LOG_FMT(
+                           "BerryNav: invoke dest=\"%s\" new=%d reuse=%d "
+                           "windows=%zu\n",
+                           dest.spec().c_str(), force_new ? 1 : 0,
+                           reuse ? 1 : 0, Shell::windows().size());
+                       if (reuse) {
+                         BerryShowShell(reuse);
+                         return;
+                       }
+                       if (Shell::windows().empty())
+                         return;
+                       BrowserContext* ctx = Shell::windows()
+                                                 .front()
+                                                 ->web_contents()
+                                                 ->GetBrowserContext();
+                       Shell::CreateNewWindow(ctx, dest, nullptr, gfx::Size());
+                     },
+                     std::move(raw)));
 }
 
 GURL GoogleSearchUrl(const std::string& query) {
@@ -204,6 +395,21 @@ bool QnxTouchCallback(int type, int x, int y) {
       else
         shell->Reload();
       break;
+    case BerryBrowserChrome::HitResult::kShare: {
+      std::string share_url;
+      {
+        base::AutoLock lock(g_chrome_lock);
+        if (g_chrome)
+          share_url = g_chrome->url();
+      }
+      if (share_url.empty() && shell->web_contents())
+        share_url = shell->web_contents()->GetVisibleURL().spec();
+      BerryNavigatorShare(share_url);
+      break;
+    }
+    case BerryBrowserChrome::HitResult::kWindows:
+      BerryCycleWindow();
+      break;
     case BerryBrowserChrome::HitResult::kUrlBar: {
       base::AutoLock lock(g_chrome_lock);
       g_url_bar_editing = true;
@@ -269,6 +475,10 @@ void QnxVisibilityCallback(bool visible) {
   // background timer throttling, and stops compositing/painting -- so a
   // thumbnailed or covered browser stops competing with the foreground app for
   // the Krait cores. Showing restores VISIBLE.
+  //
+  // Only stamp the Active Frame cover when Navigator actually backgrounds us.
+  // Updating the cover while fullscreen made Navigator report THUMBNAIL, which
+  // hid the page and aborted googlevideo (YouTube "Playback failed").
   Shell* shell = nullptr;
   {
     base::AutoLock lock(g_chrome_lock);
@@ -276,6 +486,17 @@ void QnxVisibilityCallback(bool visible) {
   }
   if (!shell || !shell->web_contents())
     return;
+  const GURL url = shell->web_contents()->GetVisibleURL();
+  const std::string host = url.host();
+  const bool keep_visible =
+      host.find("youtube.com") != std::string::npos ||
+      host.find("googlevideo.com") != std::string::npos;
+  if (!visible)
+    BerryUpdateWindowCover(url);
+  if (!visible && keep_visible) {
+    shell->web_contents()->UpdateWebContentsVisibility(Visibility::VISIBLE);
+    return;
+  }
   shell->web_contents()->UpdateWebContentsVisibility(
       visible ? Visibility::VISIBLE : Visibility::HIDDEN);
 }
@@ -306,6 +527,8 @@ void QnxExitCallback() {
 
 struct ShellPlatformDelegate::ShellData {
   gfx::NativeWindow window;
+  std::unique_ptr<ShellPlatformDataAura> extra_aura;
+  std::string group;
 };
 
 struct ShellPlatformDelegate::PlatformData {
@@ -330,6 +553,9 @@ void ShellPlatformDelegate::Initialize(const gfx::Size& default_window_size) {
   ui::SetQnxScreenKeyCallback(QnxKeyCallback);
   ui::SetQnxScreenExitCallback(QnxExitCallback);
   ui::SetQnxScreenVisibilityCallback(QnxVisibilityCallback);
+  ui::SetQnxScreenInvokeUriCallback(QnxInvokeUriCallback);
+  ui::SetQnxScreenActiveGroupCallback(QnxActiveGroupCallback);
+  navigator_set_close_prompt("Berry Browser", "Close Berry Browser?");
 }
 
 void ShellPlatformDelegate::CreatePlatformWindow(
@@ -337,20 +563,27 @@ void ShellPlatformDelegate::CreatePlatformWindow(
     const gfx::Size& initial_size) {
   DCHECK(!base::Contains(shell_data_map_, shell));
   ShellData& shell_data = shell_data_map_[shell];
+  // One Screen application window (Navigator limit). Extra Shells are extra
+  // WebContents in this same Aura host — swapped by BerryShowShell.
+  platform_->aura->ResizeWindow(initial_size);
+  shell_data.window = platform_->aura->host()->window();
+  if (auto* wm = ui::GetQnxScreenWindowManager()) {
+    if (auto* w = wm->GetLastAddedWindow())
+      shell_data.group = w->group_name();
+  }
+  if (!shell_data.group.empty())
+    g_group_to_shell[shell_data.group] = shell;
+
   {
     base::AutoLock lock(g_chrome_lock);
     g_active_shell = shell;
     int rw = initial_size.width() > 0 ? initial_size.width() : 720;
     int rh = initial_size.height() > 0 ? initial_size.height() : 720;
     ui::QnxScreenGetRenderSize(&rw, &rh);
-    if (!BerryAppModeNoChrome())
+    if (!BerryAppModeNoChrome() && !g_chrome)
       g_chrome = std::make_unique<BerryBrowserChrome>(rw, rh);
     g_url_bar_editing = false;
   }
-
-  platform_->aura->ResizeWindow(initial_size);
-
-  shell_data.window = platform_->aura->host()->window();
 }
 
 gfx::NativeWindow ShellPlatformDelegate::GetNativeWindow(Shell* shell) {
@@ -361,11 +594,21 @@ gfx::NativeWindow ShellPlatformDelegate::GetNativeWindow(Shell* shell) {
 
 void ShellPlatformDelegate::CleanUp(Shell* shell) {
   DCHECK(base::Contains(shell_data_map_, shell));
+  auto it = shell_data_map_.find(shell);
+  if (it != shell_data_map_.end() && !it->second.group.empty())
+    g_group_to_shell.erase(it->second.group);
   if (g_active_shell == shell) {
     base::AutoLock lock(g_chrome_lock);
     g_active_shell = nullptr;
-    g_chrome.reset();
     g_url_bar_editing = false;
+    for (Shell* s : Shell::windows()) {
+      if (s != shell) {
+        g_active_shell = s;
+        break;
+      }
+    }
+    if (!g_active_shell)
+      g_chrome.reset();
   }
   shell_data_map_.erase(shell);
 }
@@ -376,7 +619,6 @@ void ShellPlatformDelegate::SetContents(Shell* shell) {
   if (!parent->Contains(content))
     parent->AddChild(content);
 
-  content->Show();
   {
     base::AutoLock lock(g_chrome_lock);
     auto* rwhv = shell->web_contents()->GetRenderWidgetHostView();
@@ -384,7 +626,6 @@ void ShellPlatformDelegate::SetContents(Shell* shell) {
       if (g_chrome) {
         rwhv->SetSize(g_chrome->GetWebContentBounds().size());
       } else {
-        // App mode (no toolbar): give the page the full render window.
         int rw = 0, rh = 0;
         ui::QnxScreenGetRenderSize(&rw, &rh);
         if (rw > 0 && rh > 0)
@@ -392,8 +633,7 @@ void ShellPlatformDelegate::SetContents(Shell* shell) {
       }
     }
   }
-  shell->web_contents()->Focus();
-  RepaintChrome();
+  BerryShowShell(shell);
 }
 
 void ShellPlatformDelegate::ResizeWebContent(Shell* shell,
@@ -414,7 +654,7 @@ void ShellPlatformDelegate::EnableUIControl(Shell* shell,
                                             UIControl control,
                                             bool is_enabled) {
   base::AutoLock lock(g_chrome_lock);
-  if (!g_chrome)
+  if (!g_chrome || shell != g_active_shell)
     return;
   if (control == BACK_BUTTON) {
     if (is_enabled == g_last_can_back)
@@ -434,7 +674,7 @@ void ShellPlatformDelegate::EnableUIControl(Shell* shell,
 
 void ShellPlatformDelegate::SetAddressBarURL(Shell* shell, const GURL& url) {
   base::AutoLock lock(g_chrome_lock);
-  if (!g_chrome || g_url_bar_editing)
+  if (!g_chrome || g_url_bar_editing || shell != g_active_shell)
     return;
   const std::string spec = url.spec();
   if (spec == g_last_chrome_url)
@@ -456,7 +696,7 @@ void ShellPlatformDelegate::SetAddressBarURL(Shell* shell, const GURL& url) {
 
 void ShellPlatformDelegate::SetIsLoading(Shell* shell, bool loading) {
   base::AutoLock lock(g_chrome_lock);
-  if (!g_chrome)
+  if (!g_chrome || shell != g_active_shell)
     return;
   if (loading == g_last_loading)
     return;
