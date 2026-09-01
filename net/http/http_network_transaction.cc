@@ -1716,6 +1716,13 @@ HttpNetworkTransaction::GetRetryReasonForIOError(int error) {
       return RetryReason::kQuicGoawayRequestCanBeRetried;
     case ERR_QUIC_PROTOCOL_ERROR:
       return RetryReason::kQuicProtocolError;
+#if BUILDFLAG(IS_QNX)
+    // QNX/BoringSSL intermittently surfaces ERR_SSL_BAD_RECORD_MAC_ALERT on
+    // reused HTTP/2 connections (e.g. api.x.com GraphQL POST). A fresh TCP+TLS
+    // handshake usually succeeds; treat like a poisoned keep-alive socket.
+    case ERR_SSL_BAD_RECORD_MAC_ALERT:
+      return RetryReason::kConnectionReset;
+#endif
   }
   return absl::nullopt;
 }

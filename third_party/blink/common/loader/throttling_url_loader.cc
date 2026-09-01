@@ -618,9 +618,12 @@ void ThrottlingURLLoader::StartNow() {
   DCHECK(start_info_->url_loader_factory);
   QNX_TRACE_MSG("QNX:TUL:preCreateLoader\n");
 #if defined(__QNX__) || defined(__QNXNTO__)
-  QNX_NAV_LOG_FMT("BerryNav: TULSend url=\"%s\" abs=%lld\n",
-                  start_info_->url_request.url.spec().substr(0, 80).c_str(),
-                  base::QnxNowMs());
+  {
+    const std::string url_log =
+        start_info_->url_request.url.spec().substr(0, 110);
+    QNX_NAV_LOG_FMT("BerryNav: TULSend url=\"%s\" abs=%lld\n",
+                    url_log.c_str(), base::QnxNowMs());
+  }
 #endif
   start_info_->url_loader_factory->CreateLoaderAndStart(
       url_loader_.BindNewPipeAndPassReceiver(start_info_->task_runner),

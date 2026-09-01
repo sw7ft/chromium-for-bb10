@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/functional/bind.h"
+#include "build/build_config.h"
 #include "services/device/geolocation/geolocation_context.h"
 #include "services/device/public/cpp/geolocation/geoposition.h"
 
@@ -84,13 +85,23 @@ void GeolocationImpl::QueryNextPosition(QueryNextPositionCallback callback) {
 }
 
 void GeolocationImpl::SetOverride(const mojom::GeopositionResult& result) {
-  if (!position_callback_.is_null()) {
-    if (!current_result_) {
-      current_result_ =
-          mojom::GeopositionResult::NewError(mojom::GeopositionError::New(
-              mojom::GeopositionErrorCode::kPositionUnavailable,
-              /*error_message=*/"", /*error_technical=*/""));
-    }
+  // When applying a valid fixed position, do not synthesize PositionUnavailable
+  // for an in-flight QueryNextPosition callback first — the client receives
+  // that error via ReportCurrentPosition (which clears the callback) and never
+  // sees the override (Google Maps then centers at lat=-90).
+#if BUILDFLAG(IS_QNX)
+  const bool valid_position_override =
+      result.is_position() &&
+      ValidateGeoposition(*result.get_position());
+#else
+  const bool valid_position_override = false;
+#endif
+  if (!position_callback_.is_null() && !current_result_ &&
+      !valid_position_override) {
+    current_result_ =
+        mojom::GeopositionResult::NewError(mojom::GeopositionError::New(
+            mojom::GeopositionErrorCode::kPositionUnavailable,
+            /*error_message=*/"", /*error_technical=*/""));
     ReportCurrentPosition();
   }
 

@@ -5,6 +5,11 @@
 import("//build/config/chromecast_build.gni")
 import("//third_party/webrtc/webrtc.gni")
 
+_pgo_disable = []
+if (is_qnx && chrome_pgo_phase == 1) {
+  _pgo_disable = [ "//build/config/compiler/pgo:pgo_no_instrumentation" ]
+}
+
 if (is_android) {
   import("//build/config/android/rules.gni")
 }
@@ -163,7 +168,7 @@ if (is_castos || is_cast_android || is_nacl) {
 }
 
 component("webrtc_component") {
-  configs += webrtc_configs
+  configs += webrtc_configs + _pgo_disable
   public_configs = webrtc_public_configs
   public_deps = webrtc_public_deps
 }
@@ -177,7 +182,7 @@ source_set("init_webrtc") {
   configs += [
     "//third_party/webrtc:common_config",
     "//third_party/webrtc:library_impl_config",
-  ]
+  ] + _pgo_disable
   public_configs = [
     "//third_party/webrtc:common_inherited_config",
 
@@ -238,7 +243,7 @@ source_set("task_queue_factory") {
     "low_precision_timer.cc",
     "low_precision_timer.h",
   ]
-  configs += [ "//third_party/webrtc:library_impl_config" ]
+  configs += [ "//third_party/webrtc:library_impl_config" ] + _pgo_disable
   deps = [
     "//base",
     "//third_party/webrtc/api:location",
@@ -296,7 +301,7 @@ source_set("bridge_ice_controller") {
     "p2p/base/ice_switch_proposal.cc",
     "p2p/base/ice_switch_proposal.h",
   ]
-  configs += [ "//third_party/webrtc:library_impl_config" ]
+  configs += [ "//third_party/webrtc:library_impl_config" ] + _pgo_disable
   deps = [
     "//base",
     "//third_party/abseil-cpp:absl",

@@ -18,6 +18,7 @@ import("//build/config/chromecast_build.gni")
 import("//build/config/chromeos/ui_mode.gni")
 import("//build/config/features.gni")
 import("//build/config/nacl/config.gni")
+import("//build/config/compiler/pgo/pgo.gni")
 import("//build/toolchain/kythe.gni")
 import("//components/nacl/features.gni")
 import("//third_party/jinja2/jinja2.gni")
@@ -1028,6 +1029,9 @@ template("mojom") {
       testonly = invoker.testonly
     }
     configs += [ "//build/config/compiler:wexit_time_destructors" ]
+    if (is_qnx && chrome_pgo_phase == 1) {
+      configs += [ "//build/config/compiler/pgo:pgo_no_instrumentation" ]
+    }
     deps = []
     public_deps = []
     if (output_file_base_paths != []) {
@@ -1601,6 +1605,9 @@ template("mojom") {
       defines = export_defines
       configs += [ "//build/config/compiler:wexit_time_destructors" ]
       configs += extra_configs
+      if (is_qnx && chrome_pgo_phase == 1) {
+        configs += [ "//build/config/compiler/pgo:pgo_no_instrumentation" ]
+      }
       if (output_file_base_paths != []) {
         sources = []
         foreach(base_path, output_file_base_paths) {

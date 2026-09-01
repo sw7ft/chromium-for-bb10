@@ -882,12 +882,47 @@ std::string BerryJsStringEscape(const std::string& input) {
   return out;
 }
 
+// youtube.com or the cookie-less embed domain (youtube-nocookie.com does NOT
+// contain the substring "youtube.com", so it needs its own check).
+bool BerryIsYoutubeHost(const GURL& url) {
+  if (!url.is_valid())
+    return false;
+  const std::string& host = url.host();
+  return host.find("youtube.com") != std::string::npos ||
+         host.find("youtube-nocookie.com") != std::string::npos;
+}
+
+// Video id from a path-style URL: /embed/<id> (third-party iframes, e.g. Bing
+// Videos), /shorts/<id> (shared links), /v/<id> (legacy embeds). Returns empty
+// for playlist pseudo-ids ("videoseries") and implausible segments.
+std::string BerryExtractYoutubeVideoIdFromPath(const GURL& url) {
+  static const char* kPrefixes[] = {"/embed/", "/shorts/", "/v/"};
+  const std::string& path = url.path();
+  for (const char* prefix : kPrefixes) {
+    if (!base::StartsWith(path, prefix, base::CompareCase::SENSITIVE))
+      continue;
+    std::string id = path.substr(strlen(prefix));
+    const size_t slash = id.find('/');
+    if (slash != std::string::npos)
+      id = id.substr(0, slash);
+    if (id.empty() || id.size() > 20 || id == "videoseries")
+      return std::string();
+    return id;
+  }
+  return std::string();
+}
+
 std::string BerryExtractYoutubeVideoId(const GURL& url) {
   if (!url.is_valid())
     return std::string();
   for (net::QueryIterator it(url); !it.IsAtEnd(); it.Advance()) {
     if (it.GetKey() == "v" && !it.GetValue().empty())
       return std::string(it.GetValue());
+  }
+  {
+    const std::string path_id = BerryExtractYoutubeVideoIdFromPath(url);
+    if (!path_id.empty())
+      return path_id;
   }
   const std::string spec = url.spec();
   static const char* kNeedles[] = {"watch?v=", "?v=", "&v="};
@@ -936,15 +971,23 @@ bool BerryWatchUrlRequestsFullPage(const GURL& url) {
 
 bool BerryShouldUseYoutubeWatchShim(const net::URLRequest* req,
                                     int resource_type) {
-  if (resource_type != 0 || !req)
+  // resource_type: 0 = main frame, 1 = subframe. /watch stays main-frame-only
+  // (subframe watch loads are YouTube-internal). Path-style ids (/embed,
+  // /shorts, /v) are shimmed in BOTH: third-party sites (Bing Videos, news,
+  // blogs) load /embed/<id> iframes whose real YouTube player dies on this
+  // browser ("An error occurred").
+  if (!req || (resource_type != 0 && resource_type != 1))
     return false;
   if (access("/accounts/1000/shared/misc/berry-youtube-shim.disable", F_OK) ==
       0)
     return false;
   const GURL& url = req->url();
-  if (!url.is_valid() || url.host().find("youtube.com") == std::string::npos)
+  if (!BerryIsYoutubeHost(url))
     return false;
-  if (url.path() != "/watch" && url.path() != "/watch/")
+  const bool is_watch_path =
+      url.path() == "/watch" || url.path() == "/watch/";
+  const bool is_path_id = !BerryExtractYoutubeVideoIdFromPath(url).empty();
+  if (!is_path_id && (!is_watch_path || resource_type != 0))
     return false;
   if (BerryWatchUrlRequestsFullPage(url))
     return false;
@@ -1011,6 +1054,30 @@ bool BerryUrlIsGoogleSorryBounceTarget(const GURL& url) {
               F_OK) == 0)
     return false;
   return BerryUrlIsGoogleSorryPath(url);
+}
+
+// youtube.com/ home feed: the kevlar desktop app half-loads on this browser
+// (broken skeleton / error). Body-swap a local landing page that feeds the
+// working search shim instead. berry_full=1 escapes to the real site.
+bool BerryUrlIsYoutubeHomeBounceTarget(const GURL& url) {
+  if (!BerryIsYoutubeHost(url))
+    return false;
+  const std::string& path = url.path();
+  if (path != "/" && !path.empty())
+    return false;
+  if (access("/accounts/1000/shared/misc/berry-youtube-shim.disable", F_OK) ==
+      0)
+    return false;
+  if (BerryWatchUrlRequestsFullPage(url))
+    return false;
+  return true;
+}
+
+bool BerryShouldUseYoutubeHomeBounce(const net::URLRequest* req,
+                                     int resource_type) {
+  if (resource_type != 0 || !req)
+    return false;
+  return BerryUrlIsYoutubeHomeBounceTarget(req->url());
 }
 
 std::string BerryExtractGoogleSearchQueryFromSorryUrl(const GURL& url) {
@@ -1084,9 +1151,11 @@ void BerryCancelWatchShimJsAliveTripwire() {
 }
 
 bool BerryUrlIsWatchShimTarget(const GURL& url) {
-  if (!url.is_valid() || url.host().find("youtube.com") == std::string::npos)
+  if (!BerryIsYoutubeHost(url))
     return false;
-  if (url.path() != "/watch" && url.path() != "/watch/")
+  const bool is_watch_path =
+      url.path() == "/watch" || url.path() == "/watch/";
+  if (!is_watch_path && BerryExtractYoutubeVideoIdFromPath(url).empty())
     return false;
   if (access("/accounts/1000/shared/misc/berry-youtube-shim.disable", F_OK) == 0)
     return false;
@@ -1111,6 +1180,9 @@ void BerryScrubWatchShimResponseHeaders(mojom::URLResponseHead* response,
       "Transfer-Encoding",
       "Cross-Origin-Opener-Policy",
       "Cross-Origin-Embedder-Policy",
+      // Shim HTML may be served into third-party iframes (/embed, /shorts);
+      // YouTube's SAMEORIGIN on watch/shorts would blank the frame.
+      "X-Frame-Options",
   };
   for (const char* name : kRemove)
     response->headers->RemoveHeader(name);
@@ -1251,6 +1323,37 @@ std::string BerryBuildSorryBounceHtml(const GURL& sorry_url,
          google_url +
          std::string("\">Try Google again</a>"
                      "</div></body></html>");
+}
+
+std::string BerryBuildYoutubeHomeBounceHtml() {
+  return std::string(
+      "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+      "<meta name=\"viewport\" content=\"width=device-width\">"
+      "<title>YouTube</title>"
+      "<style>"
+      "body{font-family:sans-serif;background:#111;color:#eee;margin:0;"
+      "padding:24px 16px;max-width:640px}"
+      "h1{font-size:1.4em;margin:0 0 4px}"
+      "h1 .red{color:#f33}"
+      "p{color:#888;font-size:0.9em;margin:0 0 18px;line-height:1.4}"
+      "form{display:flex;gap:8px;margin:0 0 14px}"
+      "input{flex:1;padding:13px 14px;border-radius:10px;border:1px solid "
+      "#444;background:#1c1c1c;color:#eee;font-size:1.05em}"
+      "button{padding:13px 18px;border-radius:10px;border:0;background:#f33;"
+      "color:#fff;font-size:1.05em;font-weight:700}"
+      "a.full{color:#58a6ff;font-size:0.85em;text-decoration:none}"
+      "</style></head><body>"
+      "<h1><span class=\"red\">&#9654;</span> YouTube</h1>"
+      "<p>Search videos below &mdash; results and playback use the fast "
+      "built-in player. The full YouTube site doesn't work well on this "
+      "browser.</p>"
+      "<form action=\"https://www.youtube.com/results\" method=\"get\">"
+      "<input name=\"search_query\" placeholder=\"Search YouTube\" "
+      "autofocus autocomplete=\"off\">"
+      "<button type=\"submit\">Go</button></form>"
+      "<a class=\"full\" href=\"https://www.youtube.com/?berry_full=1\">"
+      "Load full YouTube site anyway</a>"
+      "</body></html>");
 }
 #endif
 
@@ -2164,11 +2267,15 @@ void URLLoader::ScheduleStart() {
           !BerryUrlIsGoogleSorryBounceTarget(url_request_->url()))
         BerryCancelWatchShimJsAliveTripwire();
     }
+    const char* url_log_ptr = "null";
+    std::string url_log_storage;
+    if (url_request_) {
+      url_log_storage = url_request_->url().spec().substr(0, 120);
+      url_log_ptr = url_log_storage.c_str();
+    }
     QNX_NAV_LOG_FMT(
         "BerryNav: URLReqStart loader=%p url=\"%s\" ms=%lld abs=%lld\n",
-        this,
-        url_request_ ? url_request_->url().spec().substr(0, 120).c_str()
-                       : "null",
+        this, url_log_ptr,
         url_request_ && url_request_->creation_time().is_null() == false
             ? static_cast<long long>(
                   (base::TimeTicks::Now() - url_request_->creation_time())
@@ -2205,6 +2312,9 @@ void URLLoader::ScheduleStart() {
     } else if (BerryShouldUseGoogleSorryBounce(url_request_.get(),
                                                resource_type_)) {
       QnxPrepareGoogleSorryBounce();
+    } else if (BerryShouldUseYoutubeHomeBounce(url_request_.get(),
+                                               resource_type_)) {
+      QnxPrepareYoutubeHomeBounce();
     }
 #endif
     QNX_TRACE_MSG("QNX:UL:Starting!\n");
@@ -3056,6 +3166,22 @@ void URLLoader::QnxPrepareGoogleSorryBounce() {
                   qnx_youtube_watch_shim_html_.size());
 }
 
+void URLLoader::QnxPrepareYoutubeHomeBounce() {
+  // Reuses the sorry-bounce plumbing (buffer original body, force 200, swap
+  // in local HTML) with a different page.
+  qnx_google_sorry_bounce_ = true;
+  qnx_youtube_watch_shim_active_ = true;
+  qnx_youtube_watch_shim_buffer_ = true;
+  qnx_watch_shim_response_ready_ = false;
+  qnx_watch_shim_scrubbed_ = false;
+  qnx_youtube_watch_page_sniff_.clear();
+  qnx_youtube_video_id_.clear();
+  qnx_youtube_watch_shim_html_ = BerryBuildYoutubeHomeBounceHtml();
+  QNX_NAV_LOG_FMT(
+      "BerryNav: YtHomeBounce start loader=%p url=\"%.80s\" (body-swap)\n",
+      this, url_request_->url().spec().c_str());
+}
+
 void URLLoader::QnxFlushWatchShimBody() {
   if (qnx_youtube_watch_shim_html_.empty())
     return;
@@ -3714,9 +3840,15 @@ void URLLoader::NotifyCompleted(int error_code) {
                                spec.find("/client-web/") != std::string::npos ||
                                spec.find("x.com") != std::string::npos;
       const bool is_googlevideo = spec.find("googlevideo.com") != std::string::npos;
-      const bool is_maps_tile = spec.find("khms") != std::string::npos ||
-                                spec.find("maps/vt") != std::string::npos ||
-                                spec.find("maps.googleapis.com") != std::string::npos;
+      const bool is_maps_tile =
+          spec.find("khms") != std::string::npos ||
+          spec.find("maps/vt") != std::string::npos ||
+          spec.find("maps.googleapis.com/maps/vt") != std::string::npos ||
+          spec.find("mt0.google.com") != std::string::npos ||
+          spec.find("mt1.google.com") != std::string::npos ||
+          spec.find("google.com/maps/vt") != std::string::npos ||
+          (spec.find("maps.googleapis.com") != std::string::npos &&
+           spec.find("/maps/api/js") != std::string::npos);
       if ((is_js && is_spa_host) || error_code != 0 || is_googlevideo ||
           is_maps_tile) {
         std::string enc("(none)");

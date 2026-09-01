@@ -14,6 +14,7 @@
 #include "components/permissions/permission_util.h"
 #include "content/public/browser/permission_controller.h"
 #include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
 #include "content/shell/common/shell_switches.h"
 #include "media/base/media_switches.h"
@@ -101,8 +102,11 @@ void ShellPermissionManager::RequestPermissions(
   std::vector<blink::mojom::PermissionStatus> result;
   for (const auto& permission : request_description.permissions) {
 #if BUILDFLAG(IS_QNX)
-    if (permission == PermissionType::GEOLOCATION)
+    if (permission == PermissionType::GEOLOCATION) {
       BerryOptIntoGeolocationServices();
+      if (WebContents* wc = WebContents::FromRenderFrameHost(render_frame_host))
+        BerryApplyFixedGeolocationOverride(wc);
+    }
 #endif
     result.push_back(IsAllowlistedPermissionType(permission)
                          ? blink::mojom::PermissionStatus::GRANTED
@@ -131,8 +135,11 @@ void ShellPermissionManager::RequestPermissionsFromCurrentDocument(
   std::vector<blink::mojom::PermissionStatus> result;
   for (const auto& permission : request_description.permissions) {
 #if BUILDFLAG(IS_QNX)
-    if (permission == PermissionType::GEOLOCATION)
+    if (permission == PermissionType::GEOLOCATION) {
       BerryOptIntoGeolocationServices();
+      if (WebContents* wc = WebContents::FromRenderFrameHost(render_frame_host))
+        BerryApplyFixedGeolocationOverride(wc);
+    }
 #endif
     result.push_back(IsAllowlistedPermissionType(permission)
                          ? blink::mojom::PermissionStatus::GRANTED

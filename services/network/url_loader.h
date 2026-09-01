@@ -522,6 +522,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) URLLoader
   void QnxPrepareYoutubeWatchShim();
   void QnxPrepareYoutubeSearchShim();
   void QnxPrepareGoogleSorryBounce();
+  void QnxPrepareYoutubeHomeBounce();
   bool QnxWriteBodyToNewDataPipe(const std::string& body, const char* log_tag);
   void QnxFlushBufferedYoutubePlayerBody();
   void QnxFlushWatchShimBody();

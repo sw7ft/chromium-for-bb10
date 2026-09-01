@@ -306,6 +306,10 @@ bool DisplayScheduler::OnBeginFrame(const BeginFrameArgs& args) {
       s_max_bf_delta_ms = 0;
     }
   }
+  /* NOTE: the passive "QNX:BF peak" stall log used to live here, but gaps
+   * between BeginFrames also cover idle pages and background suspension, so it
+   * reported bogus multi-hour "stalls". Replaced by the renderer main-thread
+   * heartbeat in render_thread_impl.cc ("QNX:MT stall"). */
 #endif
   QNX_TRACE_FMT("QNX:DS:onbf type=%d needs_draw=%d\n", (int)args.type,
                 (int)needs_draw_);

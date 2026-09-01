@@ -51,7 +51,8 @@ The launcher logs what it applied to `/accounts/1000/shared/misc/berry-kbd.log`
 | `berry-noimages.enable` | Block all images (no fetch/decode) — big load + RAM win | `--blink-settings=imagesEnabled=false` |
 | `berry-nojs.enable` | Disable JavaScript entirely | `--blink-settings=scriptEnabled=false` |
 | `berry-adblock.disable` | Turn **off** the built-in ad/tracker blocker (on by default) | (env `BERRY_ADBLOCK=0`) |
-| `berry-block.enable` | Blackhole WhatsApp/Meta telemetry hosts | `--host-resolver-rules=...` |
+| `berry-block.disable` | Turn **off** telemetry host blocklist (on by default) | `--host-resolver-rules=...` |
+| `berry-privacy.enable` | Re-enable FedCM/privacy-sandbox APIs (disabled by default) | `--disable-features=...` (inverted) |
 
 ## Appearance
 

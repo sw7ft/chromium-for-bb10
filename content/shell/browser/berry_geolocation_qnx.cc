@@ -10,15 +10,50 @@
 #include "base/qnx_trace.h"
 #include "base/strings/string_util.h"
 #include "base/task/single_thread_task_runner.h"
+#include "base/time/time.h"
+#include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/device_service.h"
 #include "content/public/browser/web_contents.h"
 #include "mojo/public/cpp/bindings/remote.h"
+#include "services/device/public/cpp/geolocation/geoposition.h"
 #include "services/device/public/mojom/geolocation_control.mojom.h"
+#include "services/device/public/mojom/geoposition.mojom.h"
 
 namespace content {
 
 namespace {
+
+device::mojom::GeopositionResultPtr BerryMakeVancouverPosition() {
+  auto position = device::mojom::Geoposition::New();
+  position->latitude = kBerryDefaultLatitude;
+  position->longitude = kBerryDefaultLongitude;
+  position->altitude = 0.0;
+  position->accuracy = 100.0;
+  position->altitude_accuracy = 0.0;
+  position->heading = 0.0;
+  position->speed = 0.0;
+  position->timestamp = base::Time::Now();
+  return device::mojom::GeopositionResult::NewPosition(std::move(position));
+}
+
+void BerryInjectFixedGeolocationOnContext(WebContents* web_contents) {
+  if (!web_contents)
+    return;
+  auto* context =
+      static_cast<WebContentsImpl*>(web_contents)->GetGeolocationContext();
+  if (!context)
+    return;
+  auto result = BerryMakeVancouverPosition();
+  if (!result->is_position() ||
+      !device::ValidateGeoposition(*result->get_position())) {
+    return;
+  }
+  context->SetOverride(std::move(result));
+  QNX_NAV_LOG_FMT(
+      "BerryNav: GeoContextOverride lat=%.5f lon=%.5f\n",
+      kBerryDefaultLatitude, kBerryDefaultLongitude);
+}
 
 void BerryOptIntoGeolocationServicesOnce() {
   static bool opted_in = false;
@@ -30,7 +65,7 @@ void BerryOptIntoGeolocationServicesOnce() {
   GetDeviceService().BindGeolocationControl(
       geolocation_control.BindNewPipeAndPassReceiver());
   geolocation_control->UserDidOptIntoLocationServices();
-  QNX_TRACE_MSG("QNX:Geo:UserDidOptIntoLocationServices\n");
+  QNX_NAV_LOG_FMT("%s", "BerryNav: GeoOptIn UserDidOptIntoLocationServices\n");
 }
 
 }  // namespace
@@ -57,18 +92,29 @@ bool BerryIsGoogleMapsUrl(const GURL& url) {
   return false;
 }
 
-void BerryApplyFixedGeolocationOverride(WebContents* web_contents) {
-  // Fixed position is supplied by ShellFixedLocationProvider +
-  // UserDidOptIntoLocationServices. Do not use GeolocationContext::SetOverride:
-  // it can deliver PositionUnavailable to an in-flight getCurrentPosition
-  // before the override, which leaves Maps Lite stuck loading forever.
+void BerryPreseedGeolocationContext(WebContents* web_contents) {
   BerryOptIntoGeolocationServices();
+  BerryInjectFixedGeolocationOnContext(web_contents);
+}
+
+void BerryApplyFixedGeolocationOverride(WebContents* web_contents) {
+  BerryPreseedGeolocationContext(web_contents);
 }
 
 void BerryScheduleMapsGeolocationRetries(WebContents* web_contents) {
-  for (int delay_ms : {500, 2000, 5000}) {
+  static constexpr int kRetryDelaysMs[] = {50,  100,  250,  500,
+                                           1000, 2000, 5000};
+  for (int delay_ms : kRetryDelaysMs) {
     GetUIThreadTaskRunner({})->PostDelayedTask(
-        FROM_HERE, base::BindOnce(&BerryOptIntoGeolocationServicesOnce),
+        FROM_HERE,
+        base::BindOnce(
+            [](base::WeakPtr<WebContents> wc) {
+              if (!wc)
+                return;
+              BerryOptIntoGeolocationServicesOnce();
+              BerryInjectFixedGeolocationOnContext(wc.get());
+            },
+            web_contents->GetWeakPtr()),
         base::Milliseconds(delay_ms));
   }
 }

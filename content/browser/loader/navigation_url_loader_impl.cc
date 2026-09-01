@@ -736,9 +736,10 @@ void NavigationURLLoaderImpl::FallbackToNonInterceptedRequest(
     response_loader_receiver_.reset();
 #if defined(__QNX__) || defined(__QNXNTO__)
     if (request_info_->common_params->navigation_start.is_null() == false) {
+      const std::string url_log = url_.spec().substr(0, 120);
       QNX_NAV_LOG_FMT(
           "BerryNav: FactoryStart url=\"%s\" ms=%lld abs=%lld\n",
-          url_.spec().substr(0, 120).c_str(),
+          url_log.c_str(),
           static_cast<long long>((base::TimeTicks::Now() -
                                   request_info_->common_params->navigation_start)
                                      .InMilliseconds()),
@@ -871,9 +872,10 @@ void NavigationURLLoaderImpl::OnReceiveResponse(
 #if defined(__QNX__)
   QNX_TRACE_MSG("QNX:NULI:OnRecvResp!\n");
   if (request_info_->common_params->navigation_start.is_null() == false) {
+    const std::string url_log = url_.spec().substr(0, 120);
     QNX_NAV_LOG_FMT(
         "BerryNav: OnRecvResp url=\"%s\" ms=%lld abs=%lld\n",
-        url_.spec().substr(0, 120).c_str(),
+        url_log.c_str(),
         static_cast<long long>((base::TimeTicks::Now() -
                                 request_info_->common_params->navigation_start)
                                    .InMilliseconds()),

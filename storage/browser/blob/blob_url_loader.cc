@@ -63,8 +63,12 @@ scoped_refptr<net::HttpResponseHeaders> GenerateHeaders(
       headers->SetHeader(net::HttpResponseHeaders::kContentRange,
                          content_range_header);
     }
-    headers->SetHeader(net::HttpRequestHeaders::kContentType,
-                       blob_handle->content_type());
+    // Blob spec default when type is empty; avoid passing dangling/empty refs
+    // into header assembly on QNX libstdc++ (COW string paths).
+    std::string content_type = blob_handle->content_type();
+    if (content_type.empty())
+      content_type = "application/octet-stream";
+    headers->SetHeader(net::HttpRequestHeaders::kContentType, content_type);
     if (!blob_handle->content_disposition().empty()) {
       headers->SetHeader("Content-Disposition",
                          blob_handle->content_disposition());

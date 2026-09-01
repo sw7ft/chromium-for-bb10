@@ -10,6 +10,7 @@ import("//build/config/chromeos/args.gni")
 import("//build/config/chromeos/ui_mode.gni")
 import("//build/config/clang/clang.gni")
 import("//build/config/compiler/compiler.gni")
+import("//build/config/compiler/pgo/pgo.gni")
 import("//build/config/coverage/coverage.gni")
 import("//build/config/dcheck_always_on.gni")
 import("//build/config/gclient_args.gni")
@@ -571,7 +572,12 @@ config("compiler") {
     # disabling this (https://bugs.llvm.org/show_bug.cgi?id=18538#c13),
     # but for now it looks like our build might rely on it
     # (https://crbug.com/829795).
-    cflags += [ "-fmerge-all-constants" ]
+    #
+    # QNX PGI: -fmerge-all-constants creates duplicate .L__profd__ COMDATs that
+    # bfd/lld discard while __llvm_profile_init still references them.
+    if (!(is_qnx && chrome_pgo_phase == 1)) {
+      cflags += [ "-fmerge-all-constants" ]
+    }
   }
 
   if (use_lld) {
@@ -2318,28 +2324,35 @@ if (is_win) {
       ]
     }
   } else if (current_os != "aix" && current_os != "zos") {
-    # Non-Mac Posix flags.
     # Aix does not support these.
 
-    common_optimize_on_cflags += [
-      # Put data and code in their own sections, so that unused symbols
-      # can be removed at link time with --gc-sections.
-      "-fdata-sections",
-      "-ffunction-sections",
-    ]
-    if ((!is_nacl || is_nacl_saigo) && is_clang) {
-      # We don't care about unique section names, this makes object files a bit
-      # smaller.
-      common_optimize_on_cflags += [ "-fno-unique-section-names" ]
-    }
+    # PGI (-fprofile-generate) breaks when profile sections are GC'd at link.
+    if (chrome_pgo_phase != 1) {
+      common_optimize_on_cflags += [
+        # Put data and code in their own sections, so that unused symbols
+        # can be removed at link time with --gc-sections.
+        "-fdata-sections",
+        "-ffunction-sections",
+      ]
+      if ((!is_nacl || is_nacl_saigo) && is_clang) {
+        # We don't care about unique section names, this makes object files a bit
+        # smaller.
+        common_optimize_on_cflags += [ "-fno-unique-section-names" ]
+      }
 
-    common_optimize_on_ldflags += [
-      # Specifically tell the linker to perform optimizations.
-      # See http://lwn.net/Articles/192624/ .
-      # -O2 enables string tail merge optimization in gold and lld.
-      "-Wl,-O2",
-      "-Wl,--gc-sections",
-    ]
+      common_optimize_on_ldflags += [
+        # Specifically tell the linker to perform optimizations.
+        # See http://lwn.net/Articles/192624/ .
+        # -O2 enables string tail merge optimization in gold and lld.
+        "-Wl,-O2",
+        "-Wl,--gc-sections",
+      ]
+    } else {
+      # Skip linker ICF/GC during PGI; lld (used by QNX g++) drops .profd sections.
+      if (chrome_pgo_phase != 1) {
+        common_optimize_on_ldflags += [ "-Wl,-O2" ]
+      }
+    }
   }
 
   # We cannot rely on errno being set after math functions,

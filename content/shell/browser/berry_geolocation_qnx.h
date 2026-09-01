@@ -20,6 +20,8 @@ constexpr double kBerryDefaultLongitude = -123.123904;
 
 void BerryOptIntoGeolocationServices();
 bool BerryIsGoogleMapsUrl(const GURL& url);
+// Pre-seed GeolocationContext override before any page binds geolocation.
+void BerryPreseedGeolocationContext(WebContents* web_contents);
 void BerryApplyFixedGeolocationOverride(WebContents* web_contents);
 void BerryScheduleMapsGeolocationRetries(WebContents* web_contents);
 

@@ -1,145 +1,374 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://web.whatsapp.com">
+<link rel="preconnect" href="https://www.messenger.com">
+<link rel="preconnect" href="https://i.ytimg.com">
+<link rel="dns-prefetch" href="https://www.google.com">
 <title>Berry Browser</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: rgba(0,0,0,0); }
-  html, body { margin: 0; padding: 0; min-height: 100%;
-    font-family: -apple-system, "Slate Pro", Arial, sans-serif;
+  html, body {
+    margin: 0; padding: 0; min-height: 100%;
+    font-family: -apple-system, "Slate Pro", "Segoe UI", Arial, sans-serif;
     color: #e8eef5;
-    background: radial-gradient(1200px 600px at 50% -10%, #1b2942 0%, #0e131a 60%);
+    background:
+      radial-gradient(900px 480px at 50% -8%, rgba(74, 163, 255, 0.14) 0%, transparent 55%),
+      linear-gradient(180deg, #121820 0%, #0a0e13 100%);
   }
-  .wrap { max-width: 720px; margin: 0 auto; padding: 22px 18px 40px; }
+  .wrap { max-width: 700px; margin: 0 auto; padding: 18px 16px 32px; }
 
-  .bar { display: flex; align-items: center; gap: 10px; margin-bottom: 22px; }
-  .brand { font-size: 30px; font-weight: 800; letter-spacing: .3px; }
-  .brand span { color: #4aa3ff; }
-  .bar .spacer { flex: 1; }
-  .icobtn { display: inline-flex; align-items: center; justify-content: center;
-    width: 48px; height: 48px; border-radius: 12px; font-size: 24px;
-    text-decoration: none; color: #cdd8e4; background: #18222e;
-    border: 1px solid #27333f; }
-  .icobtn:active { background: #223040; }
+  .top {
+    display: flex; align-items: center; gap: 14px;
+    margin-bottom: 24px;
+  }
+  .profile {
+    width: 46px; height: 46px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; font-weight: 800; color: #fff;
+    background: #1a3a6e;
+    border: 2px solid rgba(255,255,255,0.1);
+  }
+  .headline { flex: 1; min-width: 0; }
+  .headline h1 {
+    margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.02em;
+  }
+  .headline h1 span { color: #4aa3ff; }
+  .greeting { margin: 3px 0 0; font-size: 13px; color: #6b7d90; }
+  .fav-btn {
+    flex-shrink: 0; padding: 10px 14px; border-radius: 12px;
+    font-size: 14px; font-weight: 700; color: #b8cce0;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    cursor: pointer;
+  }
+  .fav-btn:active { background: rgba(255,255,255,0.12); }
 
-  form { display: flex; gap: 10px; margin-bottom: 8px; }
-  #omni { flex: 1; font-size: 26px; padding: 17px 18px; border-radius: 14px;
-    border: 2px solid #2b3744; background: #0b0f14; color: #fff; outline: none; }
-  #omni:focus { border-color: #4aa3ff; }
-  #go { font-size: 24px; padding: 0 26px; border: none; border-radius: 14px;
-    background: #de5833; color: #fff; font-weight: 800; }
-  .hint { text-align: center; color: #5f6e7d; font-size: 14px; margin: 6px 0 14px; }
+  /* unified search bar */
+  .search-wrap { margin-bottom: 26px; }
+  .search-bar {
+    display: flex; align-items: stretch;
+    border: 2px solid rgba(255,255,255,0.1);
+    border-radius: 14px; overflow: hidden;
+    background: #0c1018;
+  }
+  .search-bar:focus-within { border-color: #4aa3ff; }
+  #omni {
+    flex: 1; min-width: 0; border: none; outline: none;
+    font-size: 18px; padding: 16px 18px;
+    background: transparent; color: #fff;
+  }
+  #omni::placeholder { color: #5a6a7a; }
+  #go {
+    border: none; border-left: 1px solid rgba(255,255,255,0.12);
+    padding: 0 22px; font-size: 16px; font-weight: 600;
+    background: #1a73e8; color: #fff; cursor: pointer;
+    white-space: nowrap;
+  }
+  #go:active { background: #1558b0; }
+  .search-hint { margin: 8px 0 0 4px; font-size: 12px; color: #506070; }
 
-  .auth-row { display: grid; grid-template-columns: 1fr 1fr; gap: 13px;
-    margin-bottom: 26px; }
-  .auth { display: flex; align-items: center; justify-content: center; gap: 10px;
-    text-decoration: none; padding: 16px 12px; border-radius: 14px;
-    font-size: 18px; font-weight: 700; color: #fff; border: 1px solid #243140; }
-  .auth:active { filter: brightness(1.12); }
-  .auth.g { background: #4285f4; }
-  .auth.k { background: #1a73e8; }
+  .sec {
+    font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: #5a6d80; margin: 0 2px 12px; font-weight: 600;
+  }
+  .grid {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 14px; margin-bottom: 22px;
+  }
+  .tile {
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    text-decoration: none; text-align: center;
+    padding: 14px 4px 12px; border-radius: 16px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    color: #c8d6e4; font-size: 13px; font-weight: 600;
+  }
+  .tile:active { background: rgba(255,255,255,0.08); }
+  .tile .label {
+    display: block; max-width: 100%; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; padding: 0 2px;
+  }
+  .ic {
+    width: 58px; height: 58px; border-radius: 15px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px; font-weight: 800; color: #fff;
+    line-height: 1;
+  }
+  .ic.two { font-size: 18px; letter-spacing: -0.5px; }
 
-  .sec { font-size: 13px; letter-spacing: .1em; text-transform: uppercase;
-    color: #61707f; margin: 0 4px 12px; }
-  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 13px; }
-  .tile { display: flex; flex-direction: column; align-items: center; gap: 8px;
-    text-decoration: none; text-align: center; padding: 18px 6px;
-    border-radius: 16px; background: #161f2b; color: #dce6f1;
-    font-size: 14px; border: 1px solid #243140; }
-  .tile:active { background: #1f2c3a; }
-  .ic { width: 46px; height: 46px; border-radius: 13px; display: flex;
-    align-items: center; justify-content: center; font-size: 22px;
-    font-weight: 700; color: #fff; }
-  .d{background:#de5833}.wa{background:#25d366}.f{background:#1877f2}
-  .w{background:#636466}.wsj{background:#0274b6}.g{background:#4285f4}
-  .y{background:#ff0000}.h{background:#ff6600}.x{background:#222}
-  .b{background:#bb1919}.n{background:#834bff}.m{background:#34a853}
-  .yf{background:#6001d2}
+  .d  { background: #de5833; }
+  .bi { background: #0078d4; }
+  .ya { background: #6001d2; }
+  .g  { background: #4285f4; }
+  .wp { background: #111; }
+  .hn { background: #ff6600; }
+  .wi { background: #555; }
+  .yf { background: #7b1fa2; font-size: 28px; }
+  .wa { background: #128c7e; }
+  .msg { background: linear-gradient(135deg, #a334fa 0%, #0084ff 100%); }
+  .fb { background: #1877f2; }
+  .x  { background: #000; border: 1px solid #333; }
+  .rd { background: #ff4500; }
+  .am { background: #ff9900; color: #111; }
+  .yt { background: #cc0000; }
 
-  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 13px;
-    margin-top: 22px; }
-  .act { display: flex; align-items: center; justify-content: center; gap: 10px;
-    text-decoration: none; padding: 18px; border-radius: 16px; font-size: 20px;
-    font-weight: 700; }
-  .act.set { background: #1e2a3a; color: #cfe0f3; border: 1px solid #2c3e54; }
-  .act.res { background: #2a2030; color: #f0d6ea; border: 1px solid #4f3a52; }
-  .act:active { filter: brightness(1.15); }
+  .actions {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+    margin-bottom: 20px;
+  }
+  .act {
+    display: flex; align-items: center; justify-content: center;
+    text-decoration: none; padding: 15px; border-radius: 14px;
+    font-size: 15px; font-weight: 700;
+  }
+  .act.set { background: rgba(255,255,255,0.04); color: #b8cce0;
+    border: 1px solid rgba(255,255,255,0.08); }
+  .act.res { background: rgba(222,88,51,0.12); color: #f0b8a8;
+    border: 1px solid rgba(222,88,51,0.25); }
+  .act:active { filter: brightness(1.12); }
 
-  .support { margin-top: 26px; padding: 16px 18px; border-radius: 14px;
-    background: #141c28; border: 1px solid #243140; text-align: center; }
-  .support p { margin: 0; font-size: 15px; line-height: 1.45; color: #8fa0b3; }
-  .support a { color: #ff424d; font-weight: 700; text-decoration: none; }
-  .support a:active { opacity: .85; }
-  .ver { margin-top: 10px; font-size: 12px; color: #4f6070; letter-spacing: .04em; }
+  .support {
+    padding: 14px; border-radius: 14px; text-align: center;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.05);
+  }
+  .support p { margin: 0; font-size: 13px; color: #6a7a8a; }
+  .support a { color: #ff6b6b; font-weight: 600; text-decoration: none; }
+  .diag { margin-top: 8px; font-size: 11px; }
+  .diag a { color: #4a5a6a; text-decoration: none; margin: 0 4px; }
+  .ver { margin-top: 8px; font-size: 11px; color: #3a4a5a; }
+
+  /* favorites manager modal */
+  .modal-bg {
+    display: none; position: fixed; inset: 0; z-index: 100;
+    background: rgba(0,0,0,0.65); align-items: center; justify-content: center;
+    padding: 16px;
+  }
+  .modal-bg.open { display: flex; }
+  .modal {
+    width: 100%; max-width: 420px; max-height: 85vh; overflow: auto;
+    background: #151c28; border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px; padding: 18px;
+  }
+  .modal h2 { margin: 0 0 14px; font-size: 18px; }
+  .fav-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .fav-row label { flex: 1; font-size: 14px; cursor: pointer; }
+  .fav-row input[type=checkbox] { width: 20px; height: 20px; }
+  .add-row { margin-top: 14px; }
+  .add-row input {
+    width: 100%; margin-bottom: 8px; padding: 12px; font-size: 15px;
+    border-radius: 10px; border: 1px solid rgba(255,255,255,0.12);
+    background: #0c1018; color: #fff;
+  }
+  .modal-btns { display: flex; gap: 10px; margin-top: 16px; }
+  .modal-btns button {
+    flex: 1; padding: 12px; border-radius: 10px; font-size: 15px;
+    font-weight: 700; border: none; cursor: pointer;
+  }
+  .btn-done { background: #1a73e8; color: #fff; }
+  .btn-reset { background: rgba(255,255,255,0.08); color: #b8cce0; }
+  .btn-add { background: #2a6b3c; color: #fff; width: 100%; margin-top: 4px; }
 </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="bar">
-      <div class="brand">Berry<span>Browser</span></div>
-      <div class="spacer"></div>
-      <a class="icobtn" href="https://berry.settings/" title="Settings">&#9881;</a>
-      <a class="icobtn" href="https://berry.restart/" title="Restart">&#8635;</a>
-    </div>
+    <header class="top">
+      <div class="profile" aria-hidden="true">B</div>
+      <div class="headline">
+        <h1>Berry<span>Browser</span></h1>
+        <p class="greeting" id="greet">Good morning</p>
+      </div>
+      <button type="button" class="fav-btn" id="fav-open">Favorites</button>
+    </header>
 
-    <form id="f">
-      <input id="omni" type="text" inputmode="search" autocomplete="off"
-             autocapitalize="off" spellcheck="false"
-             placeholder="Search DuckDuckGo or enter a URL">
-      <button id="go" type="submit">Go</button>
-    </form>
-    <div class="hint">Searches use DuckDuckGo &middot; URLs open directly</div>
+    <section class="search-wrap">
+      <form id="f">
+        <div class="search-bar">
+          <input id="omni" type="text" inputmode="search" autocomplete="off"
+                 autocapitalize="off" spellcheck="false"
+                 placeholder="Search or enter address">
+          <button id="go" type="submit">Search</button>
+        </div>
+      </form>
+      <p class="search-hint">DuckDuckGo search &middot; type a URL to go directly</p>
+    </section>
 
-    <div class="auth-row">
-      <a class="auth g" href="https://www.google.com/"><span class="ic g">G</span>Google</a>
-      <a class="auth k" href="https://accounts.google.com/"><span class="ic k">&#128273;</span>Sign in</a>
-    </div>
-
-    <div class="sec">Quick links</div>
-    <div class="grid">
-      <!-- row 1 -->
-      <a class="tile" href="https://duckduckgo.com/"><span class="ic d">&#129414;</span>DuckDuckGo</a>
-      <a class="tile" href="https://web.whatsapp.com/"><span class="ic wa">&#128172;</span>WhatsApp</a>
-      <a class="tile" href="https://m.facebook.com/"><span class="ic f">f</span>Facebook</a>
-      <a class="tile" href="https://en.wikipedia.org/"><span class="ic w">W</span>Wikipedia</a>
-      <!-- row 2 -->
-      <a class="tile" href="https://www.wsj.com/"><span class="ic wsj">WSJ</span>WSJ</a>
-      <a class="tile" href="https://www.google.com/"><span class="ic g">G</span>Google</a>
-      <a class="tile" href="https://www.youtube.com/watch?v=jNQXAC9IVRw"><span class="ic y">&#9658;</span>YT Video</a>
-      <a class="tile" href="youtube-search.html"><span class="ic y">&#128269;</span>YT Search</a>
-      <a class="tile" href="https://news.ycombinator.com/"><span class="ic h">Y</span>Hacker News</a>
-      <!-- row 3 -->
-      <a class="tile" href="https://www.reddit.com/"><span class="ic n">r</span>Reddit</a>
-      <a class="tile" href="https://x.com/"><span class="ic x">X</span>X</a>
-      <a class="tile" href="https://www.google.com/maps"><span class="ic m">&#128205;</span>Maps</a>
-    </div>
+    <p class="sec">Favorites</p>
+    <nav class="grid" id="fav-grid" aria-label="Quick links"></nav>
 
     <div class="actions">
-      <a class="act set" href="https://berry.settings/">&#9881; Settings</a>
-      <a class="act res" href="https://berry.restart/">&#8635; Restart</a>
+      <a class="act set" href="https://berry.settings/">Settings</a>
+      <a class="act res" href="https://berry.restart/">Restart</a>
     </div>
 
-    <div class="support">
-      <p>BerryBrowser is built by <strong style="color:#cdd8e4">sw7ft</strong>.
-        If it helps you, consider supporting development on
-        <a href="https://www.patreon.com/sw7ft">Patreon</a>.</p>
-      <p style="font-size:11px;margin-top:8px">
-        <a href="file:///accounts/1000/shared/misc/diag.html">diag</a> &middot;
-        <a href="file:///accounts/1000/shared/misc/diag_mc.html">diag_mc</a> &middot;
-        <a href="file:///accounts/1000/shared/misc/diag_mse.html">diag_mse</a> &middot;
-        <a href="file:///accounts/1000/shared/misc/diag_eme.html">diag_eme</a>
+    <footer class="support">
+      <p>Built by <strong style="color:#a8b8c8">sw7ft</strong>
+        &middot; <a href="https://www.patreon.com/sw7ft">Patreon</a></p>
+      <p class="diag">
+        <a href="file:///accounts/1000/shared/misc/diag.html">diag</a>
+        <a href="file:///accounts/1000/shared/misc/diag_maps.html">maps</a>
       </p>
-      <div class="ver">BerryBrowserV3 &middot; v3.0.2 &middot; build 25</div>
+      <div class="ver">BerryBrowserV3 &middot; v3.0.2 &middot; build 72</div>
+    </footer>
+  </div>
+
+  <div class="modal-bg" id="fav-modal" aria-hidden="true">
+    <div class="modal">
+      <h2>Manage Favorites</h2>
+      <div id="fav-list"></div>
+      <div class="add-row">
+        <input id="add-name" type="text" placeholder="Site name" autocapitalize="off">
+        <input id="add-url" type="text" placeholder="https://..." autocapitalize="off">
+        <button type="button" class="btn-add" id="add-fav">Add favorite</button>
+      </div>
+      <div class="modal-btns">
+        <button type="button" class="btn-reset" id="fav-reset">Reset</button>
+        <button type="button" class="btn-done" id="fav-done">Done</button>
+      </div>
     </div>
   </div>
 
 <script>
-  var f = document.getElementById('f');
-  var omni = document.getElementById('omni');
-  f.addEventListener('submit', function(e){
+(function() {
+  var STORAGE_KEY = 'berry_home_favorites_v1';
+
+  var DEFAULTS = [
+    { id: 'ddg',  label: 'DuckDuckGo',   url: 'https://duckduckgo.com/',           abbr: 'D',  cls: 'd',  on: true },
+    { id: 'bing', label: 'Bing',         url: 'https://www.bing.com/',             abbr: 'B',  cls: 'bi', on: true },
+    { id: 'yahoo',label: 'Yahoo',        url: 'https://www.yahoo.com/',            abbr: 'Y',  cls: 'ya', on: true },
+    { id: 'goog', label: 'Google',       url: 'https://www.google.com/',           abbr: 'G',  cls: 'g',  on: true },
+    { id: 'wapo', label: 'WaPo',         url: 'https://www.washingtonpost.com/',   abbr: 'WP', cls: 'wp two', on: true },
+    { id: 'yfin', label: 'Yahoo Finance',url: 'https://finance.yahoo.com/',        abbr: '$',  cls: 'yf', on: true },
+    { id: 'hn',   label: 'Hacker News',  url: 'https://news.ycombinator.com/',     abbr: 'HN', cls: 'hn two', on: true },
+    { id: 'wiki', label: 'Wikipedia',    url: 'https://en.wikipedia.org/',         abbr: 'W',  cls: 'wi', on: true },
+    { id: 'wa',   label: 'WhatsApp',     url: 'https://web.whatsapp.com/',         abbr: 'WA', cls: 'wa two', on: true },
+    { id: 'msg',  label: 'Messenger',    url: 'https://www.messenger.com/',        abbr: 'Msg',cls: 'msg two', on: true },
+    { id: 'fb',   label: 'Facebook',     url: 'https://m.facebook.com/',           abbr: 'f',  cls: 'fb', on: true },
+    { id: 'x',    label: 'X',            url: 'https://x.com/',                    abbr: 'X',  cls: 'x',  on: true },
+    { id: 'rd',   label: 'Reddit',       url: 'https://www.reddit.com/',           abbr: 'r',  cls: 'rd', on: true },
+    { id: 'amz',  label: 'Amazon',       url: 'https://www.amazon.com/',           abbr: 'a',  cls: 'am', on: true },
+    { id: 'yt',   label: 'YouTube',      url: 'https://www.youtube.com/',          abbr: 'YT', cls: 'yt two', on: true },
+    { id: 'yts',  label: 'YT Search',    url: 'youtube-search.html',               abbr: 'YS', cls: 'yt two', on: true }
+  ];
+
+  function loadFavs() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        var saved = JSON.parse(raw);
+        var ids = {};
+        for (var i = 0; i < saved.length; i++) ids[saved[i].id] = true;
+        for (var j = 0; j < DEFAULTS.length; j++) {
+          if (!ids[DEFAULTS[j].id]) {
+            var d = DEFAULTS[j];
+            saved.push({
+              id: d.id, label: d.label, url: d.url,
+              abbr: d.abbr, cls: d.cls, on: d.on
+            });
+          }
+        }
+        return saved;
+      }
+    } catch (e) {}
+    return DEFAULTS.map(function(f) {
+      return { id: f.id, label: f.label, url: f.url, abbr: f.abbr, cls: f.cls, on: f.on };
+    });
+  }
+
+  function saveFavs(list) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch (e) {}
+  }
+
+  function renderGrid() {
+    var grid = document.getElementById('fav-grid');
+    var list = loadFavs();
+    var html = '';
+    for (var i = 0; i < list.length; i++) {
+      var f = list[i];
+      if (!f.on) continue;
+      html += '<a class="tile" href="' + f.url.replace(/"/g, '&quot;') + '">'
+        + '<span class="ic ' + f.cls + '">' + f.abbr + '</span>'
+        + '<span class="label">' + f.label + '</span></a>';
+    }
+    grid.innerHTML = html;
+  }
+
+  function renderManager() {
+    var box = document.getElementById('fav-list');
+    var list = loadFavs();
+    var html = '';
+    for (var i = 0; i < list.length; i++) {
+      var f = list[i];
+      html += '<div class="fav-row">'
+        + '<input type="checkbox" id="chk-' + f.id + '" data-id="' + f.id + '"'
+        + (f.on ? ' checked' : '') + '>'
+        + '<label for="chk-' + f.id + '">' + f.label + '</label>'
+        + '</div>';
+    }
+    box.innerHTML = html;
+    var checks = box.querySelectorAll('input[type=checkbox]');
+    for (var j = 0; j < checks.length; j++) {
+      checks[j].addEventListener('change', function() {
+        var id = this.getAttribute('data-id');
+        var lst = loadFavs();
+        for (var k = 0; k < lst.length; k++) {
+          if (lst[k].id === id) { lst[k].on = this.checked; break; }
+        }
+        saveFavs(lst);
+        renderGrid();
+      });
+    }
+  }
+
+  var modal = document.getElementById('fav-modal');
+  document.getElementById('fav-open').addEventListener('click', function() {
+    renderManager();
+    modal.classList.add('open');
+    modal.setAttribute('aria-hidden', 'false');
+  });
+  document.getElementById('fav-done').addEventListener('click', function() {
+    modal.classList.remove('open');
+    modal.setAttribute('aria-hidden', 'true');
+  });
+  document.getElementById('fav-reset').addEventListener('click', function() {
+    saveFavs(DEFAULTS.map(function(f) {
+      return { id: f.id, label: f.label, url: f.url, abbr: f.abbr, cls: f.cls, on: f.on };
+    }));
+    renderManager();
+    renderGrid();
+  });
+  document.getElementById('add-fav').addEventListener('click', function() {
+    var name = (document.getElementById('add-name').value || '').trim();
+    var url = (document.getElementById('add-url').value || '').trim();
+    if (!name || !url) return;
+    if (!/^[a-z]+:\/\//i.test(url)) url = 'https://' + url;
+    var lst = loadFavs();
+    var letter = name.charAt(0).toUpperCase();
+    lst.push({ id: 'c' + Date.now(), label: name, url: url, abbr: letter, cls: 'g', on: true });
+    saveFavs(lst);
+    document.getElementById('add-name').value = '';
+    document.getElementById('add-url').value = '';
+    renderManager();
+    renderGrid();
+  });
+
+  var h = new Date().getHours();
+  var g = document.getElementById('greet');
+  if (g) {
+    if (h < 12) g.textContent = 'Good morning';
+    else if (h < 17) g.textContent = 'Good afternoon';
+    else g.textContent = 'Good evening';
+  }
+
+  document.getElementById('f').addEventListener('submit', function(e) {
     e.preventDefault();
-    var v = (omni.value || '').trim();
+    var v = (document.getElementById('omni').value || '').trim();
     if (!v) return;
     var hasScheme = /^[a-z]+:\/\//i.test(v);
     var looksUrl = /^[^\s]+\.[^\s]{2,}/.test(v) && !/\s/.test(v);
@@ -149,7 +378,10 @@
     else dest = 'https://duckduckgo.com/?q=' + encodeURIComponent(v);
     window.location.href = dest;
   });
-  requestAnimationFrame(function(){ omni.focus(); });
+
+  renderGrid();
+  requestAnimationFrame(function() { document.getElementById('omni').focus(); });
+})();
 </script>
 </body>
 </html>

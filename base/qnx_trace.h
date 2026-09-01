@@ -44,7 +44,8 @@ inline bool QnxNavLogEnabled() {
     return access("/accounts/1000/shared/misc/berry-nav.debug", F_OK) == 0 ||
            access("/accounts/1000/shared/misc/berry-kbd.debug", F_OK) == 0 ||
            access("/accounts/1000/shared/misc/berry-video.debug", F_OK) == 0 ||
-           access("/accounts/1000/shared/misc/berry-decode.debug", F_OK) == 0;
+           access("/accounts/1000/shared/misc/berry-decode.debug", F_OK) == 0 ||
+           access("/accounts/1000/shared/misc/berry-maps.debug", F_OK) == 0;
   }();
   return on;
 }
@@ -69,6 +70,15 @@ inline bool QnxFpsLogEnabled() {
       return true;
     return access("/accounts/1000/shared/misc/berry-fps.enable", F_OK) == 0;
   }();
+  return on;
+}
+
+// Passive renderer main-thread stall sampling: a 500ms heartbeat task logs the
+// worst delivery delay ("QNX:MT stall") once per 60s window (see
+// render_thread_impl.cc). Default ON; opt out: berry-stall-log.disable.
+inline bool QnxStallPeakLogEnabled() {
+  static const bool on =
+      access("/accounts/1000/shared/misc/berry-stall-log.disable", F_OK) != 0;
   return on;
 }
 

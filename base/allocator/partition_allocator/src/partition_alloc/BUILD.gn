@@ -7,6 +7,7 @@ import("//build/config/android/config.gni")
 import("//build/config/chromecast_build.gni")
 import("//build/config/chromeos/ui_mode.gni")
 import("//build/config/compiler/compiler.gni")
+import("//build/config/compiler/pgo/pgo.gni")
 import("//build/config/dcheck_always_on.gni")
 import("//build/config/logging.gni")
 import("../../partition_alloc.gni")
@@ -111,6 +112,12 @@ if (!is_debug || partition_alloc_optimized_debug) {
 } else {
   _remove_configs += [ "//build/config/compiler:default_optimization" ]
   _add_configs += [ "//build/config/compiler:no_optimize" ]
+}
+
+# QNX PGI: partition_alloc + ld.lld-17 drop .profd COMDAT sections at link.
+if (is_qnx && chrome_pgo_phase == 1) {
+  _remove_configs +=
+      [ "//build/config/compiler/pgo:pgo_instrumentation_flags" ]
 }
 
 component("partition_alloc") {

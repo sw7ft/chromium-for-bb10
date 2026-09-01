@@ -31,6 +31,8 @@ class QnxScreenEventSource : public PlatformEventSource {
   bool bps_initialized_ = false;
   raw_ptr<QnxScreenWindowManager> window_manager_;
   base::RepeatingTimer poll_timer_;
+  // BB10 touch keyboard: tap-Shift often omits KEYMOD_SHIFT on the next letter.
+  bool shift_latched_ = false;
 };
 
 }  // namespace ui

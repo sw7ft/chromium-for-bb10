@@ -88,6 +88,28 @@ action("workaround_list") {
   }
 }
 
+if (is_qnx) {
+  # Upstream generates gpu_lists_version.h from GPU list metadata; Berry QNX
+  # builds use a static stub (see out/qnx-arm/gen/gpu/config/gpu_lists_version.h).
+  source_set("gpu_lists_version") {
+    visibility = [ ":config_sources" ]
+
+    _file = "$target_gen_dir/gpu_lists_version.h"
+    write_file(_file,
+               [
+                 "// Generated stub for QNX build",
+                 "#ifndef GPU_CONFIG_GPU_LISTS_VERSION_H_",
+                 "#define GPU_CONFIG_GPU_LISTS_VERSION_H_",
+                 "",
+                 "#define GPU_LISTS_VERSION \"unknown\"",
+                 "",
+                 "#endif  // GPU_CONFIG_GPU_LISTS_VERSION_H_",
+               ])
+
+    sources = [ _file ]
+  }
+}
+
 if (enable_vulkan) {
   component("vulkan_info") {
     sources = [
@@ -250,6 +272,9 @@ source_set("config_sources") {
   }
   if (use_ozone) {
     deps += [ "//ui/ozone" ]
+  }
+  if (is_qnx) {
+    deps += [ ":gpu_lists_version" ]
   }
 }
 

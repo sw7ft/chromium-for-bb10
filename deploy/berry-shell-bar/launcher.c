@@ -129,10 +129,18 @@ static size_t read_marker_text(const char* name, char* out, size_t out_sz) {
 }
 
 /* Load-reduction profiles (Settings > Display / Frame rate, or marker files).
- * Defaults (no markers): device profile render size, 45 fps cap, 4 raster threads.
+ * Defaults (no markers): 540-tier on 720+ profiles, 45 fps cap, 4 raster threads.
  * Resolution tiers scale the device profile's default render (420/540/720/1440
  * relative to a 720px reference on the short axis). Profiles stack unless
- * noted: berry-x-lite.enable implies 420-tier + 12fps + 2 thr. */
+ * noted: berry-x-lite.enable = 420-tier + 12fps + 2 thr;
+ * berry-x-perf.enable = 540-tier + 12fps + 2 thr. */
+static int has_resolution_tier_marker(void) {
+  return marker_exists("berry-x-420.enable") ||
+         marker_exists("berry-x-540.enable") ||
+         marker_exists("berry-x-720.enable") ||
+         marker_exists("berry-x-1440.enable");
+}
+
 static void apply_x_load_profile(int* render_w,
                                  int* render_h,
                                  int* max_fps,
@@ -144,7 +152,6 @@ static void apply_x_load_profile(int* render_w,
                                  int base_render_h) {
   float scale = 1.0f;
   strncpy(profile_name, "default", profile_name_len);
-  scale_render_dims(render_w, render_h, base_render_w, base_render_h, scale);
 
   if (marker_exists("berry-x-lite.enable")) {
     scale = 420.0f / 720.0f;
@@ -155,6 +162,22 @@ static void apply_x_load_profile(int* render_w,
     strncpy(profile_name, "lite(420-tier+12fps+2thr)", profile_name_len);
     return;
   }
+  if (marker_exists("berry-x-perf.enable")) {
+    scale = 540.0f / 720.0f;
+    scale_render_dims(render_w, render_h, base_render_w, base_render_h, scale);
+    *max_fps = 12;
+    *raster_threads = 2;
+    *use_fps_limit_flag = 1;
+    strncpy(profile_name, "perf(540-tier+12fps+2thr)", profile_name_len);
+    return;
+  }
+  if (!has_resolution_tier_marker() && base_render_w >= 720 &&
+      base_render_h >= 720) {
+    scale = 540.0f / 720.0f;
+    strncpy(profile_name, "540 (default)", profile_name_len);
+  }
+  scale_render_dims(render_w, render_h, base_render_w, base_render_h, scale);
+
   if (marker_exists("berry-x-420.enable")) {
     scale = 420.0f / 720.0f;
     strncpy(profile_name, "420", profile_name_len);
@@ -211,21 +234,12 @@ static void apply_x_load_profile(int* render_w,
  * unstable on QNX — they deadlock or race the resource loader (the ~20-60s
  * crash on heavy sites like google.com was RawResource::NotifyFinished hitting
  * an invalid state via the dedicated network thread + sync cookie IPC). Viz is
- * intentionally left ENABLED because on-screen qnx_screen rendering needs it. */
-static const char* kDisableFeatures =
-    "--disable-features=ServiceWorker,NetworkServiceDedicatedThread,MojoIpcz,"
-    "Translate,OptimizationHints,MediaRouter,PreconnectToSearch,"
-    "BackForwardCache,AutofillServerCommunication,HeavyAdPrivacyMitigations,"
-    "InterestFeedContentSuggestions";
-
-/* Same list but with ServiceWorker LEFT ENABLED. WhatsApp Web (and most PWAs)
- * use a Service Worker as their primary cache: it stores the app shell + JS +
- * WASM in Cache Storage so warm loads serve locally and bootstrap without
- * re-fetching. ServiceWorker was originally lumped in with the unstable
- * networking/IPC features above; re-enable it via the berry-sw.enable marker to
- * test whether it's stable here and how much it speeds repeat loads. */
-static const char* kDisableFeaturesSW =
-    "--disable-features=NetworkServiceDedicatedThread,MojoIpcz,"
+ * intentionally left ENABLED because on-screen qnx_screen rendering needs it.
+ * NOTE: Chromium does NOT merge repeated --disable-features switches (last one
+ * wins), so ALL feature disables must be combined into the single string built
+ * below in main(). */
+static const char* kUnstableFeatures =
+    "NetworkServiceDedicatedThread,MojoIpcz,"
     "Translate,OptimizationHints,MediaRouter,PreconnectToSearch,"
     "BackForwardCache,AutofillServerCommunication,HeavyAdPrivacyMitigations,"
     "InterestFeedContentSuggestions";
@@ -372,9 +386,19 @@ int main(int argc, char** argv) {
       setenv("QNX_GPU_PROBE", "1", 1);
     else
       setenv("QNX_GPU_PROBE", "0", 1);
+    /* PGO profile collection: write LLVM .profraw to shared/misc/pgo/ and skip
+     * the exit watchdog so profiles flush on close/restart. */
+    if (access("/accounts/1000/shared/misc/berry-pgo-collect.enable", F_OK) ==
+        0) {
+      setenv("BERRY_PGO_COLLECT", "1", 1);
+      setenv("LLVM_PROFILE_FILE",
+             "/accounts/1000/shared/misc/pgo/berry-%p-%m.profraw", 1);
+      fprintf(stderr,
+              "BerryShell: PGO collect = ON (profiles -> shared/misc/pgo/)\n");
+    }
   }
 
-  fprintf(stderr, "BerryShell: BerryBrowserV3 build 49\n");
+  fprintf(stderr, "BerryShell: BerryBrowserV3 build 72\n");
   fprintf(stderr, "BerryShell: app dir = %s\n", dir);
   fprintf(stderr, "BerryShell: work dir (cwd) = %s\n", work);
   fprintf(stderr, "BerryShell: %s\n",
@@ -596,41 +620,42 @@ int main(int argc, char** argv) {
    * bot signal that trips Google's secure-browser / reCAPTCHA checks) and
    * opens a CDP port. The renderer shim also forces navigator.webdriver=false,
    * but keeping this flag off removes the underlying signal entirely. */
-  /* QUIC A/B: default off (historical stability), berry-quic.enable turns it on.
-   * Now that DNS is reliable (built-in resolver), HTTP/3 0-RTT may cut connect
-   * latency to Meta/Cloudflare CDNs. */
-  if (!marker_exists("berry-quic.enable")) {
-    argv_buf[n++] = (char*)"--disable-quic";
-  } else {
+  /* QUIC OPT-IN (build 68): QUIC's TLS proof verification fails on QNX
+   * (repeated BoringSSL CERTIFICATE_VERIFY_FAILED; the ignore-cert-errors
+   * wrapper covers the TCP path but QUIC handshakes still died), which
+   * media-timeouts video CDNs advertising HTTP/3 (CBC "Phoenix" player,
+   * googlevideo). HTTP/2 is the reliable transport here. Debug via
+   * berry-quic.enable. */
+  if (marker_exists("berry-quic.enable")) {
     fprintf(stderr, "BerryShell: QUIC = enabled (berry-quic.enable)\n");
+  } else {
+    argv_buf[n++] = (char*)"--disable-quic";
+    fprintf(stderr, "BerryShell: QUIC = disabled (default)\n");
   }
-  /* HTTP/1.1 A/B: googlevideo may fail over HTTP/2 ALPN on QNX (see HARDENING.md). */
+  /* HTTP/2 ON by default (HARDENING tier 1 PASS). Opt out: berry-http1.enable
+   * (googlevideo ALPN quirk A/B). */
   if (marker_exists("berry-http1.enable")) {
     argv_buf[n++] = (char*)"--disable-http2";
     fprintf(stderr, "BerryShell: HTTP/2 = disabled (berry-http1.enable)\n");
+  } else {
+    fprintf(stderr, "BerryShell: HTTP/2 = enabled (default)\n");
   }
-  /* Alt-Svc/SVCB A/B: stop DNS HTTPS records from advertising HTTP/3 paths. */
-  if (marker_exists("berry-alt-svc.disable")) {
-    argv_buf[n++] =
-        (char*)"--disable-features=UseDnsHttpsSvcb,UseDnsHttpsSvcbAlpn";
+  /* Telemetry blackhole: fast-fail non-essential Meta/WhatsApp logging hosts
+   * during the load-critical window (DNS + connections + JS). Conservative
+   * list — chat UI / CDN / login hosts are untouched. Default ON; opt out:
+   * berry-block.disable. Legacy berry-block.enable is redundant. */
+  if (!marker_exists("berry-block.disable")) {
+    static char block_rules[768];
+    snprintf(
+        block_rules, sizeof(block_rules),
+        "--host-resolver-rules="
+        "MAP crashlogs.whatsapp.net 0.0.0.0,"
+        "MAP pixel.facebook.com 0.0.0.0,"
+        "MAP analytics.facebook.com 0.0.0.0,"
+        "MAP metric.facebook.com 0.0.0.0");
+    argv_buf[n++] = block_rules;
     fprintf(stderr,
-            "BerryShell: Alt-Svc/SVCB = disabled (berry-alt-svc.disable)\n");
-  }
-  /* Privacy sandbox / identity APIs: FedCM, ads measurement, etc. — background
-   * work with no BB10 benefit. Toggle in Settings or berry-privacy.disable. */
-  if (marker_exists("berry-privacy.disable")) {
-    argv_buf[n++] = (char*)"--disable-features=FedCm,PrivacySandboxAdsAPIs,"
-                           "SharedStorageAPI,PrivateAggregationApi";
-    fprintf(stderr, "BerryShell: privacy sandbox APIs = disabled\n");
-  }
-  /* Telemetry blackhole A/B: berry-block.enable maps known non-essential Meta/
-   * WhatsApp logging hosts to 0.0.0.0 so they fail fast instead of consuming
-   * CPU, connections and DNS during the load-critical window. Conservative list
-   * (crash-log upload only) so the chat UI is never affected. */
-  if (marker_exists("berry-block.enable")) {
-    argv_buf[n++] = (char*)"--host-resolver-rules=MAP crashlogs.whatsapp.net "
-                           "0.0.0.0,MAP *.crashlogs.whatsapp.net 0.0.0.0";
-    fprintf(stderr, "BerryShell: telemetry blocklist = on (berry-block.enable)\n");
+            "BerryShell: telemetry blocklist = on (analytics only, graph OK)\n");
   }
   /* No screen reader exists on BB10, so skip building and maintaining the
    * renderer accessibility tree. On heavy SPAs that tree is rebuilt on every
@@ -667,14 +692,42 @@ int main(int argc, char** argv) {
     }
   }
   argv_buf[n++] = (char*)kScaleFactor;
-  /* ServiceWorker A/B: ON by default (YouTube/PWA app-shell caching). Opt out:
-   * berry-sw.disable. Legacy berry-sw.enable is redundant. */
-  if (marker_exists("berry-sw.disable")) {
-    argv_buf[n++] = (char*)kDisableFeatures;
-    fprintf(stderr, "BerryShell: ServiceWorker = disabled (berry-sw.disable)\n");
-  } else {
-    argv_buf[n++] = (char*)kDisableFeaturesSW;
-    fprintf(stderr, "BerryShell: ServiceWorker = ENABLED (default)\n");
+  /* Single merged --disable-features switch. Chromium keeps only the LAST
+   * occurrence of a repeated switch, so the stability list, the privacy-sandbox
+   * cuts, and the Alt-Svc A/B must be combined here (they used to be separate
+   * switches and silently cancelled each other — only the last one applied). */
+  {
+    static char disable_features[768];
+    snprintf(disable_features, sizeof(disable_features), "--disable-features=%s",
+             kUnstableFeatures);
+    /* ServiceWorker A/B: ON by default (YouTube/PWA app-shell caching). Opt
+     * out: berry-sw.disable. Legacy berry-sw.enable is redundant. */
+    if (marker_exists("berry-sw.disable")) {
+      strncat(disable_features, ",ServiceWorker",
+              sizeof(disable_features) - strlen(disable_features) - 1);
+      fprintf(stderr,
+              "BerryShell: ServiceWorker = disabled (berry-sw.disable)\n");
+    } else {
+      fprintf(stderr, "BerryShell: ServiceWorker = ENABLED (default)\n");
+    }
+    /* Privacy sandbox / identity APIs: FedCM, ads measurement, etc. —
+     * background work with no BB10 benefit. Default OFF; opt back in:
+     * berry-privacy.enable. */
+    if (!marker_exists("berry-privacy.enable")) {
+      strncat(disable_features,
+              ",FedCm,PrivacySandboxAdsAPIs,SharedStorageAPI,"
+              "PrivateAggregationApi",
+              sizeof(disable_features) - strlen(disable_features) - 1);
+      fprintf(stderr, "BerryShell: privacy sandbox APIs = disabled (default)\n");
+    }
+    /* Alt-Svc/SVCB A/B: stop DNS HTTPS records from advertising HTTP/3 paths. */
+    if (marker_exists("berry-alt-svc.disable")) {
+      strncat(disable_features, ",UseDnsHttpsSvcb,UseDnsHttpsSvcbAlpn",
+              sizeof(disable_features) - strlen(disable_features) - 1);
+      fprintf(stderr,
+              "BerryShell: Alt-Svc/SVCB = disabled (berry-alt-svc.disable)\n");
+    }
+    argv_buf[n++] = disable_features;
   }
   /* Low-end device mode ON by default (smaller V8 heap + leaner tile caches;
    * big win on heavy SPAs like WhatsApp). Opt out: berry-lowend.disable.
@@ -686,9 +739,9 @@ int main(int argc, char** argv) {
   /* Larger HTTP cache for repeat visits (YouTube thumbs, Maps tiles, SW shells).
    * Opt out: berry-disk-cache.disable */
   if (!marker_exists("berry-disk-cache.disable")) {
-    argv_buf[n++] = (char*)"--disk-cache-size=67108864";
-    argv_buf[n++] = (char*)"--media-cache-size=67108864";
-    fprintf(stderr, "BerryShell: disk+media cache = 64MB (default)\n");
+    argv_buf[n++] = (char*)"--disk-cache-size=268435456";
+    argv_buf[n++] = (char*)"--media-cache-size=268435456";
+    fprintf(stderr, "BerryShell: disk+media cache = 256MB (default)\n");
   }
   /* Present as Android Chrome unless a desktop-gated host forced desktop above.
    * content_shell's GetUserAgent()/GetUserAgentMetadata() and OverrideWebkitPrefs
@@ -698,17 +751,37 @@ int main(int argc, char** argv) {
     argv_buf[n++] = (char*)"--use-mobile-user-agent";
   if (use_custom_ua)
     argv_buf[n++] = ua_arg;
-  /* Optional V8 flag passthrough for tuning experiments (e.g. WASM compile
-   * levers). Write the flag string into shared/misc/berry-jsflags and relaunch;
-   * no content_shell rebuild needed. Example contents:
-   *   --liftoff-only --wasm-lazy-validation --trace-wasm-compilation-times */
+  /* V8 flags. berry-jsflags (text marker) overrides everything for A/B tests.
+   * Defaults otherwise:
+   *   --max-old-space-size=256 — low-end device mode caps the JS heap at
+   *     ~128MB, which OOM-crashes Messenger/Facebook ("Ineffective
+   *     mark-compacts near heap limit", seen Aug 27). The Passport has 3GB;
+   *     give JS 256MB while keeping the rest of low-end mode's savings.
+   *     Opt out: berry-heap.default marker.
+   *   WASM liftoff-only stays OPT-IN (berry-wasm-liftoff.enable): default
+   *     leaves V8 tier-up on so Messenger/Facebook login crypto works. */
   {
     static char jsflags_buf[1024];
-    static char jsflags_arg[1040];
+    static char jsflags_arg[1104];
     if (read_marker_text("berry-jsflags", jsflags_buf, sizeof(jsflags_buf))) {
       snprintf(jsflags_arg, sizeof(jsflags_arg), "--js-flags=%s", jsflags_buf);
       argv_buf[n++] = jsflags_arg;
-      fprintf(stderr, "BerryShell: js-flags = %s\n", jsflags_buf);
+      fprintf(stderr, "BerryShell: js-flags = %s (berry-jsflags)\n", jsflags_buf);
+    } else {
+      const int big_heap = !marker_exists("berry-heap.default");
+      const int liftoff = marker_exists("berry-wasm-liftoff.enable");
+      if (big_heap || liftoff) {
+        snprintf(jsflags_arg, sizeof(jsflags_arg), "--js-flags=%s%s%s",
+                 big_heap ? "--max-old-space-size=256" : "",
+                 (big_heap && liftoff) ? " " : "",
+                 liftoff ? "--no-wasm-tier-up --wasm-lazy-validation" : "");
+        argv_buf[n++] = jsflags_arg;
+      }
+      if (big_heap)
+        fprintf(stderr, "BerryShell: js heap = 256MB old-space (default)\n");
+      if (liftoff)
+        fprintf(stderr,
+                "BerryShell: wasm = liftoff-only (berry-wasm-liftoff)\n");
     }
   }
   /* Content/render settings driven by .bar markers, no rebuild needed. These

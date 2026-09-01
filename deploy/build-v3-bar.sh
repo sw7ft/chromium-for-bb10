@@ -20,12 +20,12 @@ export QNX_TARGET="$QNX800/arm-blackberry-qnx8eabi"
 export QNX_INC="$QNX800/include"
 export QNX_LIB="$QNX800/arm-blackberry-qnx8eabi/lib"
 
-CHROMIUM_OUT="$(cd "$SCRIPT_DIR/.." && pwd)/out/qnx-arm/content_shell"
+CHROMIUM_OUT="${BERRY_CONTENT_SHELL:-$(cd "$SCRIPT_DIR/.." && pwd)/out/qnx-arm/content_shell}"
 if [ ! -f "$CHROMIUM_OUT" ]; then
   echo "Missing $CHROMIUM_OUT — run ninja -C out/qnx-arm content/shell:content_shell first." >&2
   exit 1
 fi
-echo "=== sync payload/content_shell from out/qnx-arm ==="
+echo "=== sync payload/content_shell from ${CHROMIUM_OUT} ==="
 cp -f "$CHROMIUM_OUT" "$BAR_DIR/payload/content_shell"
 
 VERSION="$(sed -n 's:.*<versionNumber>\([^<]*\)</versionNumber>.*:\1:p' "$DESC" | head -1)"

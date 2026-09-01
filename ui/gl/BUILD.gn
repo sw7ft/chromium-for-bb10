@@ -13,6 +13,7 @@ import("//gpu/vulkan/features.gni")
 import("//testing/test.gni")
 import("//third_party/angle/gni/angle.gni")
 import("//third_party/dawn/scripts/dawn_features.gni")
+import("//build/config/compiler/pgo/pgo.gni")
 import("//ui/gl/features.gni")
 
 declare_args() {
@@ -240,10 +241,14 @@ component("gl") {
   if (use_ozone) {
     deps += [ "//ui/ozone:buildflags" ]
     if (use_egl && !is_fuchsia) {
-      data_deps += [
-        "//third_party/angle:libEGL",
-        "//third_party/angle:libGLESv2",
-      ]
+      # QNX PGI: skip building instrumented ANGLE .so blobs; runtime uses BB10
+      # system libEGL/libGLESv2 via dlopen (see qnx_screen_gl_ozone_egl.cc).
+      if (!(is_qnx && chrome_pgo_phase == 1)) {
+        data_deps += [
+          "//third_party/angle:libEGL",
+          "//third_party/angle:libGLESv2",
+        ]
+      }
       if (angle_shared_libvulkan && !is_chromeos) {
         data_deps += [ "//third_party/vulkan-deps/vulkan-loader/src:libvulkan" ]
       }

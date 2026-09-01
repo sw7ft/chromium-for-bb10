@@ -281,6 +281,15 @@ QnxKeyMap MapQnxKey(int sym) {
     case KEYCODE_INSERT:
       m = {VKEY_INSERT, DomCode::INSERT, DomKey::INSERT, true};
       return m;
+    case KEYCODE_LEFT_SHIFT:
+      m = {VKEY_SHIFT, DomCode::SHIFT_LEFT, DomKey::SHIFT, true};
+      return m;
+    case KEYCODE_RIGHT_SHIFT:
+      m = {VKEY_SHIFT, DomCode::SHIFT_RIGHT, DomKey::SHIFT, true};
+      return m;
+    case KEYCODE_CAPS_LOCK:
+      m = {VKEY_CAPITAL, DomCode::CAPS_LOCK, DomKey::CAPS_LOCK, true};
+      return m;
     default:
       break;
   }
@@ -323,7 +332,21 @@ void QnxScreenEventSource::ProcessKeyboardEvent(screen_event_t ev) {
   if (key_cb && key_cb(sym, down))
     return;
 
-  QnxKeyMap m = MapQnxKey(sym);
+  // Touch keyboard: tap Shift then a letter often arrives without KEYMOD_SHIFT.
+  if (sym == KEYCODE_LEFT_SHIFT || sym == KEYCODE_RIGHT_SHIFT) {
+    if (down)
+      shift_latched_ = true;
+  }
+
+  const bool shift_mod =
+      (mods & (KEYMOD_SHIFT | KEYMOD_SHIFT_LOCK | KEYMOD_CAPS_LOCK)) != 0;
+  const bool shift_effective = shift_mod || shift_latched_;
+
+  int effective_sym = sym;
+  if (shift_effective && sym >= 'a' && sym <= 'z')
+    effective_sym = sym - 'a' + 'A';
+
+  QnxKeyMap m = MapQnxKey(effective_sym);
   if (m.valid) {
     if (m.dom_code == DomCode::NONE) {
       if (m.dom_key != DomKey::NONE)
@@ -343,8 +366,11 @@ void QnxScreenEventSource::ProcessKeyboardEvent(screen_event_t ev) {
   if (!m.valid)
     return;
 
+  if (down && sym >= 'a' && sym <= 'z' && shift_effective)
+    shift_latched_ = false;
+
   int flags = 0;
-  if (mods & KEYMOD_SHIFT)
+  if (shift_mod || shift_effective)
     flags |= EF_SHIFT_DOWN;
   if (mods & KEYMOD_CTRL)
     flags |= EF_CONTROL_DOWN;

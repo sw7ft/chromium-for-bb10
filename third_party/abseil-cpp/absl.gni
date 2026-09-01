@@ -17,6 +17,7 @@
 #    deps = [ ":bar" ]
 #  }
 
+import("//build/config/compiler/pgo/pgo.gni")
 import("//build_overrides/build.gni")
 
 template("absl_source_set") {
@@ -29,6 +30,9 @@ template("absl_source_set") {
       "//third_party/abseil-cpp:absl_default_cflags_cc",
       "//third_party/abseil-cpp:absl_define_config",
     ]
+    if (is_qnx && chrome_pgo_phase == 1) {
+      configs -= [ "//build/config/compiler/pgo:pgo_instrumentation_flags" ]
+    }
 
     if (is_component_build) {
       defines = [ "ABSL_BUILD_DLL" ]

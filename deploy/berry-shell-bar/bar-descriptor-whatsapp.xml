@@ -1,29 +1,31 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <qnx xmlns="http://www.qnx.com/schemas/application/1.0">
-    <!-- Distinct package id + name so V3 installs ALONGSIDE the existing
-         BerryShell/BerryBrowser app instead of replacing it. -->
-    <id>com.sw7ft.BerryShellV3</id>
+    <!-- Distinct package id + name so the WhatsApp web app installs ALONGSIDE
+         BerryBrowser / BerryBrowserV3 with its own sandbox (its own persistent
+         content_shell_data, so the WhatsApp login is isolated and durable). -->
+    <id>com.sw7ft.BerryWhatsApp</id>
 
-    <name>BerryBrowserV3</name>
-    <versionNumber>3.0.2</versionNumber>
-    <buildId>72</buildId>
-    <description>Chromium content_shell browser for BlackBerry 10 (QNX, on-screen via qnx_screen). V3: balanced defaults (GPU on, 720, 45fps, low-end mode), in-app Settings, restart, custom landing page.</description>
+    <name>WhatsApp</name>
+    <versionNumber>1.0.0</versionNumber>
+    <buildId>1</buildId>
+    <description>WhatsApp Web as a standalone app for BlackBerry 10. Single-purpose Chromium content_shell tuned for web.whatsapp.com: desktop UA, Service Worker cache, persistent login, real microphone for voice messages, 720 render. Renders on-screen via qnx_screen.</description>
     <author>sw7ft</author>
 
-    <!-- Native entry point: a tiny launcher that sets LD_LIBRARY_PATH / CA
-         bundle and execs content_shell with the qnx_screen flags. -->
-    <asset path="launcher" entry="true" type="Qnx/Elf">launcher</asset>
+    <!-- Native entry point: the WhatsApp launcher boots content_shell straight
+         into web.whatsapp.com with the WhatsApp-tuned flag set. -->
+    <asset path="whatsapp-launcher" entry="true" type="Qnx/Elf">launcher</asset>
 
-    <!-- Chromium binary + its runtime libraries (the rest come from the OS).
-         Shipped as content_shell.exe because the launcher (launcher.c) execs
-         "<dir>/content_shell.exe"; this makes the .bar self-contained so a clean
-         install runs without the SSH hot-swap (deploy-binary.sh). -->
+    <!-- Chromium binary + runtime libraries. Reuses the exact same engine as
+         BerryBrowserV3 (no WhatsApp-specific engine changes are needed: the
+         desktop-UA-for-whatsapp.com flip and persistent profile are already
+         built in). Shipped as content_shell.exe because the launcher execs
+         "<dir>/content_shell.exe". -->
     <asset path="payload/content_shell" type="Qnx/Elf">content_shell.exe</asset>
     <asset path="payload/libstdc++.so.6" type="Qnx/Elf">libstdc++.so.6</asset>
     <asset path="payload/libgcc_s.so.1" type="Qnx/Elf">libgcc_s.so.1</asset>
     <asset path="payload/libm.so.2" type="Qnx/Elf">libm.so.2</asset>
-    <!-- QSA (QNX Sound Architecture) client lib for microphone capture; not
-         present in the BB10 base image, so bundle it. -->
+    <!-- QSA (QNX Sound Architecture) client lib for microphone capture (voice
+         messages); not present in the BB10 base image, so bundle it. -->
     <asset path="payload/libasound.so.2" type="Qnx/Elf">libasound.so.2</asset>
 
     <!-- Chromium data/resource files (loaded relative to the working dir). -->
@@ -34,14 +36,10 @@
     <asset path="payload/snapshot_blob.bin">snapshot_blob.bin</asset>
     <asset path="payload/root_store.certs">root_store.certs</asset>
 
-    <!-- Local start page (omnibox + bookmarks + Restart) loaded by default. -->
-    <asset path="home.html">home.html</asset>
-    <asset path="youtube-search.html">youtube-search.html</asset>
-
     <icon>
       <image>icon.png</image>
     </icon>
-    <asset path="icons/icon.png">icon.png</asset>
+    <asset path="icons/whatsapp.png">icon.png</asset>
 
     <initialWindow>
       <autoOrients>true</autoOrients>
@@ -54,8 +52,8 @@
     <permission>access_internet</permission>
     <permission>access_shared</permission>
     <permission>run_when_backgrounded</permission>
-    <!-- Microphone capture (getUserMedia audio). Without this, QNX io-audio
-         denies snd_pcm capture and the real mic stays silent. -->
+    <!-- Microphone capture for WhatsApp voice messages (getUserMedia audio).
+         Without this, QNX io-audio denies snd_pcm capture and the mic is silent. -->
     <permission>record_audio</permission>
 
     <!-- Ensure bundled libs are found at run-time (launcher also sets this). -->

@@ -135,6 +135,34 @@ const char kBerryChromeShimJs[] = R"JS(
   } catch (e) {}
 
   try {
+    // WebGPU is present but non-functional on this build (every
+    // getContext/requestAdapter path logs "Failed to create WebGPU Context
+    // Provider"). A present-but-broken API is a worse fingerprint than an
+    // absent one: anti-bot scripts (X/Twitter's castle module) feature-detect
+    // navigator.gpu, try to use it, and throw — which aborts their token
+    // computation and makes the login request fail ("Something went wrong").
+    // Report WebGPU as honestly unavailable so callers take the no-WebGPU path.
+    if ('gpu' in window.navigator) {
+      Object.defineProperty(window.navigator, 'gpu',
+          { get: function() { return undefined; }, configurable: true });
+    }
+  } catch (e) {}
+
+  try {
+    // Present plausible, stable hardware values. Low-end-device mode can make
+    // navigator.deviceMemory report a tiny/odd number, and some builds expose a
+    // low core count — both are fingerprint outliers that anti-bot scripts
+    // (e.g. X/Twitter's "castle" module) weigh. Clamp to a mid-range phone.
+    if (!window.navigator.hardwareConcurrency ||
+        window.navigator.hardwareConcurrency < 4) {
+      Object.defineProperty(window.navigator, 'hardwareConcurrency',
+          { get: function() { return 4; }, configurable: true });
+    }
+    Object.defineProperty(window.navigator, 'deviceMemory',
+        { get: function() { return 4; }, configurable: true });
+  } catch (e) {}
+
+  try {
     // navigator.platform must agree with the User-Agent or it's a fingerprint
     // inconsistency. The UA is chosen per-navigation in the browser (mobile by
     // default, desktop for hosts like WhatsApp), so derive platform from the
@@ -147,6 +175,71 @@ const char kBerryChromeShimJs[] = R"JS(
       },
       configurable: true
     });
+  } catch (e) {}
+})();
+)JS";
+
+const char kBerryMapsGeolocationShimJs[] = R"JS(
+(function() {
+  try {
+    if (!window.location || !window.location.href ||
+        window.location.href.indexOf('google.com/maps') === -1) {
+      return;
+    }
+    var geo = window.navigator && window.navigator.geolocation;
+    if (!geo) return;
+    function makePos() {
+      return {
+        coords: {
+          latitude: 49.2577355,
+          longitude: -123.123904,
+          accuracy: 100,
+          altitude: 0,
+          altitudeAccuracy: 0,
+          heading: 0,
+          speed: 0
+        },
+        timestamp: Date.now()
+      };
+    }
+    geo.getCurrentPosition = function(success, error, options) {
+      if (success) success(makePos());
+      else if (error) error({ code: 2, message: 'unavailable', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 });
+    };
+    geo.watchPosition = function(success, error, options) {
+      if (success) success(makePos());
+      return 1;
+    };
+    geo.clearWatch = function() {};
+  } catch (e) {}
+
+  try {
+    var goodCam = '@49.2577355,-123.123904,12z';
+    function fixMapsUrl(u) {
+      if (!u) return u;
+      var s = String(u);
+      if (s.indexOf('google.com/maps') === -1 && s.indexOf('/maps') === -1)
+        return u;
+      if (s.indexOf('@-90,') !== -1 || s.indexOf('NaN') !== -1 ||
+          s.indexOf('/@-') !== -1) {
+        var q = s.indexOf('?');
+        var tail = q === -1 ? '' : s.substring(q);
+        var base = s.split('?')[0];
+        var prefix = base.split('@')[0];
+        return prefix + goodCam + tail;
+      }
+      return u;
+    }
+    var push = history.pushState.bind(history);
+    var replace = history.replaceState.bind(history);
+    history.pushState = function(state, title, url) {
+      return push(state, title, fixMapsUrl(url || location.href));
+    };
+    history.replaceState = function(state, title, url) {
+      return replace(state, title, fixMapsUrl(url || location.href));
+    };
+    if (location.href.indexOf('@-90,') !== -1 || location.href.indexOf('NaN') !== -1)
+      replace(history.state, '', fixMapsUrl(location.href));
   } catch (e) {}
 })();
 )JS";
@@ -171,6 +264,7 @@ void ShellRenderFrameObserver::DidClearWindowObject() {
   }
 #if BUILDFLAG(IS_QNX)
   InjectBerryChromeShim();
+  InjectBerryMapsGeolocationShim();
 #endif
 }
 
@@ -182,6 +276,15 @@ void ShellRenderFrameObserver::InjectBerryChromeShim() {
   }
   frame->ExecuteScript(
       blink::WebScriptSource(blink::WebString::FromUTF8(kBerryChromeShimJs)));
+}
+
+void ShellRenderFrameObserver::InjectBerryMapsGeolocationShim() {
+  blink::WebLocalFrame* frame = render_frame()->GetWebFrame();
+  if (!frame) {
+    return;
+  }
+  frame->ExecuteScript(blink::WebScriptSource(
+      blink::WebString::FromUTF8(kBerryMapsGeolocationShimJs)));
 }
 #endif
 

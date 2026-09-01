@@ -29,6 +29,9 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/sequence_local_storage_slot.h"
 #include "build/build_config.h"
+#if BUILDFLAG(IS_QNX)
+#include <unistd.h>
+#endif
 #include "build/chromeos_buildflags.h"
 #include "cc/base/switches.h"
 #include "components/custom_handlers/protocol_handler_registry.h"
@@ -777,6 +780,12 @@ void ShellContentBrowserClient::OverrideWebkitPrefs(
     prefs->main_frame_resizes_are_orientation_changes = true;
     prefs->default_minimum_page_scale_factor = 0.25f;
     prefs->default_maximum_page_scale_factor = 5.f;
+  }
+  // Surface WebGL init failures in berry-kbd.log (Maps needs a GL context for
+  // tile fetch). berry-maps.debug forces this; berry-video.debug enables it too.
+  if (access("/accounts/1000/shared/misc/berry-maps.debug", F_OK) == 0 ||
+      access("/accounts/1000/shared/misc/berry-video.debug", F_OK) == 0) {
+    prefs->webgl_errors_to_console_enabled = true;
   }
 #endif
 

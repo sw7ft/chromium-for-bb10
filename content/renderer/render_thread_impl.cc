@@ -274,6 +274,43 @@ static_assert(
 BASE_DECLARE_FEATURE(kUseThreadPoolForMediaTaskRunner){
     "UseThreadPoolForMediaTaskRunner", base::FEATURE_DISABLED_BY_DEFAULT};
 
+#if BUILDFLAG(IS_QNX)
+// Passive main-thread stall sampler: a self-reposting 500ms heartbeat on the
+// renderer main thread. Any delivery delay beyond the 500ms period means the
+// thread was busy (JS/GC/layout) that long. Logs the worst stall per 60s
+// window. Gaps >= 60s are ignored: BB10 stops backgrounded apps, and the
+// resume gap would otherwise masquerade as a giant stall (the flaw that made
+// the old viz-side "QNX:BF peak" numbers useless).
+void QnxStallHeartbeat() {
+  static base::TimeTicks s_last;
+  static base::TimeTicks s_window_start;
+  static double s_peak_ms = 0;
+  constexpr base::TimeDelta kBeat = base::Milliseconds(500);
+  const base::TimeTicks now = base::TimeTicks::Now();
+  if (!s_last.is_null()) {
+    const double stall_ms = (now - s_last - kBeat).InMillisecondsF();
+    if (stall_ms > s_peak_ms && stall_ms < 60000.0)
+      s_peak_ms = stall_ms;
+  }
+  s_last = now;
+  if (s_window_start.is_null())
+    s_window_start = now;
+  if (now - s_window_start >= base::Seconds(60)) {
+    if (s_peak_ms >= 1000.0) {
+      char line[80];
+      int len = snprintf(line, sizeof(line),
+                         "QNX:MT stall peak=%.0fms (60s window)\n", s_peak_ms);
+      if (len > 0)
+        ::write(2, line, len);
+    }
+    s_window_start = now;
+    s_peak_ms = 0;
+  }
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
+      FROM_HERE, base::BindOnce(&QnxStallHeartbeat), kBeat);
+}
+#endif
+
 // Updates the crash key for whether this renderer is foregrounded.
 void UpdateForegroundCrashKey(bool foreground) {
 #if BUILDFLAG(IS_QNX)
@@ -552,6 +589,11 @@ void RenderThreadImpl::Init() {
 
   render_thread = this;
   g_main_task_runner.Get() = base::SingleThreadTaskRunner::GetCurrentDefault();
+
+#if BUILDFLAG(IS_QNX)
+  if (base::QnxStallPeakLogEnabled())
+    QnxStallHeartbeat();
+#endif
 
   // Register this object as the main thread.
   ChildProcess::current()->set_main_thread(this);

@@ -58,6 +58,7 @@
 #include "content/public/common/content_switches.h"
 #include "content/shell/app/resource.h"
 #include "content/shell/browser/berry_geolocation_qnx.h"
+#include "content/shell/browser/berry_maps_qnx.h"
 #include "content/shell/browser/shell_content_browser_client.h"
 #include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
 #include "content/shell/browser/shell_devtools_frontend.h"
@@ -74,7 +75,6 @@ namespace content {
 
 #if BUILDFLAG(IS_QNX)
 namespace {
-void BerryApplySessionDesktopUA(WebContents* web_contents);
 }  // namespace
 #endif
 
@@ -166,6 +166,11 @@ Shell* Shell::CreateShell(std::unique_ptr<WebContents> web_contents,
   // a chance to act on the main frame accordingly.
   if (raw_web_contents->GetPrimaryMainFrame()->IsRenderFrameLive())
     g_platform->MainFrameCreated(shell);
+
+#if BUILDFLAG(IS_QNX)
+  // Seed GeolocationContext override before any page JS can bind geolocation.
+  BerryPreseedGeolocationContext(raw_web_contents);
+#endif
 
   return shell;
 }
@@ -265,9 +270,6 @@ Shell* Shell::CreateNewWindow(BrowserContext* browser_context,
    * WebContents defaults to hidden and YouTube/mobile players refuse to start
    * stream fetch (no get_watch / googlevideo). Assume visible at launch. */
   shell->web_contents()->UpdateWebContentsVisibility(Visibility::VISIBLE);
-#if BUILDFLAG(IS_QNX)
-  BerryApplySessionDesktopUA(shell->web_contents());
-#endif
 
   if (!url.is_empty()) {
 #if BUILDFLAG(IS_QNX)
@@ -755,14 +757,41 @@ void Shell::OnTimeout() {
 #if BUILDFLAG(IS_QNX)
 namespace {
 
+GURL BerryIntentUrlToHttps(const GURL& url) {
+  if (url.scheme() != "intent")
+    return GURL();
+  const std::string& spec = url.spec();
+  constexpr char kPrefix[] = "intent://";
+  if (!base::StartsWith(spec, kPrefix))
+    return GURL();
+  const size_t start = sizeof(kPrefix) - 1;
+  const size_t end = spec.find("#Intent");
+  const size_t len =
+      (end == std::string::npos ? spec.size() : end) - start;
+  if (len == 0)
+    return GURL();
+  return GURL("https://" + spec.substr(start, len));
+}
+
 // Hosts that refuse a mobile UA and must be served the desktop UA. WhatsApp Web
-// is the canonical case: on mobile it shows "use WhatsApp by opening a browser
-// on your computer" instead of the chat UI.
+// and Messenger Web are the canonical cases: on mobile they show "use on your
+// computer" instead of the chat UI.
 bool BerryHostPrefersDesktopUA(const GURL& url) {
   const std::string host = url.host();
   if (host == "whatsapp.com" ||
       base::EndsWith(host, ".whatsapp.com",
                      base::CompareCase::INSENSITIVE_ASCII))
+    return true;
+  if (host == "messenger.com" ||
+      base::EndsWith(host, ".messenger.com",
+                     base::CompareCase::INSENSITIVE_ASCII))
+    return true;
+  // Messenger login/oauth/checkpoint flows redirect through www.facebook.com
+  // (not m.facebook.com — that tile keeps the lightweight mobile site). Use
+  // desktop UA for ALL www.facebook.com paths so verification ("finish signing
+  // in on Facebook") works; path-gating left mobile UA and surfaced a bogus
+  // "incorrect password" on messenger.com instead of the real checkpoint UI.
+  if (host == "facebook.com" || host == "www.facebook.com")
     return true;
   // YouTube: desktop UA by default on www.youtube.com — progressive HTTPS
   // videoplayback (fmt=18) without SABR/PO tokens. Mobile/m.youtube uses SABR
@@ -783,27 +812,17 @@ bool BerryHostPrefersDesktopUA(const GURL& url) {
                        base::CompareCase::INSENSITIVE_ASCII))
       return true;
   }
-  // Google Maps Lite on mobile waits forever for geolocation before fetching
-  // raster tiles; desktop Maps uses URL coords and loads tiles without GPS.
+  // Google Maps on google.com/maps: desktop tactile fetches maps/vt vector tiles.
+  // Build 56 mobile UA served Maps Lite (map_raster) but zero khms/vt tile
+  // requests on QNX. Embedded Maps on third-party hosts stay mobile UA.
+  if (access("/accounts/1000/shared/misc/berry-maps-mobile.enable", F_OK) == 0)
+    return false;
   if (host == "maps.google.com")
     return true;
   if ((host == "google.com" || host == "www.google.com") &&
       base::StartsWith(url.path(), "/maps", base::CompareCase::SENSITIVE))
     return true;
   return false;
-}
-
-void BerryApplySessionDesktopUA(content::WebContents* web_contents) {
-  if (!web_contents)
-    return;
-  if (access("/accounts/1000/shared/misc/berry-youtube-mobile.enable", F_OK) ==
-      0)
-    return;
-  blink::UserAgentOverride ov;
-  ov.ua_string_override = GetBerryDesktopUserAgent();
-  ov.ua_metadata_override = GetBerryDesktopUserAgentMetadata();
-  web_contents->SetUserAgentOverride(ov, /*override_in_new_tabs=*/false);
-  QNX_NAV_LOG_FMT("%s", "BerryNav: UA = desktop (session preset)\n");
 }
 
 // In-app "Restart browser". Gracefully tears down, then re-execs the launcher in
@@ -813,9 +832,31 @@ void BerryApplySessionDesktopUA(content::WebContents* web_contents) {
 // effect on restart. Mirrors QnxExitCallback but relaunches instead of exiting.
 // Posted off the navigation observer callback so teardown doesn't run while a
 // navigation is in flight. The host below must match home.html's restart link.
+#if BUILDFLAG(IS_QNX)
+extern "C" int __llvm_profile_write_file(void);
+
+bool BerryPgoCollectEnabled() {
+  const char* e = getenv("BERRY_PGO_COLLECT");
+  return e && e[0] == '1';
+}
+
+void BerryWritePgoProfileIfCollecting() {
+  if (BerryPgoCollectEnabled())
+    __llvm_profile_write_file();
+}
+#endif
+
 void BerryRestartRelaunch() {
+#if BUILDFLAG(IS_QNX)
+  if (!BerryPgoCollectEnabled())
+    base::StartQnxExitWatchdog(3000);
+#else
   base::StartQnxExitWatchdog(3000);
+#endif
   Shell::Shutdown();
+#if BUILDFLAG(IS_QNX)
+  BerryWritePgoProfileIfCollecting();
+#endif
   char exe[2048];
   exe[0] = '\0';
   int fd = open("/proc/self/exefile", O_RDONLY);
@@ -872,10 +913,12 @@ std::string BerryCurrentResKey() {
     return "720";
   if (BerryHasMarker("berry-x-1440.enable"))
     return "1440";
-  return "720";
+  return "540";
 }
 
 std::string BerryCurrentFpsKey() {
+  if (BerryHasMarker("berry-x-perf.enable"))
+    return "perf";
   if (BerryHasMarker("berry-x-lite.enable"))
     return "lite";
   if (BerryHasMarker("berry-x-fullfps.enable"))
@@ -897,6 +940,29 @@ bool BerryGpuEnabledByDefault() {
 
 bool BerryLowendEnabledByDefault() {
   return !BerryHasMarker("berry-lowend.disable");
+}
+
+bool BerryBlockTelemetryEnabled() {
+  return !BerryHasMarker("berry-block.disable");
+}
+
+bool BerryPrivacyCutsEnabled() {
+  return !BerryHasMarker("berry-privacy.enable");
+}
+
+bool BerryQuicEnabled() {
+  // OPT-IN since build 68: QUIC proof verification fails on QNX
+  // (CERTIFICATE_VERIFY_FAILED spam; CBC/googlevideo media timeouts), so
+  // HTTP/3 is off unless explicitly enabled for debugging.
+  return BerryHasMarker("berry-quic.enable");
+}
+
+bool BerryWasmLiftoffEnabled() {
+  return BerryHasMarker("berry-wasm-liftoff.enable");
+}
+
+bool BerryStallPeakLogEnabled() {
+  return !BerryHasMarker("berry-stall-log.disable");
 }
 
 void BerrySetMarker(const char* name, bool on) {
@@ -1126,8 +1192,9 @@ std::string BerryBuildSettingsHtml() {
   h += resbtn("720", "720\u00b2<br><small>sharp</small>");
   h += resbtn("1440", "1440<br><small>native</small>");
   h += "</div>";
-  h += "<div class='row'><div class='lbl'><b>Resolution tier</b><i>Scales "
-       "render buffer for your device profile (aspect kept).</i></div></div>";
+  h += "<div class='row'><div class='lbl'><b>Resolution tier</b><i>Default "
+       "540\u00b2 on Passport; scales render buffer for your device.</i></div>"
+       "</div>";
   h += toggle("Dark mode", "Force dark rendering on all sites", "dark",
               BerryHasMarker("berry-dark.enable"));
   h += "</div>";
@@ -1136,6 +1203,7 @@ std::string BerryBuildSettingsHtml() {
   h += "<div class='resrow'>";
   h += fpsbtn("60", "60<br><small>smooth</small>");
   h += fpsbtn("45", "45<br><small>balanced</small>");
+  h += fpsbtn("perf", "Perf<br><small>540+12</small>");
   h += fpsbtn("15", "15<br><small>cool</small>");
   h += fpsbtn("lite", "Lite<br><small>420+12</small>");
   h += "</div></div>";
@@ -1150,14 +1218,14 @@ std::string BerryBuildSettingsHtml() {
   h += "</div>";
 
   h += "<div class='sec'>Network</div><div class='card'>";
-  h += toggle("HTTP/3 (QUIC)", "Faster connect on supported CDNs", "quic",
-              BerryHasMarker("berry-quic.enable"));
+  h += toggle("HTTP/3 (QUIC)", "Breaks video CDNs on QNX (default off)",
+              "quic", BerryQuicEnabled());
   h += toggle("HTTP/1.1 only", "Fallback when HTTP/2 misbehaves", "http1",
               BerryHasMarker("berry-http1.enable"));
   h += toggle("Disable Alt-Svc", "Skip DNS HTTPS/SVCB upgrade hints", "altsvc",
               BerryHasMarker("berry-alt-svc.disable"));
-  h += toggle("Block telemetry", "Fast-fail crash/analytics hosts", "block",
-              BerryHasMarker("berry-block.enable"));
+  h += toggle("Block telemetry", "Block Meta analytics pixels (graph API allowed)",
+              "block", BerryBlockTelemetryEnabled());
   h += "</div>";
 
   h += "<div class='sec'>YouTube</div><div class='card'>";
@@ -1183,10 +1251,14 @@ std::string BerryBuildSettingsHtml() {
               BerryLowendEnabledByDefault());
   h += toggle("Service Workers", "PWA app-shell caching (default on)", "sw",
               !BerryHasMarker("berry-sw.disable"));
-  h += toggle("Disk &amp; media cache", "64MB HTTP/media cache (default on)",
+  h += toggle("Disk &amp; media cache", "256MB HTTP/media cache (default on)",
               "diskcache", !BerryHasMarker("berry-disk-cache.disable"));
-  h += toggle("Privacy sandbox cuts", "Disable FedCM/ads APIs background work",
-              "privacy", BerryHasMarker("berry-privacy.disable"));
+  h += toggle("Privacy sandbox cuts", "Disable FedCM/ads APIs (default on)",
+              "privacy", BerryPrivacyCutsEnabled());
+  h += toggle("WASM liftoff-only", "Faster WhatsApp load; off for Messenger login",
+              "wasmliftoff", BerryWasmLiftoffEnabled());
+  h += toggle("Stall peak log", "Log worst main-thread gap / 60s (default on)",
+              "stalllog", BerryStallPeakLogEnabled());
   h += "</div>";
 
   h += "<div class='sec'>Developer</div><div class='card'>";
@@ -1294,20 +1366,28 @@ void BerryHandleSet(Shell* shell, const GURL& url) {
   } else if (k == "sw") {
     BerrySetMarker("berry-sw.disable", !on);
     BerrySetMarker("berry-sw.enable", false);
-  } else if (k == "quic")
+  } else if (k == "quic") {
     BerrySetMarker("berry-quic.enable", on);
-  else if (k == "http1")
+    BerrySetMarker("berry-quic.disable", false);
+  } else if (k == "http1")
     BerrySetMarker("berry-http1.enable", on);
   else if (k == "altsvc")
     BerrySetMarker("berry-alt-svc.disable", on);
-  else if (k == "block")
-    BerrySetMarker("berry-block.enable", on);
-  else if (k == "ytmobile")
+  else if (k == "block") {
+    BerrySetMarker("berry-block.disable", !on);
+    BerrySetMarker("berry-block.enable", false);
+  } else if (k == "ytmobile")
     BerrySetMarker("berry-youtube-mobile.enable", on);
   else if (k == "diskcache")
     BerrySetMarker("berry-disk-cache.disable", !on);
-  else if (k == "privacy")
-    BerrySetMarker("berry-privacy.disable", on);
+  else if (k == "privacy") {
+    BerrySetMarker("berry-privacy.enable", !on);
+    BerrySetMarker("berry-privacy.disable", false);
+  } else if (k == "wasmliftoff") {
+    BerrySetMarker("berry-wasm-liftoff.enable", on);
+    BerrySetMarker("berry-wasm-tier-up.enable", false);
+  } else if (k == "stalllog")
+    BerrySetMarker("berry-stall-log.disable", !on);
   else if (k == "mic")
     BerrySetMarker("berry-mic.enable", on);
   else if (k == "videodebug")
@@ -1330,13 +1410,16 @@ void BerryHandleSet(Shell* shell, const GURL& url) {
     else if (vdec == "1440")
       BerrySetMarker("berry-x-1440.enable", true);
   } else if (k == "fps") {
+    BerrySetMarker("berry-x-perf.enable", false);
     BerrySetMarker("berry-x-lite.enable", false);
     BerrySetMarker("berry-x-fullfps.enable", false);
     BerrySetMarker("berry-x-slow10.enable", false);
     BerrySetMarker("berry-x-slow12.enable", false);
     BerrySetMarker("berry-x-slow15.enable", false);
     BerrySetMarker("berry-x-slow45.enable", false);
-    if (vdec == "lite")
+    if (vdec == "perf")
+      BerrySetMarker("berry-x-perf.enable", true);
+    else if (vdec == "lite")
       BerrySetMarker("berry-x-lite.enable", true);
     else if (vdec == "60")
       BerrySetMarker("berry-x-fullfps.enable", true);
@@ -1403,10 +1486,29 @@ void Shell::DidStartNavigation(NavigationHandle* navigation_handle) {
     BerryShowHome(this);
     return;
   }
+  if (!navigation_handle->IsSameDocument() && url.scheme() == "intent") {
+    const GURL https = BerryIntentUrlToHttps(url);
+    QNX_NAV_LOG_FMT("BerryNav: blocked intent:// -> \"%s\"\n",
+                    https.is_valid() ? https.spec().substr(0, 100).c_str()
+                                     : "(invalid)");
+    if (https.is_valid()) {
+      Shell* shell = this;
+      GetUIThreadTaskRunner({})->PostTask(
+          FROM_HERE, base::BindOnce(
+                         [](Shell* s, const GURL& u) {
+                           if (s)
+                             s->LoadURL(u);
+                         },
+                         shell, https));
+    }
+    return;
+  }
   if (BerryIsGoogleMapsUrl(url)) {
     BerryApplyFixedGeolocationOverride(web_contents_.get());
     BerryScheduleMapsGeolocationRetries(web_contents_.get());
     QNX_NAV_LOG_FMT("%s", "BerryNav: Maps geolocation override applied\n");
+    BerryMaybeRedirectBrokenMapsCamera(this, url,
+                                       navigation_handle->IsSameDocument());
   }
   // Pin visibility early — YouTube aborts googlevideo fetches if hidden.
   if (!navigation_handle->IsSameDocument() && !navigation_handle->IsErrorPage() &&
@@ -1417,30 +1519,23 @@ void Shell::DidStartNavigation(NavigationHandle* navigation_handle) {
       web_contents_->UpdateWebContentsVisibility(Visibility::VISIBLE);
     }
   }
-  // User-Agent: preset desktop at WebContents creation (BerryApplySessionDesktopUA)
-  // so the first youtube.com navigation does not flip UA mid-flight and restart
-  // the loader (FactoryStart #2 + ERR_ABORTED on #1).
-  if (!navigation_handle->IsSameDocument() &&
-      (url.SchemeIsHTTPOrHTTPS() || url.SchemeIsFile())) {
-    const bool session_desktop =
-        access("/accounts/1000/shared/misc/berry-youtube-mobile.enable", F_OK) !=
-        0;
-    if (session_desktop) {
-      navigation_handle->SetIsOverridingUserAgent(true);
-      QNX_NAV_LOG_FMT("BerryNav: UA = desktop (session) host=\"%s\"\n",
-                      url.host().c_str());
-    } else if (url.SchemeIsHTTPOrHTTPS()) {
-      const bool want_desktop = BerryHostPrefersDesktopUA(url);
-      if (want_desktop) {
-        blink::UserAgentOverride ov;
-        ov.ua_string_override = GetBerryDesktopUserAgent();
-        ov.ua_metadata_override = GetBerryDesktopUserAgentMetadata();
-        web_contents_->SetUserAgentOverride(ov, /*override_in_new_tabs=*/false);
-      }
-      navigation_handle->SetIsOverridingUserAgent(want_desktop);
-      QNX_NAV_LOG_FMT("BerryNav: UA = %s for host=\"%s\"\n",
-                      want_desktop ? "desktop" : "mobile", url.host().c_str());
+  // Per-host desktop UA (YouTube/googlevideo, WhatsApp, Google Maps). Do NOT
+  // force desktop globally — embedded Maps on third-party sites (e.g.
+  // hihostels.ca) needs the mobile UA + viewport so the Maps raster path
+  // initializes and fetches khms/vt tiles.
+  if (!navigation_handle->IsSameDocument() && url.SchemeIsHTTPOrHTTPS()) {
+    const bool want_desktop = BerryHostPrefersDesktopUA(url);
+    blink::UserAgentOverride ov;
+    if (want_desktop) {
+      ov.ua_string_override = GetBerryDesktopUserAgent();
+      ov.ua_metadata_override = GetBerryDesktopUserAgentMetadata();
     }
+    // Always push override state — empty clears a prior desktop UA when leaving
+    // YouTube/WhatsApp/Messenger/Maps for a normal site (embedded Maps needs mobile UA).
+    web_contents_->SetUserAgentOverride(ov, /*override_in_new_tabs=*/false);
+    navigation_handle->SetIsOverridingUserAgent(want_desktop);
+    QNX_NAV_LOG_FMT("BerryNav: UA = %s for host=\"%s\"\n",
+                    want_desktop ? "desktop" : "mobile", url.host().c_str());
   }
   // Update the toolbar as soon as navigation starts so the user sees the
   // destination URL while the network fetch runs (commit can take 20+ s).

@@ -23,10 +23,8 @@ class ShellRenderFrameObserver : public RenderFrameObserver {
   void OnDestruct() override;
   void DidClearWindowObject() override;
 #if BUILDFLAG(IS_QNX)
-  // Installs a minimal real-Chrome JS surface (window.chrome, plugins,
-  // pdfViewerEnabled) so sites that gate on "is this really Chrome" (e.g.
-  // Google sign-in's secure-browser check) don't immediately reject us.
   void InjectBerryChromeShim();
+  void InjectBerryMapsGeolocationShim();
 #endif
   void OnInterfaceRequestForFrame(
       const std::string& interface_name,

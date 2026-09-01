@@ -31,6 +31,8 @@
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "url/gurl.h"
 
+extern "C" int __llvm_profile_write_file(void);
+
 namespace content {
 
 namespace {
@@ -284,8 +286,17 @@ void QnxExitCallback() {
   // stuck present/RunUntilIdle loop, which is why content_shell sometimes
   // survived after the window closed. Arm an independent hard-exit watchdog so
   // the process is guaranteed to die shortly regardless of teardown progress.
-  base::StartQnxExitWatchdog(3000);
+  const char* pgo = getenv("BERRY_PGO_COLLECT");
+  const bool pgo_collect = pgo && pgo[0] == '1';
+  if (!pgo_collect)
+    base::StartQnxExitWatchdog(3000);
   Shell::Shutdown();
+  if (pgo_collect) {
+    // Flush LLVM instrumentation profiles before exit (atexit is skipped by
+    // _exit). Used during berry-pgo-collect.enable collection sessions.
+    __llvm_profile_write_file();
+    exit(0);
+  }
   // If we got here cleanly the main loop quit closure already ran; make the
   // exit immediate rather than waiting on any remaining loop iterations.
   _exit(0);

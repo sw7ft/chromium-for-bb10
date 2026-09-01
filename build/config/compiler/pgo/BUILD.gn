@@ -9,19 +9,68 @@ import("//build/config/compiler/pgo/pgo.gni")
 import("//build/config/features.gni")
 import("//build/toolchain/toolchain.gni")
 
+# QNX PGI final link: force bfd + flatten thin archives (executables only).
+config("pgo_qnx_bfd_link") {
+  visibility = [
+    ":default_pgo_flags",
+    "//build/config:executable_deps",
+  ]
+
+  if (chrome_pgo_phase == 1 && is_qnx && is_a_target_toolchain) {
+    ldflags = [
+      "-B/root/chromium/src/deploy/qnx-pgi-bin",
+      "-B/root/qnx800/bin",
+      "-Wl,-fuse-ld=bfd",
+      "-Wl,--no-gc-sections",
+    ]
+  }
+}
+
+# QNX links with GCC; the profile instrumentation runtime must be linked
+# explicitly (see qnx_profile_runtime_path in pgo.gni).
+config("pgo_qnx_profile_runtime") {
+  visibility = [
+    ":default_pgo_flags",
+    "//build/config:executable_deps",
+  ]
+
+  if (chrome_pgo_phase == 1 && is_qnx && is_a_target_toolchain) {
+    if (!defined(target_type) || target_type != "shared_library") {
+      assert(qnx_profile_runtime_path != "",
+             "Set qnx_profile_runtime_path to libclang_rt.profile-arm.a for PGI")
+      libs = [ qnx_profile_runtime_path ]
+    }
+  }
+}
+
+# Counteracts default pgo_instrumentation_flags on targets that must not be
+# instrumented (QNX shared libraries / loadable modules).
+config("pgo_no_instrumentation") {
+  visibility = [ "*" ]
+  cflags = [ "-fno-profile-generate" ]
+}
+
 # Configuration that enables PGO instrumentation.
 config("pgo_instrumentation_flags") {
-  visibility = [ ":default_pgo_flags" ]
+  visibility = [ "*" ]
 
   # Only add flags when chrome_pgo_phase == 1, so that variables we would use
   # are not required to be defined when we're not actually using PGO.
-  if (chrome_pgo_phase == 1 && is_clang && !is_nacl && is_a_target_toolchain) {
-    cflags = [ "-fprofile-generate" ]
+  if (chrome_pgo_phase == 1 && is_clang && !is_nacl && is_a_target_toolchain &&
+      (!defined(target_type) || target_type != "shared_library")) {
+    cflags = [
+      "-fprofile-generate",
+    ]
     if (!is_win) {
       # Windows directly calls link.exe instead of the compiler driver when
       # linking, and embeds the path to the profile runtime library as
       # dependent library into each object file.
-      ldflags = [ "-fprofile-generate" ]
+      #
+      # QNX uses GCC for the final link; -fprofile-generate there is ignored.
+      # Use :pgo_qnx_profile_runtime instead.
+      if (!is_qnx) {
+        ldflags = [ "-fprofile-generate" ]
+      }
     }
   }
 }
@@ -83,6 +132,10 @@ config("pgo_optimization_flags") {
       } else {
         _pgo_target = "mac"
       }
+    } else if (is_qnx) {
+      # Berry Browser: profiles are collected on-device and merged manually.
+      # Always set pgo_data_path in args.gn; never fetch from GCS.
+      _pgo_target = "qnx-arm"
     }
 
     if (_pgo_target == "win-arm64") {
@@ -109,7 +162,7 @@ config("pgo_optimization_flags") {
       inputs = [ "//chrome/build/android-arm64.pgo.txt" ]
     }
 
-    if (_pgo_target != "" && pgo_data_path == "") {
+    if (_pgo_target != "" && pgo_data_path == "" && !is_qnx) {
       pgo_data_path = exec_script("//tools/update_pgo_profiles.py",
                                   [
                                     "--target",
@@ -162,6 +215,9 @@ config("default_pgo_flags") {
     # Nothing. This config should be a no-op when chrome_pgo_phase == 0.
   } else if (chrome_pgo_phase == 1) {
     configs = [ ":pgo_instrumentation_flags" ]
+    if (is_qnx) {
+      configs += [ ":pgo_qnx_profile_runtime" ]
+    }
   } else if (chrome_pgo_phase == 2) {
     configs = [ ":pgo_optimization_flags" ]
   }

@@ -33,4 +33,10 @@ declare_args() {
 
   # When using chrome_pgo_phase = 2, read profile data from this path.
   pgo_data_path = ""
+
+  # QNX: path to cross-built libclang_rt.profile-arm.a (LLVM instrumentation
+  # runtime). Required when chrome_pgo_phase = 1 on QNX because the link step
+  # uses GCC, not Clang, and cannot pull in the profile runtime via -fprofile-
+  # generate at link time. Build with deploy/build-qnx-profile-runtime.sh.
+  qnx_profile_runtime_path = ""
 }

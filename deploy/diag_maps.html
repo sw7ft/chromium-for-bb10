@@ -1,0 +1,61 @@
+<!doctype html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Berry Maps diag</title>
+<style>
+  body { font-family: sans-serif; margin: 8px; background: #111; color: #eee; }
+  #map { width: 100%; height: 360px; background: #333; margin: 8px 0; }
+  #log { font-size: 12px; white-space: pre-wrap; }
+</style>
+</head><body>
+<h2>Maps / WebGL diagnostic</h2>
+<div id="map"></div>
+<pre id="log"></pre>
+<script>
+function L(m) { console.log('MAPSDIAG: ' + m); document.getElementById('log').textContent += m + '\n'; }
+L('start ua=' + navigator.userAgent.substring(0, 80));
+
+(function(){
+  try {
+    var c = document.createElement('canvas');
+    var gl = c.getContext('webgl') || c.getContext('experimental-webgl');
+    if (!gl) { L('WebGL1: MISSING'); return; }
+    var dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    var r = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : '(no debug ext)';
+    L('WebGL1: OK renderer=' + r);
+  } catch (e) { L('WebGL1 THREW ' + e); }
+})();
+
+(function(){
+  try {
+    var c = document.createElement('canvas');
+    var gl2 = c.getContext('webgl2');
+    L('WebGL2: ' + (gl2 ? 'OK' : 'MISSING'));
+  } catch (e) { L('WebGL2 THREW ' + e); }
+})();
+
+function initMap() {
+  L('initMap callback');
+  try {
+    var map = new google.maps.Map(document.getElementById('map'), {
+      center: { lat: 49.2577, lng: -123.1239 },
+      zoom: 12
+    });
+    new google.maps.Marker({ position: { lat: 49.2577, lng: -123.1239 }, map: map });
+    L('Map+Marker constructed');
+    setTimeout(function() {
+      var imgs = document.querySelectorAll('#map img, #map canvas');
+      L('after 5s: map child nodes=' + document.getElementById('map').childNodes.length +
+        ' imgs/canvas=' + imgs.length);
+    }, 5000);
+  } catch (e) { L('initMap THREW ' + e); }
+}
+
+var s = document.createElement('script');
+s.src = 'https://maps.googleapis.com/maps/api/js?key=AIzaSyAxXE60SJ53gN6KNc1OyssF2tX9osc9cH0&callback=initMap';
+s.onerror = function() { L('maps/api/js script onerror'); };
+document.head.appendChild(s);
+L('loading maps/api/js...');
+</script>
+</body></html>

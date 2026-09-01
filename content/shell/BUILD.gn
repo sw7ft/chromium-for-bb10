@@ -15,6 +15,7 @@ import("//gpu/vulkan/features.gni")
 import("//media/media_options.gni")
 import("//mojo/public/tools/bindings/mojom.gni")
 import("//ppapi/buildflags/buildflags.gni")
+import("//build/config/compiler/pgo/pgo.gni")
 import("//tools/grit/grit_rule.gni")
 import("//tools/grit/repack.gni")
 import("//tools/v8_context_snapshot/v8_context_snapshot.gni")
@@ -91,7 +92,10 @@ static_library("content_shell_app") {
     "//content/public/app",
     "//v8",
   ]
-  if (support_web_tests) {
+  # QNX PGI: web_test pulls in PPAPI loadable_modules; instrumented .o in .so
+  # links fail with ld.lld (.profd COMDAT discarded). Berry production shell
+  # does not need web tests during profile collection.
+  if (support_web_tests && !(is_qnx && chrome_pgo_phase == 1)) {
     deps += [
       "//content/web_test:web_test_browser",
       "//content/web_test:web_test_common",
@@ -409,6 +413,9 @@ static_library("content_shell_lib") {
       "browser/berry_browser_chrome.h",
       "browser/berry_geolocation_qnx.cc",
       "browser/berry_geolocation_qnx.h",
+      "browser/berry_maps_qnx.cc",
+      "browser/berry_maps_qnx.h",
+      "browser/berry_pgo_stub_qnx.cc",
       "browser/qnx_berry_daemon_host.cc",
       "browser/qnx_berry_daemon_host.h",
       "browser/shell_fixed_location_provider.cc",

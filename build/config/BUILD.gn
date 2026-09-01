@@ -18,6 +18,7 @@ import("//build/config/mac/mac_sdk_overrides.gni")
 import("//build/config/pch.gni")
 import("//build/config/rust.gni")
 import("//build/config/sanitizers/sanitizers.gni")
+import("//build/config/compiler/pgo/pgo.gni")
 import("//build/config/ui.gni")
 import("//build/toolchain/goma.gni")
 if (is_android) {
@@ -274,6 +275,12 @@ group("executable_deps") {
       public_deps += [ "//buildtools/third_party/libc++abi" ]
     }
     public_configs = [ "//build/config/sanitizers:link_executable" ]
+    if (is_qnx && chrome_pgo_phase == 1) {
+      public_configs += [
+        "//build/config/compiler/pgo:pgo_qnx_profile_runtime",
+        "//build/config/compiler/pgo:pgo_qnx_bfd_link",
+      ]
+    }
   }
 }
 
@@ -283,6 +290,10 @@ group("loadable_module_deps") {
     public_deps = [ ":common_deps" ]
 
     public_configs = [ "//build/config/sanitizers:link_shared_library" ]
+    if (is_qnx && chrome_pgo_phase == 1) {
+      public_configs +=
+          [ "//build/config/compiler/pgo:pgo_no_instrumentation" ]
+    }
   }
 }
 
@@ -292,6 +303,10 @@ group("shared_library_deps") {
     public_deps = [ ":common_deps" ]
 
     public_configs = [ "//build/config/sanitizers:link_shared_library" ]
+    if (is_qnx && chrome_pgo_phase == 1) {
+      public_configs +=
+          [ "//build/config/compiler/pgo:pgo_no_instrumentation" ]
+    }
   }
 }
 
