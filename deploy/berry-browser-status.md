@@ -1,9 +1,9 @@
-# BerryBrowserV3 — Project Status (Aug 31 2026)
+# BerryBrowserV3 — Project Status (Sep 6 2026)
 
-**Device:** BlackBerry Passport (QNX / BB10)  
+**Device:** BlackBerry Passport (QNX / BB10) — other BB10 models auto-detected since build 84 (see *Device compatibility*)  
 **Engine:** Chromium `content_shell` (~96 MB ARM), single-process default  
 **App:** BerryBrowserV3 `.bar` (`com.sw7ft.BerryShellV3`)  
-**Latest build:** **72** — deployed to device Sep 1 (engine+launcher+home.html via root SSH; no `.bar` reinstall needed)  
+**Latest build:** **84** — panel auto-detect (touch calibration on Q10/Q20/etc.), modern start page, Android-first YouTube playback  
 **Log:** `/accounts/1000/shared/misc/berry-kbd.log`
 
 This document is the consolidated “where we are” snapshot and **onboarding guide for the next agent**. Read **Executive summary** + **Core strategy**, then **Agent continuation guide**, **Diagnostics**, and **Build pipeline** before touching code.
@@ -56,6 +56,45 @@ Both spoof `visitorData` and Android VR client context where needed.
 - **`www.youtube.com/` home feed** — kevlar + SABR + botguard; same class as m.youtube.com  
 - **Passing Google reCAPTCHA checkbox** — server sends poisoned state; transport is clean  
 - **TLS/JA3 spoofing** — structural hypothesis largely excluded; not worth the cost  
+
+---
+
+## Device compatibility (build 84+)
+
+The engine is device-agnostic; what varies per model is **panel size, touch
+mapping, and render resolution**. Since build 84 the launcher queries libscreen
+for the native panel size at startup and derives all three automatically —
+before that, everything defaulted to Passport geometry and touch on 720-panel
+devices landed at half position (the Q10/Q20 "calibration" bug).
+
+| Device | Panel | Default render | Notes |
+|--------|-------|----------------|-------|
+| Passport | 1440×1440 | 720² (540² tier default) | Primary target; fully tested |
+| Classic (Q20) | 720×720 | 540² | Auto-detected; `q20` and `classic` both accepted |
+| Q10 / Q5 | 720×720 | 540² | Auto-detected |
+| Z10 | 768×1280 | 384×640 | Auto-detected; portrait, less tested |
+| Z30 / Z3 / Leap | 720×1280 | 360×640 | Auto-detected; portrait, less tested |
+| Unknown panel | detected W×H | half of panel (min 320) | Fallback: uses whatever libscreen reports |
+
+How it resolves, in order:
+1. **`berry-device` marker** (written by Settings > Device) — manual pick always wins.
+2. **libscreen auto-detect** — no marker or marker says `auto`: read the first
+   display's `SCREEN_PROPERTY_SIZE`, match a known profile (either orientation),
+   else synthesize output=panel, render=panel/2.
+3. **Passport fallback** — only if detection itself fails.
+
+The launcher exports `QNX_SCREEN_OUTPUT_*` (panel) vs `QNX_SCREEN_WIDTH/HEIGHT`
+(render); `QnxScreenMapOutputToRender()` scales incoming touch coordinates
+between them, so a wrong output size directly mis-places every tap.
+`berry-device-rotation` marker still overrides rotation (0/90/180/270).
+Settings > Device shows **Auto (detect)** as the default; the launcher logs
+`device = <name> (auto) panel=WxH` at startup for verification.
+
+Caveats: only the Passport is regression-tested on real hardware. Keyboard
+models (Q10/Q20) use the same BPS input path so hardware keys should work
+unchanged. Z-series portrait devices share the same rotation default (90) as
+the square phones — if a Z10 renders sideways, set rotation via marker. Minimum
+OS is BB10 10.3.x (QNX 8 userland, `libscreen.so.1`).
 
 ---
 

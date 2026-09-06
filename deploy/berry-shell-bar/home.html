@@ -13,243 +13,304 @@
   html, body {
     margin: 0; padding: 0; min-height: 100%;
     font-family: -apple-system, "Slate Pro", "Segoe UI", Arial, sans-serif;
-    color: #f3e6ef;
-    background:
-      radial-gradient(900px 480px at 50% -8%, rgba(119, 33, 111, 0.45) 0%, transparent 55%),
-      linear-gradient(180deg, #2c001e 0%, #1a0012 100%);
+    color: #f6edf3;
+    background: #14000e;
   }
-  .wrap { max-width: 700px; margin: 0 auto; padding: 18px 16px 32px; }
+  body::before {
+    content: "";
+    position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background:
+      radial-gradient(120% 70% at 80% -10%, rgba(233, 84, 32, 0.28) 0%, transparent 48%),
+      radial-gradient(90% 60% at -10% 10%, rgba(119, 33, 111, 0.55) 0%, transparent 52%),
+      radial-gradient(80% 50% at 50% 120%, rgba(94, 39, 80, 0.4) 0%, transparent 55%),
+      linear-gradient(180deg, #3a052c 0%, #1a0012 42%, #11000c 100%);
+  }
+
+  .wrap { max-width: 720px; margin: 0 auto; padding: 22px 18px 36px; }
 
   .top {
-    display: flex; align-items: center; gap: 14px;
-    margin-bottom: 24px;
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 28px;
   }
-  .profile {
-    width: 46px; height: 46px; border-radius: 12px; flex-shrink: 0;
+  .brand {
+    display: flex; align-items: center; gap: 12px;
+    flex: 1; min-width: 0;
+  }
+  .mark {
+    width: 48px; height: 48px; border-radius: 14px; flex-shrink: 0;
     overflow: hidden; background: #5e2750;
-    border: 1px solid rgba(233,84,32,0.45);
+    box-shadow: 0 8px 20px rgba(0,0,0,0.28);
   }
-  .profile img { width: 100%; height: 100%; display: block; }
-  .headline { flex: 1; min-width: 0; }
+  .mark img { width: 100%; height: 100%; display: block; }
   .headline h1 {
-    margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.02em;
+    margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.03em;
+    line-height: 1.15;
   }
-  .headline h1 span { color: #e95420; }
-  .greeting { margin: 3px 0 0; font-size: 13px; color: #c4a0b8; }
+  .headline h1 span { color: #ff7a3d; }
+  .greeting { margin: 4px 0 0; font-size: 13px; color: #c9a8be; font-weight: 500; }
   .fav-btn {
-    flex-shrink: 0; padding: 10px 14px; border-radius: 12px;
-    font-size: 14px; font-weight: 700; color: #f3e6ef;
-    background: rgba(119,33,111,0.35);
-    border: 1px solid rgba(233,84,32,0.35);
+    flex-shrink: 0; padding: 10px 14px; border-radius: 999px;
+    font-size: 13px; font-weight: 700; color: #f6edf3;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.1);
     cursor: pointer;
   }
-  .fav-btn:active { background: rgba(255,255,255,0.12); }
+  .fav-btn:active { background: rgba(255,255,255,0.14); }
 
-  /* unified search bar */
-  .search-wrap { margin-bottom: 26px; }
+  .search-wrap { margin-bottom: 30px; }
   .search-bar {
-    display: flex; align-items: stretch;
-    border: 2px solid rgba(255,255,255,0.1);
-    border-radius: 14px; overflow: hidden;
-    background: #1a0012;
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 6px 6px 18px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.1);
+    box-shadow: 0 14px 36px rgba(0,0,0,0.22);
   }
-  .search-bar:focus-within { border-color: #e95420; }
+  .search-bar:focus-within {
+    border-color: rgba(233,84,32,0.85);
+    box-shadow: 0 0 0 4px rgba(233,84,32,0.18), 0 14px 36px rgba(0,0,0,0.22);
+    background: rgba(255,255,255,0.1);
+  }
+  .search-ico {
+    width: 18px; height: 18px; flex-shrink: 0; opacity: 0.55;
+  }
   #omni {
     flex: 1; min-width: 0; border: none; outline: none;
-    font-size: 18px; padding: 16px 18px;
+    font-size: 17px; padding: 12px 4px;
     background: transparent; color: #fff;
   }
-  #omni::placeholder { color: #8a6a80; }
+  #omni::placeholder { color: #9b7d90; }
   #go {
-    border: none; border-left: 1px solid rgba(255,255,255,0.12);
-    padding: 0 22px; font-size: 16px; font-weight: 600;
-    background: #77216f; color: #fff; cursor: pointer;
-    white-space: nowrap;
+    width: 48px; height: 48px; border: none; border-radius: 50%;
+    background: #e95420; color: #fff; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    box-shadow: 0 6px 16px rgba(233,84,32,0.38);
   }
-  #go:active { background: #5e2750; }
-  .search-hint { margin: 8px 0 0 4px; font-size: 12px; color: #8a6a80; }
+  #go:active { background: #c64618; }
+  #go svg { width: 20px; height: 20px; display: block; }
+  .search-hint {
+    margin: 10px 0 0; text-align: center;
+    font-size: 12px; color: #8d6d82; letter-spacing: 0.01em;
+  }
 
-  .sec {
-    font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
-    color: #a08098; margin: 0 2px 12px; font-weight: 600;
+  .sec-row {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin: 0 4px 14px;
   }
+  .sec {
+    font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: #b089a4; margin: 0; font-weight: 700;
+  }
+
   .grid {
     display: grid; grid-template-columns: repeat(4, 1fr);
-    gap: 14px; margin-bottom: 22px;
+    gap: 10px 8px; margin-bottom: 22px;
   }
   .tile {
-    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
     text-decoration: none; text-align: center;
-    padding: 14px 4px 12px; border-radius: 16px;
-    background: rgba(255,255,255,0.03);
-    border: 1px solid rgba(255,255,255,0.06);
-    color: #e8d0e0; font-size: 13px; font-weight: 600;
+    padding: 10px 2px 8px; border-radius: 18px;
+    color: #ead6e3; font-size: 11px; font-weight: 600;
   }
-  .tile:active { background: rgba(255,255,255,0.08); }
+  .tile:active { background: rgba(255,255,255,0.06); }
   .tile .label {
     display: block; max-width: 100%; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap; padding: 0 2px;
   }
   .ic {
-    width: 58px; height: 58px; border-radius: 15px;
+    width: 56px; height: 56px; border-radius: 16px;
     display: flex; align-items: center; justify-content: center;
-    font-size: 26px; font-weight: 800; color: #fff;
+    font-size: 22px; font-weight: 800; color: #fff;
     line-height: 1;
+    box-shadow: 0 8px 18px rgba(0,0,0,0.28);
+    position: relative;
   }
-  .ic.two { font-size: 18px; letter-spacing: -0.5px; }
+  .ic::after {
+    content: "";
+    position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+    background: linear-gradient(180deg, rgba(255,255,255,0.22) 0%, transparent 42%);
+  }
+  .ic.two { font-size: 15px; letter-spacing: -0.4px; }
 
   .d  { background: #de5833; }
   .bi { background: #0078d4; }
   .ya { background: #6001d2; }
   .g  { background: #4285f4; }
-  .wp { background: #111; }
+  .wp { background: #1b1b1b; }
   .hn { background: #ff6600; }
-  .wi { background: #555; }
-  .yf { background: #7b1fa2; font-size: 28px; }
+  .wi { background: #5a5a5a; }
+  .yf { background: #7b1fa2; font-size: 26px; }
   .wa { background: #128c7e; }
   .msg { background: linear-gradient(135deg, #a334fa 0%, #0084ff 100%); }
   .fb { background: #1877f2; }
-  .x  { background: #000; border: 1px solid #333; }
+  .x  { background: #111; }
   .rd { background: #ff4500; }
   .am { background: #ff9900; color: #111; }
   .yt { background: #cc0000; }
 
-  .actions {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
-    margin-bottom: 20px;
+  .pin-card {
+    margin-bottom: 16px;
+    border-radius: 18px;
+    background: rgba(255,255,255,0.045);
+    border: 1px solid rgba(255,255,255,0.08);
+    overflow: hidden;
+  }
+  .pin-card summary {
+    list-style: none; cursor: pointer;
+    padding: 14px 16px;
+    font-size: 15px; font-weight: 700;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .pin-card summary::-webkit-details-marker { display: none; }
+  .pin-card summary span { color: #c9a8be; font-size: 12px; font-weight: 600; }
+  .pin-body { padding: 0 16px 16px; }
+  .pin-card p { margin: 0 0 12px; font-size: 13px; line-height: 1.45; color: #c4a0b8; }
+  .pin-card input {
+    width: 100%; margin-bottom: 8px; padding: 13px 14px; font-size: 15px;
+    border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);
+    background: rgba(10,0,8,0.45); color: #fff; outline: none;
+  }
+  .pin-card input:focus { border-color: #e95420; }
+  .pin-card button {
+    width: 100%; padding: 13px; border: none; border-radius: 12px;
+    font-size: 15px; font-weight: 700; background: #e95420; color: #fff;
+  }
+  .pin-card button:active { background: #c64618; }
+
+  .dock {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 10px; margin-bottom: 22px;
   }
   .act {
     display: flex; align-items: center; justify-content: center;
-    text-decoration: none; padding: 15px; border-radius: 14px;
-    font-size: 15px; font-weight: 700;
+    text-decoration: none; padding: 13px; border-radius: 14px;
+    font-size: 14px; font-weight: 700;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
+    color: #f3e6ef;
   }
-  .act.set { background: rgba(119,33,111,0.28); color: #f3e6ef;
-    border: 1px solid rgba(233,84,32,0.28); }
-  .act.res { background: rgba(222,88,51,0.12); color: #f0b8a8;
-    border: 1px solid rgba(222,88,51,0.25); }
-  .act:active { filter: brightness(1.12); }
+  .act.res { color: #ffb199; }
+  .act:active { background: rgba(255,255,255,0.1); }
 
-  .support {
-    padding: 14px; border-radius: 14px; text-align: center;
-    background: rgba(255,255,255,0.02);
-    border: 1px solid rgba(255,255,255,0.05);
-  }
-  .support p { margin: 0; font-size: 13px; color: #a08098; }
-  .support a { color: #e95420; font-weight: 600; text-decoration: none; }
+  .support { text-align: center; padding: 4px 8px 8px; }
+  .support p { margin: 0; font-size: 13px; color: #8d6d82; }
+  .support a { color: #ff7a3d; font-weight: 600; text-decoration: none; }
   .diag { margin-top: 8px; font-size: 11px; }
-  .diag a { color: #8a6a80; text-decoration: none; margin: 0 4px; }
-  .ver { margin-top: 8px; font-size: 11px; color: #6a4860; }
+  .diag a { color: #6e5166; text-decoration: none; margin: 0 6px; }
+  .ver { margin-top: 8px; font-size: 11px; color: #5a3d54; }
 
-  /* favorites manager modal */
   .modal-bg {
     display: none; position: fixed; inset: 0; z-index: 100;
-    background: rgba(0,0,0,0.65); align-items: center; justify-content: center;
+    background: rgba(8,0,6,0.72); align-items: center; justify-content: center;
     padding: 16px;
   }
   .modal-bg.open { display: flex; }
   .modal {
     width: 100%; max-width: 420px; max-height: 85vh; overflow: auto;
-    background: #2c001e; border: 1px solid rgba(233,84,32,0.28);
-    border-radius: 16px; padding: 18px;
+    background: #2a0822;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 20px; padding: 20px;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.45);
   }
-  .modal h2 { margin: 0 0 14px; font-size: 18px; }
+  .modal h2 { margin: 0 0 14px; font-size: 18px; letter-spacing: -0.02em; }
   .fav-row {
     display: flex; align-items: center; gap: 10px;
-    padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.06);
+    padding: 11px 0; border-bottom: 1px solid rgba(255,255,255,0.06);
   }
   .fav-row label { flex: 1; font-size: 14px; cursor: pointer; }
   .fav-row input[type=checkbox] { width: 20px; height: 20px; }
-  .add-row { margin-top: 14px; }
+  .add-row { margin-top: 16px; }
   .add-row input {
-    width: 100%; margin-bottom: 8px; padding: 12px; font-size: 15px;
-    border-radius: 10px; border: 1px solid rgba(255,255,255,0.12);
-    background: #1a0012; color: #fff;
+    width: 100%; margin-bottom: 8px; padding: 12px 14px; font-size: 15px;
+    border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);
+    background: rgba(10,0,8,0.45); color: #fff;
   }
   .modal-btns { display: flex; gap: 10px; margin-top: 16px; }
   .modal-btns button {
-    flex: 1; padding: 12px; border-radius: 10px; font-size: 15px;
+    flex: 1; padding: 12px; border-radius: 12px; font-size: 15px;
     font-weight: 700; border: none; cursor: pointer;
   }
-  .btn-done { background: #77216f; color: #fff; }
+  .btn-done { background: #e95420; color: #fff; }
   .btn-reset { background: rgba(255,255,255,0.08); color: #e8d0e0; }
-  .btn-add { background: #2a6b3c; color: #fff; width: 100%; margin-top: 4px; }
+  .btn-add { background: #77216f; color: #fff; width: 100%; margin-top: 4px; }
   .btn-pin {
-    flex: none; padding: 8px 10px; border-radius: 8px; font-size: 13px;
+    flex: none; padding: 8px 12px; border-radius: 999px; font-size: 12px;
     font-weight: 700; border: none; cursor: pointer;
-    background: #5e2750; color: #fff;
-  }
-  .pin-card {
-    margin-bottom: 20px; padding: 14px; border-radius: 14px;
-    background: rgba(94,39,80,0.18); border: 1px solid rgba(233,84,32,0.28);
-  }
-  .pin-card h2 { margin: 0 0 6px; font-size: 16px; }
-  .pin-card p { margin: 0 0 12px; font-size: 13px; color: #c4a0b8; }
-  .pin-card input {
-    width: 100%; margin-bottom: 8px; padding: 12px; font-size: 15px;
-    border-radius: 10px; border: 1px solid rgba(255,255,255,0.12);
-    background: #1a0012; color: #fff;
-  }
-  .pin-card button {
-    width: 100%; padding: 12px; border: none; border-radius: 10px;
-    font-size: 15px; font-weight: 700; background: #77216f; color: #fff;
+    background: rgba(255,255,255,0.1); color: #fff;
   }
 </style>
 </head>
 <body>
   <div class="wrap">
     <header class="top">
-      <div class="profile" aria-hidden="true"><img src="icon.png" alt=""></div>
-      <div class="headline">
-        <h1>Berry <span>Browser</span></h1>
-        <p class="greeting" id="greet">Good morning</p>
+      <div class="brand">
+        <div class="mark" aria-hidden="true"><img src="icon.png" alt=""></div>
+        <div class="headline">
+          <h1>Berry <span>Browser</span></h1>
+          <p class="greeting" id="greet">Good morning</p>
+        </div>
       </div>
-      <button type="button" class="fav-btn" id="fav-open">Favorites</button>
+      <button type="button" class="fav-btn" id="fav-open">Edit</button>
     </header>
 
     <section class="search-wrap">
       <form id="f">
         <div class="search-bar">
+          <svg class="search-ico" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="11" cy="11" r="6.5" stroke="#f6edf3" stroke-width="2"/>
+            <path d="M16 16l5 5" stroke="#f6edf3" stroke-width="2" stroke-linecap="round"/>
+          </svg>
           <input id="omni" type="text" inputmode="search" autocomplete="off"
                  autocapitalize="off" spellcheck="false"
                  placeholder="Search or enter address">
-          <button id="go" type="submit">Search</button>
+          <button id="go" type="submit" aria-label="Search">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M5 12h12M13 6l6 6-6 6" stroke="#fff" stroke-width="2.2"
+                    stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
         </div>
       </form>
-      <p class="search-hint">DuckDuckGo search &middot; type a URL to go directly</p>
+      <p class="search-hint">DuckDuckGo &middot; or type a URL</p>
     </section>
 
-    <p class="sec">Favorites</p>
+    <div class="sec-row">
+      <p class="sec">Apps</p>
+    </div>
     <nav class="grid" id="fav-grid" aria-label="Quick links"></nav>
 
-    <section class="pin-card">
-      <h2>Add to Home Screen</h2>
-      <p>Puts a shortcut on the BB10 desktop. Tap it later to open that site in Berry Browser &mdash; same idea as pinning WhatsApp or Messenger next to your other apps.</p>
-      <form id="pin-form">
-        <input id="pin-name" type="text" placeholder="Shortcut name" autocapitalize="off">
-        <input id="pin-url" type="text" placeholder="https://..." autocapitalize="off">
-        <button type="submit">Pin to desktop</button>
-      </form>
-    </section>
+    <details class="pin-card">
+      <summary>Pin to Home Screen <span>BB10 shortcut</span></summary>
+      <div class="pin-body">
+        <p>Adds a desktop icon that opens a site in Berry Browser &mdash; same idea as pinning WhatsApp next to your other apps.</p>
+        <form id="pin-form">
+          <input id="pin-name" type="text" placeholder="Shortcut name" autocapitalize="off">
+          <input id="pin-url" type="text" placeholder="https://..." autocapitalize="off">
+          <button type="submit">Pin to desktop</button>
+        </form>
+      </div>
+    </details>
 
-    <div class="actions">
+    <div class="dock">
       <a class="act set" href="https://berry.settings/">Settings</a>
       <a class="act res" href="https://berry.restart/">Restart</a>
     </div>
 
     <footer class="support">
-      <p>Built by <strong style="color:#f3e6ef">sw7ft</strong>
+      <p>Built by <strong style="color:#f6edf3">sw7ft</strong>
         &middot; <a href="https://www.patreon.com/sw7ft">Patreon</a></p>
       <p class="diag">
         <a href="file:///accounts/1000/shared/misc/diag.html">diag</a>
         <a href="file:///accounts/1000/shared/misc/diag_maps.html">maps</a>
       </p>
-      <div class="ver">Berry Browser &middot; v3.0.2 &middot; build 82</div>
+      <div class="ver">Berry Browser &middot; v3.0.2 &middot; build 84</div>
     </footer>
   </div>
 
   <div class="modal-bg" id="fav-modal" aria-hidden="true">
     <div class="modal">
-      <h2>Manage Favorites</h2>
+      <h2>Manage apps</h2>
       <div id="fav-list"></div>
       <div class="add-row">
         <input id="add-name" type="text" placeholder="Site name" autocapitalize="off">
@@ -404,9 +465,11 @@
   var h = new Date().getHours();
   var g = document.getElementById('greet');
   if (g) {
-    if (h < 12) g.textContent = 'Good morning';
-    else if (h < 17) g.textContent = 'Good afternoon';
-    else g.textContent = 'Good evening';
+    var days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var now = new Date();
+    var hello = h < 12 ? 'Good morning' : (h < 17 ? 'Good afternoon' : 'Good evening');
+    g.textContent = hello + ' · ' + days[now.getDay()] + ' ' + months[now.getMonth()] + ' ' + now.getDate();
   }
 
   document.getElementById('pin-form').addEventListener('submit', function(e) {
@@ -434,7 +497,10 @@
   });
 
   renderGrid();
-  requestAnimationFrame(function() { document.getElementById('omni').focus(); });
+  requestAnimationFrame(function() {
+    document.getElementById('omni').focus();
+    if (location.hash === '#favorites') document.getElementById('fav-open').click();
+  });
 })();
 </script>
 </body>

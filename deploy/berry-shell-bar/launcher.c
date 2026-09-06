@@ -19,11 +19,18 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <screen/screen.h>
+
 static const char* kScaleFactor = "--force-device-scale-factor=1";
 static const char* kSharedMisc = "/accounts/1000/shared/misc/";
 
 static int marker_exists(const char* name);
 static size_t read_marker_text(const char* name, char* out, size_t out_sz);
+static void scale_render_dims(int* render_w,
+                              int* render_h,
+                              int base_w,
+                              int base_h,
+                              float scale);
 
 /* BB10 device panel geometry (portrait). Render defaults are ~half panel on the
  * short axis unless the user picks a Display resolution tier. Touch coordinates
@@ -41,6 +48,7 @@ typedef struct {
 static const BerryDeviceProfile kDeviceProfiles[] = {
     {"passport", "Passport", 1440, 1440, 90, 720, 720},
     {"classic", "Classic", 720, 720, 90, 540, 540},
+    {"q20", "Classic", 720, 720, 90, 540, 540},
     {"q10", "Q10", 720, 720, 90, 540, 540},
     {"q5", "Q5", 720, 720, 90, 540, 540},
     {"z10", "Z10", 768, 1280, 90, 384, 640},
@@ -57,7 +65,54 @@ static const BerryDeviceProfile* find_device_profile(const char* id) {
         return &kDeviceProfiles[i];
     }
   }
-  return &kDeviceProfiles[0];
+  return NULL;
+}
+
+/* Match a physical panel size (either orientation) to a known profile. */
+static const BerryDeviceProfile* find_profile_by_panel(int w, int h) {
+  for (size_t i = 0; i < sizeof(kDeviceProfiles) / sizeof(kDeviceProfiles[0]);
+       ++i) {
+    const BerryDeviceProfile* p = &kDeviceProfiles[i];
+    if ((p->output_w == w && p->output_h == h) ||
+        (p->output_w == h && p->output_h == w))
+      return p;
+  }
+  return NULL;
+}
+
+/* Ask libscreen for the native panel size. This is what fixes touch
+ * calibration on Q10/Q20/Classic etc. without the user picking a device in
+ * Settings: touch events arrive in PANEL coordinates and are mapped to the
+ * render surface via QNX_SCREEN_OUTPUT_* (see qnx_screen_sizes.h), so a wrong
+ * output size (Passport 1440 assumed on a 720 panel) puts every tap at half
+ * position. Returns 1 on success. */
+static int detect_panel_size(int* w, int* h) {
+  screen_context_t ctx = NULL;
+  screen_display_t displays[8];
+  int count = 0;
+  int size[2] = {0, 0};
+  int ok = 0;
+  if (screen_create_context(&ctx, SCREEN_APPLICATION_CONTEXT) != 0)
+    return 0;
+  if (screen_get_context_property_iv(ctx, SCREEN_PROPERTY_DISPLAY_COUNT,
+                                     &count) == 0 &&
+      count > 0) {
+    if (count > 8)
+      count = 8;
+    memset(displays, 0, sizeof(displays));
+    if (screen_get_context_property_pv(ctx, SCREEN_PROPERTY_DISPLAYS,
+                                       (void**)displays) == 0 &&
+        displays[0] &&
+        screen_get_display_property_iv(displays[0], SCREEN_PROPERTY_SIZE,
+                                       size) == 0 &&
+        size[0] > 0 && size[1] > 0) {
+      *w = size[0];
+      *h = size[1];
+      ok = 1;
+    }
+  }
+  screen_destroy_context(ctx);
+  return ok;
 }
 
 static void apply_device_profile(int* output_w,
@@ -67,17 +122,53 @@ static void apply_device_profile(int* output_w,
                                  int* base_render_h,
                                  char* device_name,
                                  size_t device_name_len) {
+  /* Passport fallback if both the marker and detection fail. */
+  const BerryDeviceProfile* p = &kDeviceProfiles[0];
   char dev_id[64];
-  const char* id = "passport";
-  if (read_marker_text("berry-device", dev_id, sizeof(dev_id)))
-    id = dev_id;
-  const BerryDeviceProfile* p = find_device_profile(id);
+  int have_marker = read_marker_text("berry-device", dev_id, sizeof(dev_id)) &&
+                    strcmp(dev_id, "auto") != 0;
+
+  if (have_marker) {
+    const BerryDeviceProfile* m = find_device_profile(dev_id);
+    if (m) {
+      p = m;
+      snprintf(device_name, device_name_len, "%s", p->label);
+    } else {
+      have_marker = 0; /* unknown id -> fall through to autodetect */
+    }
+  }
+  if (!have_marker) {
+    int det_w = 0, det_h = 0;
+    if (detect_panel_size(&det_w, &det_h)) {
+      const BerryDeviceProfile* m = find_profile_by_panel(det_w, det_h);
+      if (m) {
+        p = m;
+        snprintf(device_name, device_name_len, "%s (auto)", p->label);
+      } else {
+        /* Unknown panel: use detected size directly, render at half. */
+        *output_w = det_w;
+        *output_h = det_h;
+        *rotation = 90;
+        scale_render_dims(base_render_w, base_render_h, det_w, det_h, 0.5f);
+        snprintf(device_name, device_name_len, "auto %dx%d", det_w, det_h);
+        char rot_buf2[16];
+        if (read_marker_text("berry-device-rotation", rot_buf2,
+                             sizeof(rot_buf2))) {
+          int r = atoi(rot_buf2);
+          if (r == 0 || r == 90 || r == 180 || r == 270)
+            *rotation = r;
+        }
+        return;
+      }
+    } else {
+      snprintf(device_name, device_name_len, "%s (default)", p->label);
+    }
+  }
   *output_w = p->output_w;
   *output_h = p->output_h;
   *rotation = p->rotation;
   *base_render_w = p->default_render_w;
   *base_render_h = p->default_render_h;
-  snprintf(device_name, device_name_len, "%s", p->label);
 
   char rot_buf[16];
   if (read_marker_text("berry-device-rotation", rot_buf, sizeof(rot_buf))) {
@@ -398,7 +489,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  fprintf(stderr, "BerryShell: Berry Browser build 82\n");
+  fprintf(stderr, "BerryShell: Berry Browser build 84\n");
   fprintf(stderr, "BerryShell: app dir = %s\n", dir);
   fprintf(stderr, "BerryShell: work dir (cwd) = %s\n", work);
   fprintf(stderr, "BerryShell: %s\n",

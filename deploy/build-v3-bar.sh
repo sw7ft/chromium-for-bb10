@@ -39,7 +39,8 @@ BAR_NAME="BerryBrowserV3-${VERSION}-build${BUILD}.bar"
 BAR_OUT="$BAR_DIR/$BAR_NAME"
 
 echo "=== compile launcher (QNX ARM) ==="
-"$GCC" -O2 -o "$BAR_DIR/launcher" "$BAR_DIR/launcher.c"
+"$GCC" -O2 -o "$BAR_DIR/launcher" "$BAR_DIR/launcher.c" \
+  -L"$QNX800/arm-blackberry-qnx8eabi/usr/lib" -lscreen
 file "$BAR_DIR/launcher"
 
 echo "=== package $BAR_OUT ==="

@@ -999,12 +999,14 @@ std::string BerryReadTextMarker(const char* name) {
 std::string BerryCurrentDeviceKey() {
   std::string d = BerryReadTextMarker("berry-device");
   if (d.empty())
-    return "passport";
+    return "auto";
   return d;
 }
 
 const char* BerryDeviceLabel(const std::string& id) {
-  if (id == "classic")
+  if (id == "auto")
+    return "Auto";
+  if (id == "classic" || id == "q20")
     return "Classic";
   if (id == "q10")
     return "Q10";
@@ -1022,7 +1024,9 @@ const char* BerryDeviceLabel(const std::string& id) {
 }
 
 const char* BerryDevicePanelHint(const std::string& id) {
-  if (id == "classic" || id == "q10" || id == "q5")
+  if (id == "auto")
+    return "panel detected at launch";
+  if (id == "classic" || id == "q20" || id == "q10" || id == "q5")
     return "720\u00b2 panel";
   if (id == "z10")
     return "768\u00d71280";
@@ -1177,14 +1181,16 @@ std::string BerryBuildSettingsHtml() {
   h += BerryDevicePanelHint(device);
   h += "). Pick your phone model.</i></div></div>";
   h += "<div class='resrow'>";
+  h += devbtn("auto", "Auto", "detect");
   h += devbtn("passport", "Passport", "1440 sq");
   h += devbtn("classic", "Classic", "720 sq");
   h += devbtn("q10", "Q10", "720 sq");
-  h += devbtn("q5", "Q5", "720 sq");
   h += "</div><div class='resrow'>";
+  h += devbtn("q5", "Q5", "720 sq");
   h += devbtn("z10", "Z10", "768 wide");
   h += devbtn("z30", "Z30", "720 wide");
   h += devbtn("z3", "Z3", "720 wide");
+  h += "</div><div class='resrow'>";
   h += devbtn("leap", "Leap", "720 wide");
   h += "</div></div>";
 
@@ -1623,10 +1629,14 @@ void BerryHandleSet(Shell* shell, const GURL& url) {
   else if (k == "home")
     BerrySetTextMarker("berry-home-url", vdec);
   else if (k == "device") {
-    if (vdec == "passport" || vdec == "classic" || vdec == "q10" ||
-        vdec == "q5" || vdec == "z10" || vdec == "z30" || vdec == "z3" ||
-        vdec == "leap")
+    if (vdec == "auto") {
+      /* Auto = no marker; the launcher detects the panel via libscreen. */
+      BerrySetTextMarker("berry-device", "");
+    } else if (vdec == "passport" || vdec == "classic" || vdec == "q20" ||
+               vdec == "q10" || vdec == "q5" || vdec == "z10" ||
+               vdec == "z30" || vdec == "z3" || vdec == "leap") {
       BerrySetTextMarker("berry-device", vdec);
+    }
   }
 
   BerryShowSettings(shell);
