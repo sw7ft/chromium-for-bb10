@@ -1,54 +1,74 @@
 # Chromium for BlackBerry 10 (QNX ARM32)
 
-A port of Chromium's `content_shell` to QNX, targeting the **BlackBerry Passport** (Snapdragon 801, ARMv7-A). This brings a modern (~2024-era) Chromium engine to a platform that was only ever shipped with an ancient WebKit fork.
+A port of Chromium's `content_shell` to QNX / BlackBerry 10 — now shipping as
+**Berry Browser**, a full windowed browser app for BB10 phones. This brings a
+modern (~2024-era) Chromium engine to a platform that only ever shipped with an
+ancient WebKit fork.
 
-## What Works
+What started as a headless `--dump-dom` experiment (still documented below) is
+today an installable `.bar` with GPU rendering, a Skia-drawn toolbar, HTTPS
+with a bundled root store, working YouTube playback, WhatsApp Web, ad/tracker
+blocking, and an Ubuntu-styled home screen.
 
-- **Headless browser** running in single-process mode on the BlackBerry Passport
-- **HTML parsing and DOM construction** via Blink
-- **V8 JavaScript engine** initialized and running on ARM32 QNX
-- **`--dump-dom` output** for `about:blank`, `data:`, local HTTP, **external HTTP**, and **HTTPS** with clean exit
-- **Local HTTP page loading** -- full HTML + JavaScript rendering via `http://127.0.0.1`
-- **External HTTP page loading** -- fetching and rendering pages from the internet (e.g. `http://example.com`)
-- **HTTPS page loading** -- TLS 1.3 via BoringSSL (e.g. `https://example.com`)
-- **Complex HTTPS pages** -- `https://www.google.com` and `https://en.wikipedia.org/wiki/QNX` dump full DOM (~200KB+)
-- **ICU internationalization**, CSS default stylesheets, full DOM tree
+## Download — Berry Browser (V3)
 
-```
-$ ./run.sh https://example.com 2>/dev/null
-<html><head><title>Example Domain</title>...
-<h1>Example Domain</h1>
-<p>This domain is for use in documentation examples...</p>
-...</html>
-```
+**Latest: v3.0.2 build 84** — [`releases/BerryBrowserV3-3.0.2-build84.bar`](releases/BerryBrowserV3-3.0.2-build84.bar) (~60 MB)
 
-```
-$ ./run.sh 'data:text/html,<h1>Hello from BB10</h1>' 2>/dev/null
-<html><head></head><body><h1>Hello from BB10</h1></body></html>
-```
+Install like any BB10 sideload:
 
-## In Progress
+1. Enable **Development Mode** on the phone (Settings > Security and Privacy).
+2. Sideload the `.bar` with Sachesi or DDPB from a computer — or copy it to the
+   device and install with an on-device file manager that supports `.bar`.
+3. Launch **Berry Browser** from the home screen.
 
-- **Feature hardening** -- tiered re-enablement of HTTP/2, Viz, multi-process, GPU (see `deploy/HARDENING.md`)
-- **Ozone platform for QNX Screen** -- windowed rendering backend using `screen_create_window()` + Skia software rasterizer
-- **Browser chrome UI** -- Skia-rendered toolbar with URL bar, back/forward/reload buttons
-- **BAR packaging** -- native app packaging for BB10 launcher (currently crashes on launch, needs Ozone debugging)
-- **Root CA certificates** -- device has no CA bundle, requires `--ignore-certificate-errors` for HTTPS
-- **HTTP/2** -- ALPN negotiation causes 400 responses, currently forced to HTTP/1.1
+New in build 84: the app **auto-detects the panel size** at launch, so touch is
+correctly calibrated on every BB10 model — not just the Passport. Earlier
+builds needed Settings > Device on non-Passport phones.
 
-## What Doesn't Work (Yet)
+### What works in Berry Browser
 
-- **HTTP/2** -- disabled via `--disable-http2` (ALPN negotiation issue)
-- **Certificate verification** -- no root CA store on device, bypassed with `--ignore-certificate-errors`
-- **Multi-process mode** -- QNX process model differences
-- **Service workers, web workers** -- disabled
-- **Windowed mode** -- Ozone `qnx_screen` platform needs debugging
+- **Windowed GPU rendering** (EGL + Skia), 45 fps default cap, resolution tiers
+- **HTTPS** everywhere via bundled root CA store (BoringSSL, TLS 1.3, QUIC)
+- **YouTube**: watch pages + search through a lightweight built-in player
+  (progressive MP4 — no SABR/kevlar player)
+- **WhatsApp Web, Facebook Messenger**, DuckDuckGo / Bing / Google search
+- **Ad & tracker blocking** at the network layer
+- **Pin sites to the BB10 home screen**, BB10 Share integration,
+  `mailto:`/`tel:`/`sms:` handoff to native apps
+- In-app **Settings** (resolution, frame rate, dark mode, device profile) and
+  persistent disk cache
+
+### Device compatibility
+
+| Device | Panel | Status |
+|--------|-------|--------|
+| Passport | 1440×1440 | Primary target — fully tested |
+| Classic (Q20) / Q10 / Q5 | 720×720 | Auto-detected since build 84 (fixes touch calibration) |
+| Z10 | 768×1280 | Auto-detected; less tested |
+| Z30 / Z3 / Leap | 720×1280 | Auto-detected; less tested |
+
+Requires BB10 10.3.x. Manual device selection in Settings still overrides
+auto-detect; `berry-device-rotation` marker corrects orientation if needed.
+
+## Branches
+
+| Branch | Contents |
+|--------|----------|
+| **`berry-v3`** (active) | Full Chromium source of the current Berry Browser app — all engine work, shims, launcher, packaging |
+| `qnx-bb10-v3` | Kept in sync with `berry-v3` (same commits) |
+| `qnx-bb10` | Earlier V2 line (pre-Berry-Browser save point) |
+| `main` | This snapshot: docs, patches, and prebuilt binaries against the base commit |
+
+Recent `berry-v3` milestones: YouTube watch/search shims (builds 43–49),
+stability/video/login fixes (50–72), Ubuntu-themed chrome + BB10 share +
+Android-first YouTube playback (82), modern start page (83), device panel
+auto-detect (84).
 
 ## Target Hardware
 
 | | |
 |---|---|
-| **Device** | BlackBerry Passport (SQW100-1) |
+| **Primary device** | BlackBerry Passport (SQW100-1) |
 | **SoC** | Qualcomm Snapdragon 801 |
 | **CPU** | Quad-core Krait 400, ARMv7-A |
 | **RAM** | 3 GB |
@@ -60,13 +80,42 @@ $ ./run.sh 'data:text/html,<h1>Hello from BB10</h1>' 2>/dev/null
 ad76543128c308a9afdfc1ecf5b3f714886446c1
 ```
 
-All patches apply against this commit. Fetch Chromium source using `depot_tools` and check out this commit before applying.
+All patches apply against this commit. Fetch Chromium source using `depot_tools` and check out this commit before applying. The `berry-v3` branch already contains everything applied.
+
+---
+
+# Original headless port (historical)
+
+The sections below document the original bring-up: a headless `content_shell`
+that could `--dump-dom` over SSH. Still useful for understanding the port's
+foundations and for building from source.
+
+## What Worked (headless era)
+
+- **Headless browser** running in single-process mode on the BlackBerry Passport
+- **HTML parsing and DOM construction** via Blink
+- **V8 JavaScript engine** initialized and running on ARM32 QNX
+- **`--dump-dom` output** for `about:blank`, `data:`, local HTTP, **external HTTP**, and **HTTPS** with clean exit
+- **Complex HTTPS pages** -- `https://www.google.com` and `https://en.wikipedia.org/wiki/QNX` dump full DOM (~200KB+)
+
+```
+$ ./run.sh https://example.com 2>/dev/null
+<html><head><title>Example Domain</title>...
+<h1>Example Domain</h1>
+<p>This domain is for use in documentation examples...</p>
+...</html>
+```
+
+Everything listed as "in progress" back then — windowed Ozone rendering, the
+Skia toolbar, `.bar` packaging, root CAs, GPU — has since landed on `berry-v3`.
 
 ## Repository Structure
 
 ```
 ├── README.md
-├── browser-content-shell-131.zip  # pre-built binary package (72 MB)
+├── releases/
+│   └── BerryBrowserV3-3.0.2-build84.bar  # installable Berry Browser app (~60 MB)
+├── browser-content-shell-131.zip  # pre-built headless binary package (72 MB)
 ├── patches/
 │   └── qnx-port.patch          # unified diff (~21k lines)
 ├── src/                         # 42 new QNX-specific files
