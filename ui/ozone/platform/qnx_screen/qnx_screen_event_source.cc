@@ -343,6 +343,42 @@ QnxKeyMap MapQnxKey(int sym) {
   return m;
 }
 
+// BB10 physical-keyboard Alt layer (symbols printed on the Q10/Q20/Classic
+// keys). The OS keymap normally translates KEY_SYM itself when Alt is held
+// (like Shift does); this table is the fallback when the raw letter arrives
+// instead. Returns 0 when the key has no Alt-layer symbol.
+int QnxAltLayerSym(int sym) {
+  switch (sym) {
+    case 'q': return '#';
+    case 'w': return '1';
+    case 'e': return '2';
+    case 'r': return '3';
+    case 't': return '(';
+    case 'y': return ')';
+    case 'u': return '_';
+    case 'i': return '-';
+    case 'o': return '+';
+    case 'p': return '@';
+    case 'a': return '*';
+    case 's': return '4';
+    case 'd': return '5';
+    case 'f': return '6';
+    case 'g': return '/';
+    case 'h': return ':';
+    case 'j': return ';';
+    case 'k': return '\'';
+    case 'l': return '"';
+    case 'z': return '7';
+    case 'x': return '8';
+    case 'c': return '9';
+    case 'v': return '?';
+    case 'b': return '!';
+    case 'n': return ',';
+    case 'm': return '.';
+    default: return 0;
+  }
+}
+
 }  // namespace
 
 void QnxScreenEventSource::ProcessKeyboardEvent(screen_event_t ev) {
@@ -369,9 +405,17 @@ void QnxScreenEventSource::ProcessKeyboardEvent(screen_event_t ev) {
   const bool shift_mod =
       (mods & (KEYMOD_SHIFT | KEYMOD_SHIFT_LOCK | KEYMOD_CAPS_LOCK)) != 0;
   const bool shift_effective = shift_mod || shift_latched_;
+  const bool alt_mod = (mods & KEYMOD_ALT) != 0;
 
   int effective_sym = sym;
-  if (shift_effective && sym >= 'a' && sym <= 'z')
+  if (alt_mod) {
+    // Q10/Q20/Classic Alt layer: if the OS keymap did not already translate
+    // the symbol (sym is still the plain letter), do it here.
+    int alt_sym = QnxAltLayerSym(sym);
+    if (alt_sym)
+      effective_sym = alt_sym;
+  }
+  if (effective_sym == sym && shift_effective && sym >= 'a' && sym <= 'z')
     effective_sym = sym - 'a' + 'A';
 
   QnxKeyMap m = MapQnxKey(effective_sym);
@@ -402,7 +446,12 @@ void QnxScreenEventSource::ProcessKeyboardEvent(screen_event_t ev) {
     flags |= EF_SHIFT_DOWN;
   if (mods & KEYMOD_CTRL)
     flags |= EF_CONTROL_DOWN;
-  if (mods & KEYMOD_ALT)
+  // Do NOT set EF_ALT_DOWN for printable characters: on BB10 keyboards Alt is
+  // the symbol/number layer (Alt+W = '1'), not a shortcut modifier. Blink
+  // treats Alt+key as an accelerator and suppresses the keypress, which is why
+  // Alt-numbers typed nothing on Q10/Q20. Keep Alt for non-printable keys
+  // (arrows etc.) so real shortcuts still work.
+  if (alt_mod && !m.dom_key.IsCharacter())
     flags |= EF_ALT_DOWN;
 
   EventType et = down ? ET_KEY_PRESSED : ET_KEY_RELEASED;

@@ -489,7 +489,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  fprintf(stderr, "BerryShell: Berry Browser build 84\n");
+  fprintf(stderr, "BerryShell: Berry Browser build 85\n");
   fprintf(stderr, "BerryShell: app dir = %s\n", dir);
   fprintf(stderr, "BerryShell: work dir (cwd) = %s\n", work);
   fprintf(stderr, "BerryShell: %s\n",
