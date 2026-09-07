@@ -40,7 +40,7 @@ BAR_OUT="$BAR_DIR/$BAR_NAME"
 
 echo "=== compile launcher (QNX ARM) ==="
 "$GCC" -O2 -o "$BAR_DIR/launcher" "$BAR_DIR/launcher.c" \
-  -L"$QNX800/arm-blackberry-qnx8eabi/usr/lib" -lscreen
+  -L"$QNX800/arm-blackberry-qnx8eabi/usr/lib" -lscreen -lsocket
 file "$BAR_DIR/launcher"
 
 echo "=== package $BAR_OUT ==="

@@ -14,9 +14,15 @@
  * a built-in start page.
  */
 #include <fcntl.h>
+#include <netdb.h>
+#include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <screen/screen.h>
@@ -217,6 +223,147 @@ static size_t read_marker_text(const char* name, char* out, size_t out_sz) {
     out[--got] = '\0';
   }
   return got;
+}
+
+static void write_marker_text(const char* name, const char* val) {
+  char path[512];
+  snprintf(path, sizeof(path), "%s%s", kSharedMisc, name);
+  FILE* f = fopen(path, "w");
+  if (!f)
+    return;
+  fputs(val, f);
+  fclose(f);
+}
+
+/* --- Log shipping ---------------------------------------------------------
+ * On every boot, POST the tail of berry-kbd.log to a small HTTP endpoint so
+ * device logs are collectable without USB/SSH (multiple test devices, remote
+ * work). Runs BEFORE the engine starts, so it always carries the PREVIOUS
+ * session -- including crash backtraces.
+ *
+ * Config (shared/misc markers; also exposed in Settings > Developer):
+ *   berry-logship-url      host[:port][/path]  plain HTTP; e.g.
+ *                          "logs.example.com:8787/ingest?t=secret"
+ *   berry-logship.disable  kill switch
+ *
+ * The upload runs in a forked child with socket timeouts + an alarm() hard
+ * stop, so a dead endpoint can never slow or hang boot. Pairs with
+ * deploy/logship-server.js (dependency-free node receiver). */
+#define BERRY_LOGSHIP_TAIL (192 * 1024)
+
+static void berry_ship_log(int build_num) {
+  if (marker_exists("berry-logship.disable"))
+    return;
+  char url[240];
+  if (!read_marker_text("berry-logship-url", url, sizeof(url)))
+    return; /* not configured */
+
+  /* Persistent per-device id so multiple phones don't mix logs. */
+  char dev_id[64];
+  if (!read_marker_text("berry-logship-id", dev_id, sizeof(dev_id))) {
+    char model[32] = "bb10";
+    read_marker_text("berry-device", model, sizeof(model));
+    snprintf(dev_id, sizeof(dev_id), "%s-%05ld", model,
+             (long)(time(NULL) % 100000));
+    write_marker_text("berry-logship-id", dev_id);
+  }
+
+  fprintf(stderr, "BerryShell: logship -> %s (device=%s)\n", url, dev_id);
+
+  pid_t pid = fork();
+  if (pid != 0)
+    return; /* parent (or failed fork): continue boot immediately */
+
+  /* ---- child: hard cap total time, then best-effort upload ---- */
+  alarm(15);
+
+  const char* p = url;
+  if (strncmp(p, "http://", 7) == 0)
+    p += 7;
+  char host[128] = "";
+  char portbuf[8] = "80";
+  char path[160] = "/ingest";
+  const char* slash = strchr(p, '/');
+  size_t hostlen = slash ? (size_t)(slash - p) : strlen(p);
+  if (hostlen >= sizeof(host))
+    _exit(0);
+  memcpy(host, p, hostlen);
+  host[hostlen] = '\0';
+  if (slash && slash[0])
+    snprintf(path, sizeof(path), "%s", slash);
+  char* colon = strchr(host, ':');
+  if (colon) {
+    *colon = '\0';
+    snprintf(portbuf, sizeof(portbuf), "%s", colon + 1);
+  }
+
+  /* Read the log tail. */
+  char logpath[512];
+  snprintf(logpath, sizeof(logpath), "%sberry-kbd.log", kSharedMisc);
+  int lfd = open(logpath, O_RDONLY);
+  if (lfd < 0)
+    _exit(0);
+  struct stat st;
+  if (fstat(lfd, &st) != 0 || st.st_size <= 0) {
+    close(lfd);
+    _exit(0);
+  }
+  off_t start = st.st_size > BERRY_LOGSHIP_TAIL
+                    ? st.st_size - BERRY_LOGSHIP_TAIL
+                    : 0;
+  lseek(lfd, start, SEEK_SET);
+  char* body = (char*)malloc(BERRY_LOGSHIP_TAIL);
+  if (!body) {
+    close(lfd);
+    _exit(0);
+  }
+  ssize_t body_len = read(lfd, body, BERRY_LOGSHIP_TAIL);
+  close(lfd);
+  if (body_len <= 0)
+    _exit(0);
+
+  struct addrinfo hints;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_family = AF_INET;
+  hints.ai_socktype = SOCK_STREAM;
+  struct addrinfo* res = NULL;
+  if (getaddrinfo(host, portbuf, &hints, &res) != 0 || !res)
+    _exit(0);
+  int s = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+  if (s < 0)
+    _exit(0);
+  struct timeval tv = {5, 0};
+  setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+  setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+  if (connect(s, res->ai_addr, res->ai_addrlen) != 0)
+    _exit(0);
+
+  char sep = strchr(path, '?') ? '&' : '?';
+  char hdr[640];
+  int hdr_len = snprintf(
+      hdr, sizeof(hdr),
+      "POST %s%cdevice=%s&build=%d HTTP/1.1\r\n"
+      "Host: %s\r\n"
+      "Content-Type: text/plain\r\n"
+      "Content-Length: %ld\r\n"
+      "Connection: close\r\n"
+      "\r\n",
+      path, sep, dev_id, build_num, host, (long)body_len);
+  if (hdr_len > 0 && hdr_len < (int)sizeof(hdr)) {
+    write(s, hdr, (size_t)hdr_len);
+    ssize_t off = 0;
+    while (off < body_len) {
+      ssize_t w = write(s, body + off, (size_t)(body_len - off));
+      if (w <= 0)
+        break;
+      off += w;
+    }
+    /* Drain a little of the response so the server sees a clean close. */
+    char resp[128];
+    read(s, resp, sizeof(resp));
+  }
+  close(s);
+  _exit(0);
 }
 
 /* Load-reduction profiles (Settings > Display / Frame rate, or marker files).
@@ -489,7 +636,12 @@ int main(int argc, char** argv) {
     }
   }
 
-  fprintf(stderr, "BerryShell: Berry Browser build 85\n");
+  fprintf(stderr, "BerryShell: Berry Browser build 86\n");
+
+  /* Ship the previous session's log tail (crash backtraces included) to the
+   * configured endpoint. Forked; never blocks boot. */
+  berry_ship_log(86);
+
   fprintf(stderr, "BerryShell: app dir = %s\n", dir);
   fprintf(stderr, "BerryShell: work dir (cwd) = %s\n", work);
   fprintf(stderr, "BerryShell: %s\n",

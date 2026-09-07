@@ -1277,6 +1277,15 @@ std::string BerryBuildSettingsHtml() {
               "videodebug", BerryHasMarker("berry-video.debug"));
   h += toggle("Input debug log", "Touch/keyboard tracing (slow)", "kbddebug",
               BerryHasMarker("berry-kbd.debug"));
+  h += toggle("Ship log on boot",
+              "POST previous session's log to the endpoint below", "logship",
+              !BerryHasMarker("berry-logship.disable"));
+  h += "<form class='tx' action='https://berry.set/' method='get'>"
+       "<input type='hidden' name='k' value='logshipurl'>"
+       "<input name='v' placeholder='Log endpoint host[:port][/path] "
+       "(blank = off)' value='";
+  h += BerryHtmlEscape(BerryReadTextMarker("berry-logship-url"));
+  h += "'><button type='submit'>Set</button></form>";
   h += "</div>";
 
   h += "<div class='sec'>Home screen shortcuts</div><div class='card'>";
@@ -1548,6 +1557,8 @@ void BerryHandleSet(Shell* shell, const GURL& url) {
     BerrySetMarker("berry-dark.enable", on);
   else if (k == "adblock")
     BerrySetMarker("berry-adblock.disable", !on);  // on => no disable marker
+  else if (k == "logship")
+    BerrySetMarker("berry-logship.disable", !on);  // on => no disable marker
   else if (k == "desktop")
     BerrySetMarker("berry-desktop.enable", on);
   else if (k == "lowend") {
@@ -1628,6 +1639,8 @@ void BerryHandleSet(Shell* shell, const GURL& url) {
     BerrySetTextMarker("berry-ua", vdec);
   else if (k == "home")
     BerrySetTextMarker("berry-home-url", vdec);
+  else if (k == "logshipurl")
+    BerrySetTextMarker("berry-logship-url", vdec);
   else if (k == "device") {
     if (vdec == "auto") {
       /* Auto = no marker; the launcher detects the panel via libscreen. */
