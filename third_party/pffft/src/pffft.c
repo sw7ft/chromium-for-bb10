@@ -1203,6 +1203,14 @@ struct PFFFT_Setup {
 PFFFT_Setup *pffft_new_setup(int N, pffft_transform_t transform) {
   PFFFT_Setup *s = (PFFFT_Setup*)malloc(sizeof(PFFFT_Setup));
   int k, m;
+  /* Unchecked, these mallocs are a real crash on 32-bit targets: a renderer
+     that has been running a heavy SPA for minutes can fail the ~131KB
+     contiguous twiddle-table allocation (or even the header alloc), and
+     `s->N = N` then writes through NULL -- observed on BB10 as a SIGSEGV at
+     fault address 0x0 when x.com's fingerprinting script spins up an
+     OfflineAudioContext. Callers (blink FFTFrame) handle a NULL return. */
+  if (!s)
+    return 0;
   /* unfortunately, the fft size must be a multiple of 16 for complex FFTs 
      and 32 for real FFTs -- a lot of stuff would need to be rewritten to
      handle other cases (or maybe just switch to a scalar fft, I don't know..) */
@@ -1214,6 +1222,10 @@ PFFFT_Setup *pffft_new_setup(int N, pffft_transform_t transform) {
   /* nb of complex simd vectors */
   s->Ncvec = (transform == PFFFT_REAL ? N/2 : N)/SIMD_SZ;
   s->data = (v4sf*)pffft_aligned_malloc(2*s->Ncvec * sizeof(v4sf));
+  if (!s->data) {
+    free(s);
+    return 0;
+  }
   s->e = (float*)s->data;
   s->twiddle = (float*)(s->data + (2*s->Ncvec*(SIMD_SZ-1))/SIMD_SZ);  
 

@@ -636,11 +636,11 @@ int main(int argc, char** argv) {
     }
   }
 
-  fprintf(stderr, "BerryShell: Berry Browser build 86\n");
+  fprintf(stderr, "BerryShell: Berry Browser build 93\n");
 
   /* Ship the previous session's log tail (crash backtraces included) to the
    * configured endpoint. Forked; never blocks boot. */
-  berry_ship_log(86);
+  berry_ship_log(93);
 
   fprintf(stderr, "BerryShell: app dir = %s\n", dir);
   fprintf(stderr, "BerryShell: work dir (cwd) = %s\n", work);

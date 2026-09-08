@@ -6,7 +6,7 @@
 
     <name>Berry Browser</name>
     <versionNumber>3.0.2</versionNumber>
-    <buildId>86</buildId>
+    <buildId>93</buildId>
     <description>Chromium browser for BlackBerry 10. Pin web links to the home screen; other apps can Open http/https URLs here.</description>
     <author>sw7ft</author>
 

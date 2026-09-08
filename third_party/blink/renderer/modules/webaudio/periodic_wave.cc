@@ -409,6 +409,33 @@ void PeriodicWaveImpl::CreateBandLimitedTables(const float* real_data,
                                                const float* imag_data,
                                                unsigned number_of_components,
                                                bool disable_normalization) {
+#if defined(__QNX__)
+  // WebAudio's 32-bit ARM DSP (FFTFrame setup + band-limited table synthesis
+  // via inverse FFT and vector math) is a recurring crash source on BB10, and
+  // on this browser it is only ever exercised by sites' background audio
+  // fingerprinting and WebRTC voice -- never by anything the user actually
+  // hears. Two separate crashes were traced here: pffft_new_setup OOM (fixed
+  // separately) and memory corruption while building these tables (SIGSEGV
+  // with a data pointer reading back as 0xffffffff). Rather than keep patching
+  // individual sites, produce silent, correctly-sized tables and skip the
+  // fragile FFT/vector-math path entirely. Oscillators then output silence,
+  // WaveDataForFundamentalFrequency still returns valid (zeroed) buffers, the
+  // page keeps running, and the whole PeriodicWave/FFTFrame crash class is
+  // gone. AudioFloatArray zero-fills on allocation, so the tables are silence.
+  (void)real_data;
+  (void)imag_data;
+  (void)number_of_components;
+  (void)disable_normalization;
+  const unsigned qnx_wave_size = PeriodicWaveSize();
+  band_limited_tables_.reserve(NumberOfRanges());
+  for (unsigned range_index = 0; range_index < NumberOfRanges();
+       ++range_index) {
+    auto table = std::make_unique<AudioFloatArray>(qnx_wave_size);
+    AdjustV8ExternalMemory(static_cast<int64_t>(qnx_wave_size) * sizeof(float));
+    band_limited_tables_.push_back(std::move(table));
+  }
+  return;
+#else
   // The default scale factor for when normalization is disabled.
   float normalization_scale = 0.5;
 
@@ -484,6 +511,7 @@ void PeriodicWaveImpl::CreateBandLimitedTables(const float* real_data,
     // Apply normalization scale.
     vector_math::Vsmul(data, 1, &normalization_scale, data, 1, fft_size);
   }
+#endif  // defined(__QNX__)
 }
 
 void PeriodicWaveImpl::GenerateBasicWaveform(int shape) {

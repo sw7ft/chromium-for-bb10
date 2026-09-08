@@ -29,14 +29,22 @@ FFTFrame::FFTSetup::FFTSetup(unsigned fft_size) {
 
   // All FFTs we need are FFTs of real signals, and the inverse FFTs produce
   // real signals.  Hence |PFFFT_REAL|.
+  //
+  // This can legitimately return null on 32-bit targets: pffft_new_setup needs
+  // a ~131KB contiguous table and a long-lived renderer can fail that
+  // allocation (seen on BB10 when x.com's fingerprinting script creates an
+  // OfflineAudioContext minutes into a session). DoFFT/DoInverseFFT treat a
+  // null setup as "produce silence" rather than crashing the renderer.
   setup_ = pffft_new_setup(fft_size, PFFFT_REAL);
-  DCHECK(setup_);
+  if (!setup_) {
+    fprintf(stderr, "QNX:AUDIO pffft_new_setup(%u) failed (OOM?)\n", fft_size);
+  }
 }
 
 FFTFrame::FFTSetup::~FFTSetup() {
-  DCHECK(setup_);
-
-  pffft_destroy_setup(setup_);
+  if (setup_) {
+    pffft_destroy_setup(setup_);
+  }
 }
 
 HashMap<unsigned, std::unique_ptr<FFTFrame::FFTSetup>>& FFTFrame::FFTSetups() {
@@ -193,7 +201,12 @@ void FFTFrame::DoFFT(const float* data) {
   DCHECK_EQ(pffft_work_.size(), fft_size_);
 
   PFFFT_Setup* setup = FFTSetupForSize(fft_size_);
-  DCHECK(setup);
+  if (!setup) {
+    // Setup allocation failed (OOM); output silence instead of crashing.
+    real_data_.Zero();
+    imag_data_.Zero();
+    return;
+  }
 
   pffft_transform_ordered(setup, data, complex_data_.Data(), pffft_work_.Data(),
                           PFFFT_FORWARD);
@@ -230,7 +243,11 @@ void FFTFrame::DoInverseFFT(float* data) {
   }
 
   PFFFT_Setup* setup = FFTSetupForSize(fft_size_);
-  DCHECK(setup);
+  if (!setup) {
+    // Setup allocation failed (OOM); output silence instead of crashing.
+    memset(data, 0, sizeof(float) * fft_size_);
+    return;
+  }
 
   pffft_transform_ordered(setup, fft_data, data, pffft_work_.Data(),
                           PFFFT_BACKWARD);
