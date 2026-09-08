@@ -22,6 +22,7 @@
 #include <ucontext.h>
 #include <arm/context.h>
 #include <dlfcn.h>
+#include <sys/mman.h>
 #include <unwind.h>
 #endif
 
@@ -476,15 +477,46 @@ void StackDumpSignalHandler(int signal, siginfo_t* info, void* void_context) {
                         sp);
       write(STDERR_FILENO, hb, ho);
     }
+    // Registers, still dladdr-free, so they survive even when the buffered
+    // report below dies. With fault=<small>, the register equal to
+    // fault-minus-offset is the null/garbage base pointer being dereferenced.
+    if (uc) {
+      static char rb[320];
+      int ro = snprintf(rb, sizeof(rb),
+                        "QNX:REGS r0=%x r1=%x r2=%x r3=%x r4=%x r5=%x r6=%x "
+                        "r7=%x r8=%x r9=%x r10=%x r11=%x r12=%x\n",
+                        uc->uc_mcontext.cpu.gpr[0], uc->uc_mcontext.cpu.gpr[1],
+                        uc->uc_mcontext.cpu.gpr[2], uc->uc_mcontext.cpu.gpr[3],
+                        uc->uc_mcontext.cpu.gpr[4], uc->uc_mcontext.cpu.gpr[5],
+                        uc->uc_mcontext.cpu.gpr[6], uc->uc_mcontext.cpu.gpr[7],
+                        uc->uc_mcontext.cpu.gpr[8], uc->uc_mcontext.cpu.gpr[9],
+                        uc->uc_mcontext.cpu.gpr[10],
+                        uc->uc_mcontext.cpu.gpr[11],
+                        uc->uc_mcontext.cpu.gpr[12]);
+      if (ro > 0)
+        write(STDERR_FILENO, rb, ro);
+    }
     // Stack scan filtered to the content_shell EXEC text by a FIXED vaddr range
     // (non-PIE), so this needs no dladdr either. Reading up from sp stays within
     // the live stack. These are candidate return addresses -> symbolize with
     //   arm-blackberry-qnx8eabi-addr2line -e out/qnx-arm/content_shell <abs>
+    //
+    // Each page is probed with msync() before it is read: on a shallow stack
+    // (e.g. the GL thread) sp+16KB can run past the stack base into unmapped
+    // memory, and faulting HERE killed the handler before this buffer was ever
+    // written (observed: QNX:CRASH essentials printed, then nothing).
     if (sp > 0x10000) {
       static char sb2[8192];
       int s2 = snprintf(sb2, sizeof(sb2), "QNX:STACKABS2:");
       unsigned* sptr = (unsigned*)sp;
+      unsigned probed_page = 0;
       for (int i = 0; i < 4096 && (unsigned)(sptr + i) < 0x7fffffff; i++) {
+        const unsigned page = ((unsigned)(sptr + i)) & ~0xFFFu;
+        if (page != probed_page) {
+          if (msync((void*)page, 1, MS_ASYNC) != 0)
+            break;  // ran off the top of the stack mapping
+          probed_page = page;
+        }
         unsigned code = sptr[i] & ~1u;  // clear thumb bit
         if (code >= 0x828000u && code < 0x5828000u &&
             s2 < (int)sizeof(sb2) - 16)

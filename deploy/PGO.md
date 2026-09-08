@@ -2,6 +2,42 @@
 
 Profile-Guided Optimization for BerryBrowserV3 on QNX ARM (Passport). Expect ~5–10% improvement on native C++ hot paths (Skia, net, compositor); does not fix multi-second JS stalls on heavy SPAs.
 
+## ⚠️ KNOWN BLOCKER (Sep 2026) — PGI link does not complete
+
+The instrumented (`chrome_pgo_phase=1`) engine **compiles** fine (~30k objects,
+~3.5 h) but **cannot be linked** in this toolchain. Two independent, confirmed
+walls:
+
+1. **32-bit linker address-space exhaustion.** Both `arm-blackberry-qnx8eabi-ld.bfd`
+   and `...-ld.gold` are 32-bit i386 executables (`file` them). Linking the
+   ~300 MB instrumented `content_shell` drives bfd to its ~4 GB virtual ceiling
+   and it dies with `final link failed: memory exhausted` — regardless of
+   `PGO_LINK_CHUNKS`, because the final link's working set is monolithic even
+   when loose objects are pre-linked in chunks. Only the 64-bit host
+   `lld` (`/usr/lib/llvm-17/bin/ld.lld`) can allocate enough.
+
+2. **Profile-data COMDAT registration is incompatible with the QNX triple.**
+   Every object contains `__llvm_profile_init` with relocations to *section-local*
+   `.L__profd__*` symbols living in `__llvm_prf_data[__profc__*]` COMDAT groups.
+   clang emits constructor-based (runtime) registration instead of ELF
+   `__start_/__stop_` section encapsulation, because it does not recognize
+   `arm-blackberry-qnx8eabi` as an ELF target that supports start/stop symbols
+   (`needsRuntimeRegistrationOfSectionRange`). When the linker dedups those
+   COMDAT groups, the local references dangle:
+   `relocation refers to a symbol in a discarded section: .L__profd__...`.
+   **Both bfd and lld reject this** — it is baked into the objects, not a
+   link-strategy problem. The note below about `-fmerge-all-constants` does NOT
+   fix it and is not present in `build/config/compiler/pgo/BUILD.gn`.
+
+**What it would take to unblock:** a clang-side change so the QNX triple uses
+section-range profile registration (drop `__llvm_profile_init`'s local
+`.L__profd__` refs) — either patch/rebuild clang's `InstrProfiling` lowering, or
+find/confirm a `-mllvm` flag that forces section registration — THEN link the
+result with 64-bit `lld` (config currently force-selects bfd via
+`pgo_qnx_bfd_link`, which must be switched to lld for phase 1), THEN verify the
+lld-linked QNX binary actually runs. Each iteration is a full ~3.5 h
+re-instrument. Treat PGO as a separate R&D task, not a quick win.
+
 ## Overview
 
 | Phase | GN `chrome_pgo_phase` | Out dir | Purpose |

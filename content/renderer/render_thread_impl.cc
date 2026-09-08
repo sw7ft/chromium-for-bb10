@@ -172,6 +172,15 @@
 #include "ui/display/display_switches.h"
 #include "v8/include/v8-extension.h"
 
+#if BUILDFLAG(IS_QNX)
+#include <link.h>
+
+#include "third_party/blink/public/web/web_heap.h"
+#include "v8/include/v8-callbacks.h"
+#include "v8/include/v8-isolate.h"
+#include "v8/include/v8-statistics.h"
+#endif
+
 #if BUILDFLAG(IS_ANDROID)
 #include <cpu-features.h>
 #include "content/renderer/media/android/stream_texture_factory.h"
@@ -275,37 +284,138 @@ BASE_DECLARE_FEATURE(kUseThreadPoolForMediaTaskRunner){
     "UseThreadPoolForMediaTaskRunner", base::FEATURE_DISABLED_BY_DEFAULT};
 
 #if BUILDFLAG(IS_QNX)
+// --- Main-thread stall attribution ----------------------------------------
+// GC pause accumulator, fed by V8 GC prologue/epilogue callbacks on the main
+// isolate. All main-thread only (the heartbeat and the callbacks run on the
+// renderer main thread), so no locking needed.
+static double g_qnx_gc_ms_total = 0;      // cumulative GC pause time (ms)
+static int g_qnx_gc_count_total = 0;      // cumulative GC events
+static base::TimeTicks g_qnx_gc_start;    // set in prologue, read in epilogue
+// blink::MainThreadIsolate() dereferences a global that is null until
+// blink::Initialize() runs (which happens AFTER the first heartbeat fires in
+// RenderThreadImpl::Init). Calling it early is a null deref (fault=0x8). This
+// flag is flipped right after blink::Initialize so the heartbeat only touches
+// the isolate once it is safe. Main-thread only, so a plain bool is fine.
+static bool g_qnx_blink_ready = false;
+
+void QnxGCPrologue(v8::Isolate*, v8::GCType, v8::GCCallbackFlags, void*) {
+  g_qnx_gc_start = base::TimeTicks::Now();
+}
+void QnxGCEpilogue(v8::Isolate*, v8::GCType, v8::GCCallbackFlags, void*) {
+  if (!g_qnx_gc_start.is_null()) {
+    g_qnx_gc_ms_total += (base::TimeTicks::Now() - g_qnx_gc_start).InMillisecondsF();
+    ++g_qnx_gc_count_total;
+    g_qnx_gc_start = base::TimeTicks();  // guard against unpaired epilogue
+  }
+}
+
 // Passive main-thread stall sampler: a self-reposting 500ms heartbeat on the
 // renderer main thread. Any delivery delay beyond the 500ms period means the
 // thread was busy (JS/GC/layout) that long. Logs the worst stall per 60s
 // window. Gaps >= 60s are ignored: BB10 stops backgrounded apps, and the
 // resume gap would otherwise masquerade as a giant stall (the flaw that made
 // the old viz-side "QNX:BF peak" numbers useless).
+//
+// Attribution: at each beat we accumulate GC pause time (via V8 GC callbacks)
+// and sample the JS heap. When the worst stall of a window is reported we also
+// report how much GC ran during that window and the heap size, so a stall can
+// be pinned on GC vs. synchronous JS/layout/paint without a profiler. Logging
+// goes through raw write(2) (unbuffered) because V8 --trace-gc uses buffered
+// stdio into the same file and mostly never flushes on BB10.
+// Sample the main-isolate JS heap (MB). Safe no-op before blink init.
+static void QnxSampleHeapMB(size_t* used_mb, size_t* total_mb) {
+  *used_mb = *total_mb = 0;
+  if (!g_qnx_blink_ready)
+    return;
+  if (v8::Isolate* iso = blink::MainThreadIsolate()) {
+    v8::HeapStatistics hs;
+    iso->GetHeapStatistics(&hs);
+    *used_mb = hs.used_heap_size() >> 20;
+    *total_mb = hs.total_heap_size() >> 20;
+  }
+}
+
+// One line per loaded module: "QNX:LIBMAP <lo>-<hi> <path>". The GL-thread
+// crashes land at a pc inside some shared object whose ASLR base changes every
+// launch; the crash handler can't dladdr it (dladdr faults once the heap is
+// bad), so this boot-time map is the only reliable way to turn a raw crash pc
+// into lib+offset offline.
+static int QnxLibmapCallback(const struct dl_phdr_info* info,
+                             size_t /*size*/,
+                             void* /*data*/) {
+  unsigned lo = 0xffffffffu, hi = 0;
+  for (int i = 0; i < info->dlpi_phnum; ++i) {
+    const auto& ph = info->dlpi_phdr[i];
+    if (ph.p_type != PT_LOAD)
+      continue;
+    const unsigned s = (unsigned)(info->dlpi_addr + ph.p_vaddr);
+    const unsigned e = s + (unsigned)ph.p_memsz;
+    if (s < lo)
+      lo = s;
+    if (e > hi)
+      hi = e;
+  }
+  if (hi == 0)
+    return 0;
+  char line[320];
+  int len = snprintf(line, sizeof(line), "QNX:LIBMAP %08x-%08x %s\n", lo, hi,
+                     info->dlpi_name && info->dlpi_name[0] ? info->dlpi_name
+                                                           : "(exe)");
+  if (len > 0)
+    ::write(2, line, len > (int)sizeof(line) ? (int)sizeof(line) : len);
+  return 0;
+}
+
 void QnxStallHeartbeat() {
   static base::TimeTicks s_last;
-  static base::TimeTicks s_window_start;
-  static double s_peak_ms = 0;
+  static double s_gc_ms_prev = 0;        // g_qnx_gc_ms_total at previous beat
+  static int s_gc_cnt_prev = 0;
+  static bool s_gc_cb_registered = false;
+  static int s_beats = 0;
+  // Dump the module map once, ~10s in: after the vendor EGL/GLES driver has
+  // loaded (GL init is ~2-5s) but well before the ~45s GL-thread crash.
+  if (++s_beats == 20)
+    dl_iterate_phdr(&QnxLibmapCallback, nullptr);
+  // Log any single freeze at/above this immediately (with attribution), so a
+  // session that crashes before a full window still yields data. X on the
+  // Passport routinely freezes multiple seconds, so 1.5s is a low bar.
+  constexpr double kImmediateMs = 1500.0;
   constexpr base::TimeDelta kBeat = base::Milliseconds(500);
+
+  // Register GC callbacks once, as soon as the main isolate is safe to touch.
+  if (!s_gc_cb_registered && g_qnx_blink_ready) {
+    if (v8::Isolate* iso = blink::MainThreadIsolate()) {
+      iso->AddGCPrologueCallback(&QnxGCPrologue);
+      iso->AddGCEpilogueCallback(&QnxGCEpilogue);
+      s_gc_cb_registered = true;
+    }
+  }
+
   const base::TimeTicks now = base::TimeTicks::Now();
   if (!s_last.is_null()) {
     const double stall_ms = (now - s_last - kBeat).InMillisecondsF();
-    if (stall_ms > s_peak_ms && stall_ms < 60000.0)
-      s_peak_ms = stall_ms;
+    // Attribute THIS freeze: GC time accumulated since the previous beat is,
+    // by definition, GC that ran during the gap (the beat couldn't fire while
+    // GC held the thread). Ignore >=60s gaps (BB10 backgrounding).
+    if (stall_ms >= kImmediateMs && stall_ms < 60000.0) {
+      const double gc_ms = g_qnx_gc_ms_total - s_gc_ms_prev;
+      const int gc_cnt = g_qnx_gc_count_total - s_gc_cnt_prev;
+      size_t used_mb = 0, total_mb = 0;
+      QnxSampleHeapMB(&used_mb, &total_mb);
+      const char* verdict = (gc_ms >= stall_ms * 0.5) ? "GC" : "non-GC(JS/paint)";
+      char line[192];
+      int len = snprintf(line, sizeof(line),
+                         "QNX:MT stall=%.0fms gc=%.0fms/%dx heap=%zu/%zuMB "
+                         "-> %s\n",
+                         stall_ms, gc_ms, gc_cnt, used_mb, total_mb, verdict);
+      if (len > 0)
+        ::write(2, line, len > (int)sizeof(line) ? (int)sizeof(line) : len);
+    }
   }
   s_last = now;
-  if (s_window_start.is_null())
-    s_window_start = now;
-  if (now - s_window_start >= base::Seconds(60)) {
-    if (s_peak_ms >= 1000.0) {
-      char line[80];
-      int len = snprintf(line, sizeof(line),
-                         "QNX:MT stall peak=%.0fms (60s window)\n", s_peak_ms);
-      if (len > 0)
-        ::write(2, line, len);
-    }
-    s_window_start = now;
-    s_peak_ms = 0;
-  }
+  s_gc_ms_prev = g_qnx_gc_ms_total;
+  s_gc_cnt_prev = g_qnx_gc_count_total;
+
   base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
       FROM_HERE, base::BindOnce(&QnxStallHeartbeat), kBeat);
 }
@@ -914,6 +1024,11 @@ void RenderThreadImpl::InitializeWebKit(mojo::BinderMap* binders) {
 
   QNX_TRACE_MSG("QNX:IWK:3 v8isolate\n");
   v8::Isolate* isolate = blink::MainThreadIsolate();
+#if BUILDFLAG(IS_QNX)
+  // Safe from here on: the main isolate exists. Lets the stall heartbeat start
+  // registering GC callbacks / sampling the heap (see QnxStallHeartbeat).
+  g_qnx_blink_ready = true;
+#endif
 
   QNX_TRACE_MSG("QNX:IWK:4 compositor\n");
   if (!command_line.HasSwitch(switches::kDisableThreadedCompositing))

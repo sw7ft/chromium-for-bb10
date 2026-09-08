@@ -23,10 +23,16 @@ PARTIAL=(
 FINAL=(
   -Wl,--wrap=abort
   -Wl,--allow-multiple-definition
-  -Wl,--fatal-warnings
   -Wl,--build-id
   -no-canonical-prefixes
+  # Route the final link through the QNX bfd wrapper (flattens Clang thin
+  # archives -> fat, then real ld.bfd). Without -fuse-ld=bfd + this -B, g++
+  # picks up ld.lld-17, which cannot reconcile the duplicate .L__profd__
+  # COMDAT sections produced across the partial-linked chunks and dies with
+  # "relocation refers to a symbol in a discarded section".
+  -B/root/chromium/src/deploy/qnx-pgi-bin
   -B/root/qnx800/bin
+  -Wl,-fuse-ld=bfd
   -Wl,--no-gc-sections
   -L/root/qnx800/arm-blackberry-qnx8eabi/lib
   -L/root/qnx800/arm-blackberry-qnx8eabi/usr/lib
