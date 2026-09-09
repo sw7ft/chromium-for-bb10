@@ -392,9 +392,14 @@ config("compiler") {
     }
 
     if (use_lld) {
-      ldflags += [ "-fuse-ld=lld" ]
-      if (lld_path != "") {
-        ldflags += [ "-B$lld_path" ]
+      # QNX: the link driver is the BB10 g++ (9.3), which does not understand
+      # -fuse-ld=lld. The toolchain's `ld` is already a shim that execs
+      # ld.lld-17 with the QNX dynamic linker/crt setup, so no flag is needed.
+      if (!is_qnx) {
+        ldflags += [ "-fuse-ld=lld" ]
+        if (lld_path != "") {
+          ldflags += [ "-B$lld_path" ]
+        }
       }
     }
 
@@ -781,7 +786,20 @@ config("compiler") {
         "-mllvm:-disable-auto-upgrade-debug-info",
       ]
     } else {
-      ldflags += [ "-flto=thin" ]
+      # QNX: -flto=thin is a clang driver flag; the BB10 g++ link driver
+      # rejects it. lld (behind the toolchain's `ld` shim) detects bitcode
+      # objects and runs ThinLTO on its own; the -Wl,* flags below still
+      # reach it unchanged.
+      if (is_qnx) {
+        # The port compiles with -femulated-tls (QNX has no ELF TLS support:
+        # nothing defines __aeabi_read_tp), but clang 17 does not record that
+        # in bitcode, so the ThinLTO backend would regenerate every
+        # thread_local access against the generic ELF TLS model. Force the
+        # backend to emulated TLS to match the non-LTO objects and libc.
+        ldflags += [ "-Wl,-mllvm,-emulated-tls" ]
+      } else {
+        ldflags += [ "-flto=thin" ]
+      }
 
       # Enabling ThinLTO on Chrome OS too, in an effort to reduce the memory
       # usage in crbug.com/1038040. Note this will increase build time in
@@ -838,7 +856,14 @@ config("compiler") {
       }
 
       if (!is_win) {
-        ldflags += [ "-fwhole-program-vtables" ]
+        if (is_qnx) {
+          # The BB10 g++ link driver rejects the clang-only
+          # -fwhole-program-vtables; pass lld's underlying LTO flag directly.
+          # If devirtualization is ever suspected in a crash, drop this first.
+          ldflags += [ "-Wl,--lto-whole-program-visibility" ]
+        } else {
+          ldflags += [ "-fwhole-program-vtables" ]
+        }
       }
     }
 

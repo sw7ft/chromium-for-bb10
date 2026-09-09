@@ -144,7 +144,12 @@ void* ThreadFunc(void* params) {
 // 16-byte boundary before any Chromium code runs. clang then keeps the stack
 // 16-byte aligned for the entire call tree below.
 extern "C" {
-void* QnxThreadFuncAligned(void* params) {
+// used/retain: the only reference to this function is the textual `b
+// QnxThreadFuncAligned` inside the naked trampoline below. Inline asm in a
+// function body is invisible to (Thin)LTO symbol resolution, so without these
+// attributes LTO internalizes the symbol and the final link fails with
+// "undefined hidden symbol: QnxThreadFuncAligned".
+__attribute__((used, retain)) void* QnxThreadFuncAligned(void* params) {
   return ThreadFunc(params);
 }
 __attribute__((naked)) void* QnxThreadFuncTrampoline(void* /*params*/) {

@@ -47,6 +47,26 @@
 
 extern "C" {
 
+// Stack-protector guard, defined here as a POINTER to the canary.
+//
+// Under ThinLTO, LLVM's ARM backend lowers every canary access to an
+// indirect pattern -- movw/movt of &__stack_chk_guard, then TWO loads
+// (slot -> pointer -> canary) -- regardless of relocation model or
+// dso_local. Without a definition in the executable, lld resolved the
+// libc-defined guard with an R_ARM_COPY relocation, so the slot held the
+// canary VALUE and the second load dereferenced random canary bytes:
+// build 94 crashed at boot, SIGSEGV in the interposed strlen below (the
+// first protected function the dynamic linker calls), fault address
+// changing every run.
+//
+// Making the slot actually contain a pointer satisfies the indirect
+// (LTO) pattern, and the classic GOT pattern in non-LTO objects and
+// shared libs stays self-consistent too: each function's prologue and
+// epilogue load the same expression, whatever it dereferences to.
+static unsigned long berry_stack_canary = 0x000aff0d;  // NUL/LF/EOF bytes
+__attribute__((visibility("default"), used))
+unsigned long* __stack_chk_guard = &berry_stack_canary;
+
 // Safe strlen: QNX's __strlen_isr crashes on NULL.  We mark these with
 // default visibility so they appear in the dynamic symbol table and override
 // the versions in ldqnx.so.2 / libc.so.3 for ALL callers including shared
