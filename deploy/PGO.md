@@ -2,41 +2,46 @@
 
 Profile-Guided Optimization for BerryBrowserV3 on QNX ARM (Passport). Expect ~5–10% improvement on native C++ hot paths (Skia, net, compositor); does not fix multi-second JS stalls on heavy SPAs.
 
-## ⚠️ KNOWN BLOCKER (Sep 2026) — PGI link does not complete
+## ✅ BLOCKER RESOLVED (Sep 9, 2026) — PGI links under ThinLTO + lld
 
-The instrumented (`chrome_pgo_phase=1`) engine **compiles** fine (~30k objects,
-~3.5 h) but **cannot be linked** in this toolchain. Two independent, confirmed
-walls:
+Build 96 is the first instrumented BAR. The historical walls and their fixes:
 
-1. **32-bit linker address-space exhaustion.** Both `arm-blackberry-qnx8eabi-ld.bfd`
-   and `...-ld.gold` are 32-bit i386 executables (`file` them). Linking the
-   ~300 MB instrumented `content_shell` drives bfd to its ~4 GB virtual ceiling
-   and it dies with `final link failed: memory exhausted` — regardless of
-   `PGO_LINK_CHUNKS`, because the final link's working set is monolithic even
-   when loose objects are pre-linked in chunks. Only the 64-bit host
-   `lld` (`/usr/lib/llvm-17/bin/ld.lld`) can allocate enough.
+1. **32-bit linker exhaustion** — moot: the toolchain `ld` has been an
+   `ld.lld-17` (64-bit) shim since Feb; the PGI link peaks ~20 GB and works.
+2. **COMDAT `.L__profd__*` discards (bfd-era error)** — resolved by running
+   PGI **on ThinLTO** (`use_thin_lto=true`): COMDAT resolution happens at IR
+   level before profile lowering.
+3. **Value profiling `__profd_*` undefs across module boundaries** — disabled
+   VP (`-mllvm -disable-vp` cflag + `-Wl,-mllvm,-disable-vp` ldflag,
+   `pgo/BUILD.gn`). Block counters are all PGO needs.
+4. **Split LTO units** (`-fwhole-program-vtables` → `-fsplit-lto-unit`)
+   conflict with instrumentation → PGI builds use `-fno-split-lto-unit`, no
+   WPD/CFI (compiler/BUILD.gn). Costs nothing in a profiling binary.
+5. **Runtime-registration refs to localized profile data.** QNX is not in
+   LLVM's `needsRuntimeRegistrationOfSectionRange` allowlist, so every module
+   gets an `__llvm_profile_init` that registers its profile data — including
+   data of non-prevailing COMDAT (inline template) copies that the ThinLTO
+   backend localizes (`.L__profd_*`) in their prevailing module. Result:
+   ~35.7k undefined `__profd_<mangled>.<hash>` with un-dynamicable
+   `R_ARM_THM_MOVW/MOVT_ABS` relocs. **Fix: weak zero-filled stub objects**
+   (`deploy/qnx-pgi-stubs.s`, checked-in `.o`, wired via `libs` in
+   `pgo/BUILD.gn`). Zero records are skipped by the runtime; real counters
+   are registered by their prevailing module. Regenerate the list from the
+   link error log if it drifts:
+   `grep "against symbol '__profd_" link.log | sed "s/.*against symbol '//; s/'.*//" | sort -u`
+6. **Instrumentation retains LTO-dead code** referencing never-implemented
+   platform/test symbols → `--warn-unresolved-symbols --no-fatal-warnings`
+   on the PGI exe link + 3 explicit weak stubs (appended to qnx-pgi-stubs.s).
+7. **Test plugin SOLINKs** (`blink_*_test_plugin`) can't link instrumented
+   static libs (`R_ARM_REL32` vs preemptible `__profd_*`) → dropped from PGI
+   builds (`content/web_test/BUILD.gn`); pure data_deps, nothing references
+   them.
 
-2. **Profile-data COMDAT registration is incompatible with the QNX triple.**
-   Every object contains `__llvm_profile_init` with relocations to *section-local*
-   `.L__profd__*` symbols living in `__llvm_prf_data[__profc__*]` COMDAT groups.
-   clang emits constructor-based (runtime) registration instead of ELF
-   `__start_/__stop_` section encapsulation, because it does not recognize
-   `arm-blackberry-qnx8eabi` as an ELF target that supports start/stop symbols
-   (`needsRuntimeRegistrationOfSectionRange`). When the linker dedups those
-   COMDAT groups, the local references dangle:
-   `relocation refers to a symbol in a discarded section: .L__profd__...`.
-   **Both bfd and lld reject this** — it is baked into the objects, not a
-   link-strategy problem. The note below about `-fmerge-all-constants` does NOT
-   fix it and is not present in `build/config/compiler/pgo/BUILD.gn`.
-
-**What it would take to unblock:** a clang-side change so the QNX triple uses
-section-range profile registration (drop `__llvm_profile_init`'s local
-`.L__profd__` refs) — either patch/rebuild clang's `InstrProfiling` lowering, or
-find/confirm a `-mllvm` flag that forces section registration — THEN link the
-result with 64-bit `lld` (config currently force-selects bfd via
-`pgo_qnx_bfd_link`, which must be switched to lld for phase 1), THEN verify the
-lld-linked QNX binary actually runs. Each iteration is a full ~3.5 h
-re-instrument. Treat PGO as a separate R&D task, not a quick win.
+**Profile collection on device:** launcher always sets
+`LLVM_PROFILE_FILE=/accounts/1000/shared/misc/pgo/berry-%m.profraw` (merge
+mode), and `qnx_platform_stubs.cc` starts a thread flushing counters every
+60 s (`__llvm_profile_write_file`, weak) because BB10 kills apps without
+running atexit.
 
 ## Overview
 

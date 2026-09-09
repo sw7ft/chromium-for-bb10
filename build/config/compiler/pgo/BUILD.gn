@@ -9,21 +9,23 @@ import("//build/config/compiler/pgo/pgo.gni")
 import("//build/config/features.gni")
 import("//build/toolchain/toolchain.gni")
 
-# QNX PGI final link: force bfd + flatten thin archives (executables only).
+# QNX PGI final link.
+#
+# HISTORY: this used to force ld.bfd (-fuse-ld=bfd + -B dirs +
+# --no-gc-sections), which was one of the two documented PGO blockers: the
+# 32-bit bfd exhausts its 4GB address space on the ~300MB instrumented
+# binary. That forcing predates the discovery that the toolchain's default
+# `ld` is already a 64-bit ld.lld-17 shim (see deploy/THINLTO.md) — the same
+# linker that links every production build. The other blocker
+# ("relocation refers to a symbol in a discarded section: .L__profd__*")
+# was only ever observed through the staged-link script, whose `ld -r`
+# partial links break COMDAT groups; a direct lld link does not need it.
+# So: no ldflags — let the link fall through to the default lld shim.
 config("pgo_qnx_bfd_link") {
   visibility = [
     ":default_pgo_flags",
     "//build/config:executable_deps",
   ]
-
-  if (chrome_pgo_phase == 1 && is_qnx && is_a_target_toolchain) {
-    ldflags = [
-      "-B/root/chromium/src/deploy/qnx-pgi-bin",
-      "-B/root/qnx800/bin",
-      "-Wl,-fuse-ld=bfd",
-      "-Wl,--no-gc-sections",
-    ]
-  }
 }
 
 # QNX links with GCC; the profile instrumentation runtime must be linked
@@ -39,6 +41,35 @@ config("pgo_qnx_profile_runtime") {
       assert(qnx_profile_runtime_path != "",
              "Set qnx_profile_runtime_path to libclang_rt.profile-arm.a for PGI")
       libs = [ qnx_profile_runtime_path ]
+
+      # Weak stub definitions for symbols the instrumented link cannot
+      # resolve (see deploy/qnx-pgi-stubs.s, generated from the link error
+      # log). Two classes:
+      #  1. __profd_* of non-prevailing COMDAT copies: on runtime-registration
+      #     platforms (QNX is not in LLVM's section-boundary OS list), each
+      #     module's __llvm_profile_init registers profile data of inline
+      #     functions whose prevailing copy lives elsewhere and whose data
+      #     ThinLTO localized (.L) there. Weak zero-filled 40-byte stubs
+      #     satisfy the ABS relocs; the runtime skips all-zero records and
+      #     the real (prevailing) counters are registered by their own module.
+      #  2. A few never-implemented test-only platform symbols referenced
+      #     with ABS relocs from instrumentation-retained dead code.
+      libs += [ "//deploy/qnx-pgi-stubs.o" ]
+
+      # The BB10 port relies on ThinLTO dead-stripping to discard the large
+      # amount of cross-platform code that has no QNX implementation (test
+      # helpers, D3D translator paths, etc.). PGI instrumentation retains
+      # those otherwise-dead functions, so their calls into never-implemented
+      # platform symbols surface as ~35k "undefined symbol" errors at the exe
+      # link. The production (non-instrumented) binary contains none of that
+      # code, proving the paths never execute; letting them resolve to zero
+      # in the profiling-only binary is safe. Executable link only.
+      # --no-fatal-warnings must follow the default config's --fatal-warnings
+      # or the tolerated unresolved-symbol warnings get re-promoted to errors.
+      ldflags = [
+        "-Wl,--warn-unresolved-symbols",
+        "-Wl,--no-fatal-warnings",
+      ]
     }
   }
 }
@@ -48,6 +79,16 @@ config("pgo_qnx_profile_runtime") {
 config("pgo_no_instrumentation") {
   visibility = [ "*" ]
   cflags = [ "-fno-profile-generate" ]
+
+  # -fno-profile-generate only keeps a module's OWN sources clean; loadable
+  # modules (web-test plugins) still link instrumented static libs from the
+  # shared dep tree, whose __profd_* globals are default-visibility. Inside a
+  # .so those are preemptible, and the LTO backend's R_ARM_REL32 references
+  # to them are then illegal ("recompile with -fPIC" at SOLINK). -Bsymbolic
+  # binds them locally, making the relocations resolvable at link time. These
+  # test plugins are data_deps never loaded during profiling, so symbol
+  # interposition semantics are irrelevant.
+  ldflags = [ "-Wl,-Bsymbolic" ]
 }
 
 # Configuration that enables PGO instrumentation.
@@ -61,6 +102,19 @@ config("pgo_instrumentation_flags") {
     cflags = [
       "-fprofile-generate",
     ]
+    if (is_qnx) {
+      # Value profiling references __profd_* globals from instrumented code.
+      # Under ThinLTO cross-module importing, those references escape their
+      # defining module and the PGI link fails with ~2200 undefined
+      # __profd_<mangled>.<modhash> symbols (observed on gin_shell canary).
+      # We only need block counters for PGO; drop value profiling at both
+      # instrumentation (compile) and LTO-backend (link) stages.
+      cflags += [
+        "-mllvm",
+        "-disable-vp",
+      ]
+      ldflags = [ "-Wl,-mllvm,-disable-vp" ]
+    }
     if (!is_win) {
       # Windows directly calls link.exe instead of the compiler driver when
       # linking, and embeds the path to the profile runtime library as

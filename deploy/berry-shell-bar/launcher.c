@@ -624,23 +624,24 @@ int main(int argc, char** argv) {
       setenv("QNX_GPU_PROBE", "1", 1);
     else
       setenv("QNX_GPU_PROBE", "0", 1);
-    /* PGO profile collection: write LLVM .profraw to shared/misc/pgo/ and skip
-     * the exit watchdog so profiles flush on close/restart. */
-    if (access("/accounts/1000/shared/misc/berry-pgo-collect.enable", F_OK) ==
-        0) {
-      setenv("BERRY_PGO_COLLECT", "1", 1);
-      setenv("LLVM_PROFILE_FILE",
-             "/accounts/1000/shared/misc/pgo/berry-%p-%m.profraw", 1);
-      fprintf(stderr,
-              "BerryShell: PGO collect = ON (profiles -> shared/misc/pgo/)\n");
-    }
+    /* PGO profile collection: always armed. On a production (non-PGI) binary
+     * the env var is simply ignored, so this costs nothing. %m enables the
+     * runtime's merge-on-write pool, so counters accumulate across sessions
+     * and processes; the in-binary 60s flusher (qnx_platform_stubs.cc) makes
+     * sure data lands on disk even though BB10 kills apps without exit. */
+    mkdir("/accounts/1000/shared/misc/pgo", 0777);
+    setenv("BERRY_PGO_COLLECT", "1", 1);
+    setenv("LLVM_PROFILE_FILE",
+           "/accounts/1000/shared/misc/pgo/berry-%m.profraw", 1);
+    fprintf(stderr,
+            "BerryShell: PGO collect armed (profiles -> shared/misc/pgo/)\n");
   }
 
-  fprintf(stderr, "BerryShell: Berry Browser build 95\n");
+  fprintf(stderr, "BerryShell: Berry Browser build 96 (PGI instrumented)\n");
 
   /* Ship the previous session's log tail (crash backtraces included) to the
    * configured endpoint. Forked; never blocks boot. */
-  berry_ship_log(95);
+  berry_ship_log(96);
 
   fprintf(stderr, "BerryShell: app dir = %s\n", dir);
   fprintf(stderr, "BerryShell: work dir (cwd) = %s\n", work);

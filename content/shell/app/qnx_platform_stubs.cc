@@ -8,6 +8,7 @@
 #include <dlfcn.h>
 #include <errno.h>
 #include <pthread.h>
+#include <unistd.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -66,6 +67,34 @@ extern "C" {
 static unsigned long berry_stack_canary = 0x000aff0d;  // NUL/LF/EOF bytes
 __attribute__((visibility("default"), used))
 unsigned long* __stack_chk_guard = &berry_stack_canary;
+
+// PGO instrumentation: periodic profile flusher.
+//
+// On BB10 the browser is killed by the navigator (no clean exit), so the
+// profile runtime's atexit writer never runs. When this binary is
+// instrumented (chrome_pgo_phase=1), __llvm_profile_write_file is defined by
+// libclang_rt.profile; flush counters every 60s so a profile is always on
+// disk. Declared weak so production builds (no profile runtime) still link;
+// the null check makes this a no-op there.
+__attribute__((weak)) int __llvm_profile_write_file(void);
+
+static void* BerryProfileFlushThread(void*) {
+  for (;;) {
+    sleep(60);
+    if (__llvm_profile_write_file) {
+      __llvm_profile_write_file();
+      fprintf(stderr, "QNX:PGI profile flushed\n");
+    }
+  }
+  return nullptr;
+}
+
+__attribute__((constructor)) static void BerryStartProfileFlusher(void) {
+  if (!__llvm_profile_write_file)
+    return;  // not an instrumented build
+  pthread_t t;
+  pthread_create(&t, nullptr, &BerryProfileFlushThread, nullptr);
+}
 
 // Safe strlen: QNX's __strlen_isr crashes on NULL.  We mark these with
 // default visibility so they appear in the dynamic symbol table and override

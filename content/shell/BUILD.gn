@@ -92,10 +92,14 @@ static_library("content_shell_app") {
     "//content/public/app",
     "//v8",
   ]
-  # QNX PGI: web_test pulls in PPAPI loadable_modules; instrumented .o in .so
-  # links fail with ld.lld (.profd COMDAT discarded). Berry production shell
-  # does not need web tests during profile collection.
-  if (support_web_tests && !(is_qnx && chrome_pgo_phase == 1)) {
+  # NOTE: an earlier PGI attempt excluded web_test here for
+  # `is_qnx && chrome_pgo_phase == 1` (".profd COMDAT discarded" in
+  # instrumented .so links). That exclusion was never viable —
+  # shell_main_delegate.cc unconditionally includes web_test generated mojom
+  # headers and instantiates WebTest* classes, so PGI compiles/links break
+  # without these deps. The COMDAT problem itself is gone now that PGI runs
+  # on ThinLTO (see deploy/THINLTO.md); comdat resolution happens at IR level.
+  if (support_web_tests) {
     deps += [
       "//content/web_test:web_test_browser",
       "//content/web_test:web_test_common",

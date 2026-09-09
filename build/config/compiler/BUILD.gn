@@ -747,10 +747,19 @@ config("compiler") {
   if (!is_debug && use_thin_lto && is_a_target_toolchain) {
     assert(use_lld, "LTO is only supported with lld")
 
-    cflags += [
-      "-flto=thin",
-      "-fsplit-lto-unit",
-    ]
+    cflags += [ "-flto=thin" ]
+    if (is_qnx && chrome_pgo_phase == 1) {
+      # PGI + split LTO units is fatally incompatible on this port: every TU
+      # splits into a ThinLTO half and a regular-LTO half, the regular halves
+      # merge into one module (ld-temp.o), and its __llvm_profile_init
+      # registration references __profd_* globals that the ThinLTO backends
+      # internalize as .L-locals in their own partitions -> ~444k unresolvable
+      # R_ARM_THM_MOVW/MOVT_ABS relocs at the exe link. Instrumented builds
+      # don't need CFI/WPD, so keep every module purely thin.
+      cflags += [ "-fno-split-lto-unit" ]
+    } else {
+      cflags += [ "-fsplit-lto-unit" ]
+    }
 
     if (thin_lto_enable_cache) {
       # Limit the size of the ThinLTO cache to the lesser of 10% of
@@ -839,7 +848,10 @@ config("compiler") {
 
     # TODO(https://crbug.com/1211155): investigate why this isn't effective on
     # arm32.
-    if (!is_android || current_cpu == "arm64") {
+    if ((!is_android || current_cpu == "arm64") &&
+        !(is_qnx && chrome_pgo_phase == 1)) {
+      # QNX PGI: -fwhole-program-vtables implies -fsplit-lto-unit, which the
+      # instrumented build must disable (see -fno-split-lto-unit above).
       cflags += [ "-fwhole-program-vtables" ]
 
       if (toolchain_supports_rust_thin_lto) {
