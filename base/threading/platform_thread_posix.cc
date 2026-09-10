@@ -152,7 +152,14 @@ extern "C" {
 __attribute__((used, retain)) void* QnxThreadFuncAligned(void* params) {
   return ThreadFunc(params);
 }
-__attribute__((naked)) void* QnxThreadFuncTrampoline(void* /*params*/) {
+// no_profile_instrument_function: PGO instrumentation inserts a counter
+// update at function entry, which in a naked function runs without a
+// prologue and clobbers r0 -- observed on the build 96 PGI binary as every
+// thread reading its ThreadParams from the trampoline's own profile counter
+// (CHECK "type <= ThreadType::kMaxValue (11 vs. 6)" with the value
+// incrementing once per created thread).
+__attribute__((naked, no_profile_instrument_function)) void*
+QnxThreadFuncTrampoline(void* /*params*/) {
   // Tail-call: r0 (params) and lr are left untouched; only sp is realigned.
   // Thumb-2 disallows SP as an operand of BIC/AND, so round down via the
   // call-clobbered scratch register ip (r12).
