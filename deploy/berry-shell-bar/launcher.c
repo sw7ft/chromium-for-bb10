@@ -631,8 +631,13 @@ int main(int argc, char** argv) {
      * sure data lands on disk even though BB10 kills apps without exit. */
     mkdir("/accounts/1000/shared/misc/pgo", 0777);
     setenv("BERRY_PGO_COLLECT", "1", 1);
+    /* NO %m: merge mode folds the on-disk file back into the LIVE counters on
+     * every write, so with the 60s flusher the hot counters double per flush
+     * and wrap u64 within a session (observed: mojo/task-queue counts near
+     * 2^64). %p snapshot files hold monotonic totals-since-boot; sessions are
+     * merged offline with llvm-profdata. */
     setenv("LLVM_PROFILE_FILE",
-           "/accounts/1000/shared/misc/pgo/berry-%m.profraw", 1);
+           "/accounts/1000/shared/misc/pgo/berry-%p.profraw", 1);
     fprintf(stderr,
             "BerryShell: PGO collect armed (profiles -> shared/misc/pgo/)\n");
   }
