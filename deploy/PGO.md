@@ -37,11 +37,13 @@ Build 96 is the first instrumented BAR. The historical walls and their fixes:
    builds (`content/web_test/BUILD.gn`); pure data_deps, nothing references
    them.
 
-**Profile collection on device:** launcher always sets
-`LLVM_PROFILE_FILE=/accounts/1000/shared/misc/pgo/berry-%m.profraw` (merge
-mode), and `qnx_platform_stubs.cc` starts a thread flushing counters every
-60 s (`__llvm_profile_write_file`, weak) because BB10 kills apps without
-running atexit.
+**Profile collection on device:** launcher sets
+`LLVM_PROFILE_FILE=/accounts/1000/shared/misc/pgo/berry-%p.profraw` (per-PID
+snapshot, **not** `%m` merge — merge-on-write plus the 60s flusher doubles
+hot counters every flush and wraps u64). `qnx_platform_stubs.cc` flushes
+every 60 s because BB10 kills apps without atexit. Merge sessions offline
+with `llvm-profdata merge`. First clean profile (Sep 10 2026): 604k
+functions, 87B total counts, max block ~965M (sane).
 
 ## Overview
 
