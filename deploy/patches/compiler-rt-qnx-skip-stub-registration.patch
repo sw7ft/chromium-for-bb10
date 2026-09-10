@@ -1,0 +1,16 @@
+Apply to /root/llvm-project-17/compiler-rt/lib/profile/InstrProfilingPlatformOther.c
+then rebuild with deploy/build-qnx-profile-runtime.sh.
+
+Berry/QNX: weak zero-filled stub records (deploy/qnx-pgi-stubs.s) satisfy
+dangling ThinLTO __profd_ references. They live outside __llvm_prf_data, so
+folding them into the registration min/max ranges spans unrelated .data and
+produces an unreadable profile ("file header is corrupt"). Real records
+always have counters; skip anything that doesn't.
+
+--- a/compiler-rt/lib/profile/InstrProfilingPlatformOther.c
++++ b/compiler-rt/lib/profile/InstrProfilingPlatformOther.c
+@@ void __llvm_profile_register_function(void *Data_) {
+   const __llvm_profile_data *Data = (__llvm_profile_data *)Data_;
++  if (!Data->NumCounters || !Data->CounterPtr)
++    return;
+   if (!DataFirst) {
