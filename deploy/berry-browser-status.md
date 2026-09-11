@@ -1,9 +1,11 @@
 # BerryBrowserV3 — Project Status (Sep 6 2026)
 
+**Engine/perf checkpoint (Sep 10 2026): build 97 = ThinLTO + PGO. Read [ROADMAP.md](ROADMAP.md) first; this file is stale on build numbers.**
+
 **Device:** BlackBerry Passport (QNX / BB10) — other BB10 models auto-detected since build 84 (see *Device compatibility*)  
-**Engine:** Chromium `content_shell` (~96 MB ARM), single-process default  
+**Engine:** Chromium `content_shell` (~83 MB ARM PGO, single-process default)  
 **App:** BerryBrowserV3 `.bar` (`com.sw7ft.BerryShellV3`)  
-**Latest build:** **84** — panel auto-detect (touch calibration on Q10/Q20/etc.), modern start page, Android-first YouTube playback  
+**Latest build:** **97** — ThinLTO + on-device PGO (see ROADMAP.md). Older narrative below still describes shims/Google/YouTube.  
 **Log:** `/accounts/1000/shared/misc/berry-kbd.log`
 
 This document is the consolidated “where we are” snapshot and **onboarding guide for the next agent**. Read **Executive summary** + **Core strategy**, then **Agent continuation guide**, **Diagnostics**, and **Build pipeline** before touching code.
