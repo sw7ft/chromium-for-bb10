@@ -17,7 +17,6 @@
 #include "content/public/common/result_codes.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
 #include "base/environment.h"
-#include "base/files/dir_reader_posix.h"
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -32,35 +31,27 @@ extern char** environ;
 
 namespace {
 
-constexpr char kFDDir[] = "/proc/self/fd";
-
 // Mirror base/process/launch_posix.cc CloseSuperfluousFds for posix_spawn.
 // fork+exec closed every inherited fd except stdio and the remapped bootstrap
 // fds (Mojo + field trials at kBaseDescriptor+N). posix_spawn inherits the full
 // browser fd table unless we explicitly close the extras; duplicate open
-// handles to the same channel/pipes can break Mojo IPC and leave the renderer
-// idle after startup (white screen, "renderer unresponsive").
+// handles to the same channel/pipes break Mojo IPC and leave the renderer
+// idle after startup (white screen).
+//
+// BB10 has no /proc/self/fd (the first implementation used DirReader on that
+// path and silently closed nothing). Walk the parent's real fd table with
+// fcntl(F_GETFD) instead. File actions run dup2(src→dest) first, then these
+// closes, so the child's Mojo/field-trial dest fds survive and the parent's
+// extra copies of those sockets do not.
 void AddCloseSuperfluousFds(posix_spawn_file_actions_t* actions,
                             const base::FileHandleMappingVector& remaps) {
-  base::DirReaderPosix fd_dir(kFDDir);
-  if (!fd_dir.IsValid())
-    return;
+  long open_max = sysconf(_SC_OPEN_MAX);
+  if (open_max <= 0 || open_max > 4096)
+    open_max = 1024;
 
-  const int dir_fd = fd_dir.fd();
-  for (; fd_dir.Next(); ) {
-    if (fd_dir.name()[0] == '.')
-      continue;
-
-    char* endptr = nullptr;
-    errno = 0;
-    const long fd_l = strtol(fd_dir.name(), &endptr, 10);
-    if (fd_dir.name()[0] == 0 || *endptr || fd_l < 0 || errno)
-      continue;
-
-    const int fd = static_cast<int>(fd_l);
+  int closed = 0;
+  for (int fd = 0; fd < static_cast<int>(open_max); ++fd) {
     if (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO)
-      continue;
-    if (fd == dir_fd)
       continue;
 
     bool keep = false;
@@ -73,10 +64,14 @@ void AddCloseSuperfluousFds(posix_spawn_file_actions_t* actions,
     if (keep)
       continue;
 
-    // Ignore errors: if a fd isn't inherited, addclose is a no-op on some
-    // platforms; on others we skip silently via spawn failure logging below.
+    if (fcntl(fd, F_GETFD) == -1)
+      continue;
+
     posix_spawn_file_actions_addclose(actions, fd);
+    ++closed;
   }
+  fprintf(stderr, "QNX:LaunchChild will close %d inherited fds in child\n",
+          closed);
 }
 
 }  // namespace
