@@ -3,3 +3,4 @@ berry-browser-bundle/
 bb10-content-shell/
 *.zip
 *.tar.gz
+deploy/qnx-socket-probe
