@@ -6,6 +6,7 @@ namespace ui {
 
 namespace {
 QnxScreenOverlayPaintCallback g_overlay_callback = nullptr;
+int g_overlay_height = 56;
 }
 
 void SetQnxScreenOverlayPaintCallback(QnxScreenOverlayPaintCallback cb) {
@@ -14,6 +15,14 @@ void SetQnxScreenOverlayPaintCallback(QnxScreenOverlayPaintCallback cb) {
 
 QnxScreenOverlayPaintCallback GetQnxScreenOverlayPaintCallback() {
   return g_overlay_callback;
+}
+
+void SetQnxScreenOverlayHeight(int height) {
+  g_overlay_height = height;
+}
+
+int GetQnxScreenOverlayHeight() {
+  return g_overlay_height;
 }
 
 }  // namespace ui

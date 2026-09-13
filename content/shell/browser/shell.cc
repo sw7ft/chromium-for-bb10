@@ -1313,6 +1313,10 @@ std::string BerryBuildSettingsHtml() {
   h += toggle("Multi-process",
               "Experimental: renderer in its own process (default off)", "mp",
               BerryHasMarker("berry-mp.enable"));
+  h += toggle("URL toolbar",
+              "Back/forward and address bar. Off gives pages the full screen, "
+              "but leaves no Back button (default on)",
+              "toolbar", !BerryHasMarker("berry-toolbar.disable"));
   h += "</div>";
 
   h += "<div class='sec'>Developer</div><div class='card'>";
@@ -1639,6 +1643,8 @@ void BerryHandleSet(Shell* shell, const GURL& url) {
     BerrySetMarker("berry-stall-log.disable", !on);
   else if (k == "mp")
     BerrySetMarker("berry-mp.enable", on);
+  else if (k == "toolbar")
+    BerrySetMarker("berry-toolbar.disable", !on);
   else if (k == "mic")
     BerrySetMarker("berry-mic.enable", on);
   else if (k == "videodebug")

@@ -13,6 +13,12 @@ using QnxScreenOverlayPaintCallback = void (*)(SkCanvas* canvas);
 void SetQnxScreenOverlayPaintCallback(QnxScreenOverlayPaintCallback cb);
 QnxScreenOverlayPaintCallback GetQnxScreenOverlayPaintCallback();
 
+// Rows the chrome overlay occupies, for the toolbar-only repaint path. The
+// toolbar height scales with the render surface, so it cannot be a constant.
+// 0 means there is no chrome at all.
+void SetQnxScreenOverlayHeight(int height);
+int GetQnxScreenOverlayHeight();
+
 }  // namespace ui
 
 #endif

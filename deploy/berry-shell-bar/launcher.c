@@ -642,11 +642,11 @@ int main(int argc, char** argv) {
             "BerryShell: PGO collect armed (profiles -> shared/misc/pgo/)\n");
   }
 
-  fprintf(stderr, "BerryShell: Berry Browser build 98 (PGO+ThinLTO)\n");
+  fprintf(stderr, "BerryShell: Berry Browser build 100 (PGO+ThinLTO)\n");
 
   /* Ship the previous session's log tail (crash backtraces included) to the
    * configured endpoint. Forked; never blocks boot. */
-  berry_ship_log(98);
+  berry_ship_log(100);
 
   fprintf(stderr, "BerryShell: app dir = %s\n", dir);
   fprintf(stderr, "BerryShell: work dir (cwd) = %s\n", work);
