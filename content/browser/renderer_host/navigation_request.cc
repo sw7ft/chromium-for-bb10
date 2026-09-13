@@ -3,9 +3,6 @@
 // found in the LICENSE file.
 
 #include "content/browser/renderer_host/navigation_request.h"
-#if BUILDFLAG(IS_QNX)
-#include "content/browser/renderer_host/qnx_mp_replay_lock.h"
-#endif
 
 #include <memory>
 #include <string>
@@ -8040,44 +8037,6 @@ bool NavigationRequest::TrySendQnxPendingCommit() {
           qnx_commit_retry_attempts_);
   fflush(stderr);
 
-  // HTTPS CommitNavigation still garbles on QNX even after dropping extra
-  // remotes (Mojo reject num_bytes=~1GB). Replay the body as a data: load,
-  // the same shape as the working home commit.
-  if (qnx_pending_commit_->common_params->url.SchemeIsHTTPOrHTTPS()) {
-    if (!qnx_replay_draining_) {
-      fprintf(stderr, "QNX: https commit -> body replay %s\n",
-              qnx_pending_commit_->common_params->url.spec().c_str());
-      fflush(stderr);
-      StartQnxHttpsBodyReplay();
-    }
-    return false;
-  }
-
-  // Fat CommitNavigation (scheme-specific factories + extra remotes) exceeds
-  // what QNX sendmsg/SCM_RIGHTS can deliver. The renderer then parses a
-  // garbled header (MakeAlignedBuffer size=808858125) and CHECK-crashes.
-  // Keep the default factory so the document and https subresources can load.
-  if (qnx_pending_commit_->subresource_loader_factories) {
-    auto& bundle = *qnx_pending_commit_->subresource_loader_factories;
-    const size_t schemes = bundle.pending_scheme_specific_factories().size();
-    const size_t worlds = bundle.pending_isolated_world_factories().size();
-    bundle.pending_scheme_specific_factories().clear();
-    bundle.pending_isolated_world_factories().clear();
-    fprintf(stderr, "QNX: slim commit drop schemes=%zu worlds=%zu\n", schemes,
-            worlds);
-    fflush(stderr);
-  }
-  qnx_pending_commit_->subresource_overrides.reset();
-  qnx_pending_commit_->controller.reset();
-  qnx_pending_commit_->container_info.reset();
-  qnx_pending_commit_->subresource_proxying_loader_factory.reset();
-  qnx_pending_commit_->keep_alive_loader_factory.reset();
-  qnx_pending_commit_->fetch_later_loader_factory.reset();
-  qnx_pending_commit_->code_cache_host.reset();
-  qnx_pending_commit_->resource_cache_remote.reset();
-  qnx_pending_commit_->cookie_manager_info.reset();
-  qnx_pending_commit_->storage_info.reset();
-
   navigation_client->CommitNavigation(
       std::move(qnx_pending_commit_->common_params),
       std::move(qnx_pending_commit_->commit_params),
@@ -8114,132 +8073,6 @@ bool NavigationRequest::TrySendQnxPendingCommit() {
   return true;
 }
 
-namespace {
-GURL g_berry_qnx_replay_lock_url;
-base::TimeTicks g_berry_qnx_replay_lock_until;
-}  // namespace
-
-void BerryQnxReplayLock(const GURL& url) {
-  g_berry_qnx_replay_lock_url = url;
-  g_berry_qnx_replay_lock_until = base::TimeTicks::Now() + base::Seconds(20);
-  fprintf(stderr, "QNX: replay lock %s\n", url.spec().c_str());
-  fflush(stderr);
-}
-
-void BerryQnxReplayUnlock() {
-  g_berry_qnx_replay_lock_url = GURL();
-}
-
-bool BerryQnxReplayShouldDrop(const GURL& url) {
-  if (g_berry_qnx_replay_lock_url.is_empty() || !url.is_valid())
-    return false;
-  if (base::TimeTicks::Now() > g_berry_qnx_replay_lock_until)
-    return false;
-  return url.host() == g_berry_qnx_replay_lock_url.host();
-}
-
-void NavigationRequest::StartQnxHttpsBodyReplay() {
-  qnx_replay_draining_ = true;
-  qnx_replay_buf_.clear();
-  if (qnx_pending_commit_)
-    BerryQnxReplayLock(qnx_pending_commit_->common_params->url);
-  if (!qnx_pending_commit_ || !qnx_pending_commit_->response_body.is_valid()) {
-    FinishQnxHttpsBodyReplay();
-    return;
-  }
-  qnx_replay_watcher_ = std::make_unique<mojo::SimpleWatcher>(
-      FROM_HERE, mojo::SimpleWatcher::ArmingPolicy::MANUAL,
-      base::SequencedTaskRunner::GetCurrentDefault());
-  qnx_replay_watcher_->Watch(
-      qnx_pending_commit_->response_body.get(),
-      MOJO_HANDLE_SIGNAL_READABLE | MOJO_HANDLE_SIGNAL_PEER_CLOSED,
-      base::BindRepeating(&NavigationRequest::OnQnxHttpsBodyReadable,
-                          weak_factory_.GetWeakPtr()));
-  qnx_replay_watcher_->ArmOrNotify();
-}
-
-void NavigationRequest::OnQnxHttpsBodyReadable(MojoResult) {
-  if (!qnx_pending_commit_ || !qnx_pending_commit_->response_body.is_valid()) {
-    FinishQnxHttpsBodyReplay();
-    return;
-  }
-  constexpr size_t kMaxReplayBytes = 1500 * 1024;
-  auto& pipe = qnx_pending_commit_->response_body;
-  for (;;) {
-    uint32_t n = 64 * 1024;
-    const size_t old = qnx_replay_buf_.size();
-    if (old >= kMaxReplayBytes) {
-      FinishQnxHttpsBodyReplay();
-      return;
-    }
-    if (old + n > kMaxReplayBytes)
-      n = static_cast<uint32_t>(kMaxReplayBytes - old);
-    qnx_replay_buf_.resize(old + n);
-    const MojoResult r = pipe.get().ReadData(&qnx_replay_buf_[old], &n,
-                                            MOJO_READ_DATA_FLAG_NONE);
-    if (r == MOJO_RESULT_SHOULD_WAIT) {
-      qnx_replay_buf_.resize(old);
-      qnx_replay_watcher_->ArmOrNotify();
-      return;
-    }
-    if (r != MOJO_RESULT_OK) {
-      qnx_replay_buf_.resize(old);
-      FinishQnxHttpsBodyReplay();
-      return;
-    }
-    qnx_replay_buf_.resize(old + n);
-    if (n == 0) {
-      FinishQnxHttpsBodyReplay();
-      return;
-    }
-  }
-}
-
-void NavigationRequest::FinishQnxHttpsBodyReplay() {
-  qnx_replay_watcher_.reset();
-  if (!qnx_pending_commit_ || qnx_commit_sent_)
-    return;
-
-  const GURL orig = qnx_pending_commit_->common_params->url;
-  std::string html = std::move(qnx_replay_buf_);
-  const base::FilePath dump_path(
-      "/accounts/1000/shared/misc/berry-replay.html");
-  if (!html.empty()) {
-    base::WriteFile(dump_path, html);
-    base::WriteFile(base::FilePath("/accounts/1000/shared/misc/berry-replay.base"),
-                    orig.spec());
-  }
-
-  // Home-sized data: commit is the only shape that paints and stays up.
-  // A 352KB data: URL and an https+body-pipe commit both kill the renderer.
-  char stub[512];
-  snprintf(stub, sizeof(stub),
-           "<html><body style='background:#de5833;color:#fff;"
-           "font:28px sans-serif;padding:48px'>"
-           "<h1>DDG replay OK</h1>"
-           "<p>Fetched %zu bytes from %s</p>"
-           "<p>Tiny commit so the renderer stays alive.</p>"
-           "</body></html>",
-           html.size(), orig.spec().c_str());
-  const std::string header = "data:text/html;charset=utf-8,";
-  const std::string encoded = base::EscapeQueryParamValue(stub, false);
-  const GURL data_url(header + encoded);
-  fprintf(stderr,
-          "QNX: https replay stub html=%zu data_url=%zu url=%s valid=%d\n",
-          html.size(), data_url.spec().size(), orig.spec().c_str(),
-          data_url.is_valid() ? 1 : 0);
-  fflush(stderr);
-
-  qnx_pending_commit_->common_params->url = data_url;
-  qnx_pending_commit_->common_params->base_url_for_data_url = orig;
-  qnx_pending_commit_->response_body = mojo::ScopedDataPipeConsumerHandle();
-  qnx_pending_commit_->url_loader_client_endpoints.reset();
-  qnx_pending_commit_->response_head = network::mojom::URLResponseHead::New();
-  common_params_->url = data_url;
-  common_params_->base_url_for_data_url = orig;
-  TrySendQnxPendingCommit();
-}
-
 void NavigationRequest::OnQnxNavigationClientBound() {
   qnx_nav_client_bound_ = true;
   QNX_NAV_LOG_FMT("QNX:Browser:NavClientBound rph=%d\n",
@@ -8261,8 +8094,6 @@ void NavigationRequest::OnQnxCommitRetry() {
     fprintf(stderr, "QNX: Browser CommitRetry give up attempts=%d bound=%d\n",
             qnx_commit_retry_attempts_, qnx_nav_client_bound_ ? 1 : 0);
     fflush(stderr);
-    if (qnx_replay_draining_)
-      FinishQnxHttpsBodyReplay();
     return StopQnxCommitRetry();
   }
 

@@ -3,9 +3,6 @@
 // found in the LICENSE file.
 
 #include "content/browser/renderer_host/render_frame_host_impl.h"
-#if BUILDFLAG(IS_QNX)
-#include "content/browser/renderer_host/qnx_mp_replay_lock.h"
-#endif
 
 #if BUILDFLAG(IS_QNX)
 #include <unistd.h>
@@ -9129,16 +9126,6 @@ void RenderFrameHostImpl::BeginNavigation(
   // `IsInactiveAndDisallowActivation()` check cause both pending deletion and
   // bfcached states to return early.
   DCHECK(owner_);
-#if BUILDFLAG(IS_QNX)
-  if (BerryQnxReplayShouldDrop(unvalidated_common_params->url) &&
-      unvalidated_common_params->navigation_type !=
-          blink::mojom::NavigationType::SAME_DOCUMENT) {
-    fprintf(stderr, "QNX: drop renderer nav during replay %s\n",
-            unvalidated_common_params->url.spec().c_str());
-    fflush(stderr);
-    return;
-  }
-#endif
   if (owner_->GetRenderFrameHostManager().is_attaching_inner_delegate()) {
     // Avoid starting any new navigations since this frame is in the process of
     // attaching an inner delegate.

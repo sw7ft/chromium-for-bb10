@@ -1883,7 +1883,7 @@ void Shell::DidStartNavigation(NavigationHandle* navigation_handle) {
     static base::TimeTicks last_reissue_at;
     const base::TimeTicks now = base::TimeTicks::Now();
     if (url == last_reissue &&
-        (now - last_reissue_at) < base::Seconds(8)) {
+        (now - last_reissue_at) < base::Seconds(2)) {
       fprintf(stderr, "QNX: skip duplicate reissue %s\n", spec.c_str());
       fflush(stderr);
       return;
@@ -1984,44 +1984,6 @@ void Shell::DidFinishNavigation(NavigationHandle* navigation_handle) {
             static_cast<int>(navigation_handle->GetNetErrorCode()),
             static_cast<long long>(ms));
     fflush(stderr);
-    // Tiny DDG stub committed. Inject the saved HTML with a handle-free
-    // script so we do not send another fat CommitNavigation.
-    if (navigation_handle->HasCommitted() &&
-        !navigation_handle->IsErrorPage() &&
-        url.SchemeIs(url::kDataScheme) &&
-        url.spec().find("DDG") != std::string::npos &&
-        url.spec().find("replay") != std::string::npos) {
-      std::string html;
-      const base::FilePath dump(
-          "/accounts/1000/shared/misc/berry-replay.html");
-      if (base::ReadFileToString(dump, &html) && !html.empty()) {
-        std::string base_url = "https://duckduckgo.com/";
-        std::string base_file;
-        if (base::ReadFileToString(
-                base::FilePath("/accounts/1000/shared/misc/berry-replay.base"),
-                &base_file) &&
-            !base_file.empty()) {
-          base_url = base_file;
-        }
-        if (html.find("<base") == std::string::npos) {
-          const size_t head = html.find("<head");
-          const size_t gt =
-              head == std::string::npos ? std::string::npos : html.find('>', head);
-          if (gt != std::string::npos) {
-            html.insert(gt + 1, "<base href=\"" + base_url + "\">");
-          }
-        }
-        std::string json;
-        base::EscapeJSONString(html, true, &json);
-        const std::string js =
-            "document.open();document.write(" + json + ");document.close();";
-        fprintf(stderr, "QNX: inject replay html=%zu js=%zu base=%s\n",
-                html.size(), js.size(), base_url.c_str());
-        fflush(stderr);
-        navigation_handle->GetRenderFrameHost()->ExecuteJavaScriptForTests(
-            base::UTF8ToUTF16(js), base::NullCallback());
-      }
-    }
     // Navigator can report hidden after first paint; mobile/desktop YouTube
     // players abort googlevideo fetches when visibility != visible.
     if (!navigation_handle->IsErrorPage() && url.SchemeIsHTTPOrHTTPS()) {

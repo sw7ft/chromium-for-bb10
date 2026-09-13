@@ -356,6 +356,19 @@ bool ChannelPosix::WriteNoLock(MessageView message_view) {
     if (handles_written < num_handles) {
       iovec iov = {const_cast<void*>(message_view.data()),
                    message_view.data_num_bytes()};
+#if BUILDFLAG(IS_QNX)
+      // QNX's sendmsg() discards an 8140-byte prefix of the payload and still
+      // reports the full requested length as sent, whenever SCM_RIGHTS is
+      // attached and the payload exceeds a page. The loop below trusts the
+      // return value to decide a message is fully written, so a fat message
+      // (a CommitNavigation carrying subresource loader factories) left the
+      // channel desynchronized and the peer parsed payload bytes as a message
+      // header. Plain send() has no such limit at any size, so keep the
+      // handle-bearing write small and let the remainder go out unadorned.
+      // 2048 leaves room for the 524-byte control payload of a full
+      // kMaxSendmsgHandles batch. Measured by deploy/qnx-socket-probe.c.
+      iov.iov_len = std::min<size_t>(iov.iov_len, 2048);
+#endif
       size_t num_handles_to_send =
           std::min(num_handles - handles_written, kMaxSendmsgHandles);
       std::vector<base::ScopedFD> fds(num_handles_to_send);
@@ -363,15 +376,6 @@ bool ChannelPosix::WriteNoLock(MessageView message_view) {
         fds[i] = handles[i + handles_written].TakeHandle().TakeFD();
       // TODO: Handle lots of handles.
       result = SendmsgWithHandles(socket_.get(), &iov, 1, fds);
-#if BUILDFLAG(IS_QNX)
-      if (num_handles_to_send > 1 || message_view.data_num_bytes() > 65536) {
-        fprintf(stderr,
-                "QNX: Mojo sendmsg bytes=%zu handles=%zu/%zu result=%zd errno=%d\n",
-                message_view.data_num_bytes(), num_handles_to_send, num_handles,
-                result, result < 0 ? errno : 0);
-        fflush(stderr);
-      }
-#endif
       if (result >= 0) {
 #if BUILDFLAG(IS_IOS)
         // There is a bug in XNU which makes it dangerous to close
