@@ -5,6 +5,7 @@
 #include "base/memory/platform_shared_memory_region.h"
 
 #include <fcntl.h>
+#include <stdio.h>
 #include <sys/mman.h>
 
 #include "base/files/file.h"
@@ -209,6 +210,11 @@ PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Create(Mode mode,
   FilePath path;
   ScopedFD fd = CreateAndOpenFdForTemporaryFileInDir(directory, &path);
   File shm_file(fd.release());
+#if BUILDFLAG(IS_QNX)
+  fprintf(stderr, "QNX: shm create dir=%s path=%s valid=%d size=%zu\n",
+          directory.value().c_str(), path.value().c_str(),
+          shm_file.IsValid() ? 1 : 0, size);
+#endif
 
   if (!shm_file.IsValid()) {
     PLOG(ERROR) << "Creating shared memory in " << path.value() << " failed";

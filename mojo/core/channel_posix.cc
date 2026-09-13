@@ -363,6 +363,15 @@ bool ChannelPosix::WriteNoLock(MessageView message_view) {
         fds[i] = handles[i + handles_written].TakeHandle().TakeFD();
       // TODO: Handle lots of handles.
       result = SendmsgWithHandles(socket_.get(), &iov, 1, fds);
+#if BUILDFLAG(IS_QNX)
+      if (num_handles_to_send > 1 || message_view.data_num_bytes() > 65536) {
+        fprintf(stderr,
+                "QNX: Mojo sendmsg bytes=%zu handles=%zu/%zu result=%zd errno=%d\n",
+                message_view.data_num_bytes(), num_handles_to_send, num_handles,
+                result, result < 0 ? errno : 0);
+        fflush(stderr);
+      }
+#endif
       if (result >= 0) {
 #if BUILDFLAG(IS_IOS)
         // There is a bug in XNU which makes it dangerous to close

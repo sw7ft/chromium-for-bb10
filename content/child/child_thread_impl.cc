@@ -40,6 +40,11 @@
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
+#if BUILDFLAG(IS_QNX)
+#include <fcntl.h>
+#include <stdio.h>
+#include <unistd.h>
+#endif
 #include "content/child/browser_exposed_child_interfaces.h"
 #include "content/child/child_process.h"
 #include "content/common/child_process.mojom.h"
@@ -237,6 +242,16 @@ mojo::IncomingInvitation InitializeMojoIPCChannel() {
   endpoint =
       mojo::PlatformChannelEndpoint(mojo::PlatformHandle(std::move(receive)));
 #elif BUILDFLAG(IS_POSIX)
+#if BUILDFLAG(IS_QNX)
+  {
+    int mojo_fd = base::GlobalDescriptors::GetInstance()->Get(kMojoIPCChannel);
+    int fl = fcntl(mojo_fd, F_GETFL);
+    fprintf(stderr,
+            "QNX: child Mojo Accept begin pid=%d fd=%d fl=%d\n",
+            (int)getpid(), mojo_fd, fl);
+    fflush(stderr);
+  }
+#endif
   endpoint = mojo::PlatformChannelEndpoint(mojo::PlatformHandle(base::ScopedFD(
       base::GlobalDescriptors::GetInstance()->Get(kMojoIPCChannel))));
 #endif
@@ -245,7 +260,18 @@ mojo::IncomingInvitation InitializeMojoIPCChannel() {
     flags |= MOJO_ACCEPT_INVITATION_FLAG_INHERIT_BROKER;
   }
 
-  return mojo::IncomingInvitation::Accept(std::move(endpoint), flags);
+#if BUILDFLAG(IS_QNX)
+  fprintf(stderr, "QNX: child Mojo Accept calling pid=%d\n", (int)getpid());
+  fflush(stderr);
+#endif
+  mojo::IncomingInvitation invitation =
+      mojo::IncomingInvitation::Accept(std::move(endpoint), flags);
+#if BUILDFLAG(IS_QNX)
+  fprintf(stderr, "QNX: child Mojo Accept done pid=%d valid=%d\n",
+          (int)getpid(), invitation.is_valid() ? 1 : 0);
+  fflush(stderr);
+#endif
+  return invitation;
 }
 
 // Callback passed to variations::ChildProcessFieldTrialSyncer. Notifies the

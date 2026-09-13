@@ -4,6 +4,7 @@
 
 #include "content/shell/app/shell_main_delegate.h"
 
+#include <cstdio>
 #include <iostream>
 #include <tuple>
 #include <utility>
@@ -26,6 +27,7 @@
 #include "content/common/content_constants_internal.h"
 #include "content/public/app/initialize_mojo_core.h"
 #include "content/public/browser/browser_main_runner.h"
+#include "content/public/browser/network_service_util.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
 #include "content/public/common/url_constants.h"
@@ -194,6 +196,26 @@ absl::optional<int> ShellMainDelegate::BasicStartupComplete() {
 #endif
 
   RegisterShellPathProvider();
+
+#if BUILDFLAG(IS_QNX)
+  // MP: a new origin used to spawn a second renderer whose CommitNavigation
+  // never arrived (home painted, icon taps did nothing). Keep every site in
+  // the one renderer that already works. GPU stays in-process.
+  if (command_line.GetSwitchValueASCII(switches::kProcessType).empty() &&
+      !command_line.HasSwitch(switches::kSingleProcess)) {
+    if (!command_line.HasSwitch(switches::kRendererProcessLimit))
+      command_line.AppendSwitchASCII(switches::kRendererProcessLimit, "1");
+    if (!command_line.HasSwitch(switches::kDisableSiteIsolation))
+      command_line.AppendSwitch(switches::kDisableSiteIsolation);
+    // HTTPS from the data: home page starts in the network utility and never
+    // reaches commit (~30s ERR_ABORTED). Run network in-process like GPU.
+    ForceInProcessNetworkService();
+    fprintf(stderr,
+            "QNX: MP reuse one renderer (process-limit=1, no site isolation, "
+            "in-process network)\n");
+    fflush(stderr);
+  }
+#endif
 
   return absl::nullopt;
 }

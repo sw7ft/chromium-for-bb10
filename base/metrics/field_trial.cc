@@ -651,7 +651,16 @@ void FieldTrialList::CreateTrialsInChildProcess(const CommandLine& cmd_line,
     std::string switch_value =
         cmd_line.GetSwitchValueASCII(switches::kFieldTrialHandle);
     bool result = CreateTrialsFromSwitchValue(switch_value, fd_key);
+#if BUILDFLAG(IS_QNX)
+    // Don't abort the child: a bad shm fd is the MP white-screen case and we
+    // still want Mojo breadcrumbs / a running process to inspect.
+    if (!result) {
+      LOG(ERROR) << "QNX: CreateTrialsFromSwitchValue failed handle="
+                 << switch_value;
+    }
+#else
     CHECK(result);
+#endif
   }
 #endif  // BUILDFLAG(USE_BLINK)
 }

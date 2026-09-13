@@ -145,6 +145,11 @@ class ShellContentBrowserClient : public ContentBrowserClient {
 #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) ||
         // BUILDFLAG(IS_ANDROID)
 #if BUILDFLAG(IS_QNX)
+  void RenderProcessWillLaunch(RenderProcessHost* host) override;
+  bool ShouldLockProcessToSite(BrowserContext* browser_context,
+                               const GURL& effective_url) override;
+  bool ShouldDisableSiteIsolation(
+      SiteIsolationMode site_isolation_mode) override;
   // QNX lacks a native TTS backend; return a safe no-op TtsPlatform so the
   // Web Speech API never reaches the vtable-less QNX linker stub. See
   // shell_content_browser_client.cc (ShellTtsPlatform) for details.

@@ -51,9 +51,9 @@ void InitializeMojoCore() {
     if (!config.is_broker_process)
       config.force_direct_shared_memory_allocation = true;
   } else {
-#if BUILDFLAG(IS_WIN)
-    // On Windows it's not necessary to broker shared memory allocation, as
-    // even sandboxed processes can allocate their own without trouble.
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_QNX)
+    // Windows and QNX children can allocate shm directly. QNX has no Mojo
+    // sandbox broker; waiting on one leaves the renderer idle (white screen).
     config.force_direct_shared_memory_allocation = true;
 #endif
   }

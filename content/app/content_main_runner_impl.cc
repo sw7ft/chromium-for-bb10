@@ -5,6 +5,7 @@
 #include "content/app/content_main_runner_impl.h"
 
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -1063,6 +1064,13 @@ int ContentMainRunnerImpl::Initialize(ContentMainParams params) {
   delegate_->SandboxInitialized(process_type);
 
   QNX_TRACE_MSG("QNX:I:15 InitDone\n");
+#if BUILDFLAG(IS_QNX)
+  if (!process_type.empty()) {
+    fprintf(stderr, "QNX: child Initialize done type=%s pid=%d\n",
+            process_type.c_str(), (int)getpid());
+    fflush(stderr);
+  }
+#endif
 #if BUILDFLAG(USE_ZYGOTE)
   if (process_type.empty()) {
     // The sandbox host needs to be initialized before forking a thread to
@@ -1113,13 +1121,28 @@ int NO_STACK_PROTECTOR ContentMainRunnerImpl::Run() {
       // Zygotes will run this at a later point in time when the command line
       // has been updated.
       CreateChildThreadPool(process_type);
+#if BUILDFLAG(IS_QNX)
+      fprintf(stderr, "QNX: child Run after ThreadPool type=%s pid=%d\n",
+              process_type.c_str(), (int)getpid());
+      fflush(stderr);
+#endif
       if (delegate_->ShouldCreateFeatureList(
               ContentMainDelegate::InvokedInChildProcess())) {
         InitializeFieldTrialAndFeatureList();
+#if BUILDFLAG(IS_QNX)
+        fprintf(stderr, "QNX: child Run after FieldTrial type=%s pid=%d\n",
+                process_type.c_str(), (int)getpid());
+        fflush(stderr);
+#endif
       }
       if (delegate_->ShouldInitializeMojo(
               ContentMainDelegate::InvokedInChildProcess())) {
         InitializeMojoCore();
+#if BUILDFLAG(IS_QNX)
+        fprintf(stderr, "QNX: child Run after MojoCore type=%s pid=%d\n",
+                process_type.c_str(), (int)getpid());
+        fflush(stderr);
+#endif
       }
       delegate_->PostEarlyInitialization(
           ContentMainDelegate::InvokedInChildProcess());

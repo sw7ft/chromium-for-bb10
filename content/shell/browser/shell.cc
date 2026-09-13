@@ -22,7 +22,9 @@
 #include "base/qnx_pump_activity.h"
 #endif
 #include "base/command_line.h"
+#include "base/files/file_util.h"
 #include "base/functional/bind.h"
+#include "base/json/string_escape.h"
 #include "base/functional/callback_helpers.h"
 #include "base/values.h"
 #include "base/location.h"
@@ -50,6 +52,7 @@
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/picture_in_picture_window_controller.h"
 #include "content/public/browser/presentation_receiver_flags.h"
 #include "content/public/browser/render_process_host.h"
@@ -277,18 +280,57 @@ Shell* Shell::CreateNewWindow(BrowserContext* browser_context,
   if (!url.is_empty()) {
 #if BUILDFLAG(IS_QNX)
     // Navigation must not start during PreMainMessageLoopRun: the IO thread
-    // cannot service network-service Mojo until the UI message loop runs, which
-    // otherwise queues the first URLLoader for ~20s after FactoryStart.
-    Shell* shell_ptr = shell;
+    // cannot service network-service Mojo until the UI message loop runs.
+    // Do not Init() the renderer here — spawning a child during window
+    // create races QNX Screen and blacks the display.
     GURL load_url = url;
+    std::string mp_home_html;
+    if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kSingleProcess)) {
+      // A raw data: document is a unique opaque origin. The renderer is then
+      // not allowed to request https (clicks become ERR_ABORTED /
+      // about:blank#blocked). Load the same HTML as data with an https
+      // virtual+base URL so the process looks like a normal web renderer.
+      if (url.SchemeIsFile() &&
+          base::ReadFileToString(base::FilePath(url.path()), &mp_home_html) &&
+          !mp_home_html.empty()) {
+        fprintf(stderr, "QNX: MP first nav https home %zu bytes\n",
+                mp_home_html.size());
+        fflush(stderr);
+      } else {
+        load_url =
+            GURL("data:text/html,<body bgcolor=green><h1>MP-OK</h1>");
+      }
+    }
     GetUIThreadTaskRunner({})->PostTask(
         FROM_HERE, base::BindOnce(
-                       [](Shell* s, const GURL& u) {
-                         QNX_NAV_LOG_FMT("BerryNav: DeferredLoadURL \"%s\"\n",
-                                         u.spec().substr(0, 120).c_str());
+                       [](Shell* s, const GURL& u, std::string html) {
+                         if (!html.empty()) {
+                           // LoadDataWithBaseURL builds a data: GURL. Unescaped
+                           // CSS colors (#fff) become a URL fragment and the
+                           // page is truncated to a white screen.
+                           std::string encoded =
+                               base::EscapeQueryParamValue(html, false);
+                           GURL virt("https://start.berry/");
+                           GURL probe("data:text/html;charset=utf-8," +
+                                      encoded);
+                           fprintf(stderr,
+                                   "QNX: DeferredLoadData home virt=%s "
+                                   "html=%zu data_url=%zu valid=%d\n",
+                                   virt.spec().c_str(), html.size(),
+                                   probe.spec().size(),
+                                   probe.is_valid() ? 1 : 0);
+                           fflush(stderr);
+                           s->LoadDataWithBaseURL(virt, encoded, virt);
+                           return;
+                         }
+                         fprintf(stderr, "QNX: DeferredLoadURL %s\n",
+                                 u.spec().substr(0, 120).c_str());
+                         fflush(stderr);
                          s->LoadURL(u);
                        },
-                       base::Unretained(shell_ptr), load_url));
+                       base::Unretained(shell), load_url,
+                       std::move(mp_home_html)));
 #else
     shell->LoadURL(url);
 #endif
@@ -1787,6 +1829,10 @@ void Shell::DidStartNavigation(NavigationHandle* navigation_handle) {
   QNX_NAV_LOG_FMT(
       "BerryNav: DidStartNavigation url=\"%s\" same_doc=%d\n", spec.c_str(),
       navigation_handle->IsSameDocument() ? 1 : 0);
+  fprintf(stderr, "QNX: DidStartNav url=%s same_doc=%d renderer=%d\n",
+          spec.c_str(), navigation_handle->IsSameDocument() ? 1 : 0,
+          navigation_handle->IsRendererInitiated() ? 1 : 0);
+  fflush(stderr);
   // In-app "Restart browser" action. Any navigation to the sentinel host
   // triggers a graceful relaunch -- the home.html "Restart" tile links here, and
   // typing "berry.restart" in the URL bar works too. We catch it at navigation
@@ -1823,6 +1869,31 @@ void Shell::DidStartNavigation(NavigationHandle* navigation_handle) {
   if (!navigation_handle->IsSameDocument() && url.host() == "berry.share") {
     QNX_NAV_LOG_FMT("%s", "BerryNav: share\n");
     BerryHandleShare(this, url);
+    return;
+  }
+  // Renderer-initiated https from the data: home page never reaches commit
+  // (ERR_ABORTED). Re-issue as a typed LoadURL so the unlocked renderer can
+  // take the document.
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kSingleProcess) &&
+      !navigation_handle->IsSameDocument() &&
+      navigation_handle->IsRendererInitiated() &&
+      url.SchemeIsHTTPOrHTTPS() && url.host() != "start.berry") {
+    static GURL last_reissue;
+    static base::TimeTicks last_reissue_at;
+    const base::TimeTicks now = base::TimeTicks::Now();
+    if (url == last_reissue &&
+        (now - last_reissue_at) < base::Seconds(8)) {
+      fprintf(stderr, "QNX: skip duplicate reissue %s\n", spec.c_str());
+      fflush(stderr);
+      return;
+    }
+    last_reissue = url;
+    last_reissue_at = now;
+    fprintf(stderr, "QNX: reissue renderer nav as LoadURL %s\n", spec.c_str());
+    fflush(stderr);
+    GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE, base::BindOnce(&Shell::LoadURL, base::Unretained(this), url));
     return;
   }
   if (!navigation_handle->IsSameDocument() &&
@@ -1908,6 +1979,49 @@ void Shell::DidFinishNavigation(NavigationHandle* navigation_handle) {
         spec.c_str(), navigation_handle->IsErrorPage() ? 1 : 0,
         static_cast<int>(navigation_handle->GetNetErrorCode()),
         static_cast<long long>(ms));
+    fprintf(stderr, "QNX: DidFinishNav url=%s error=%d code=%d ms=%lld\n",
+            spec.c_str(), navigation_handle->IsErrorPage() ? 1 : 0,
+            static_cast<int>(navigation_handle->GetNetErrorCode()),
+            static_cast<long long>(ms));
+    fflush(stderr);
+    // Tiny DDG stub committed. Inject the saved HTML with a handle-free
+    // script so we do not send another fat CommitNavigation.
+    if (navigation_handle->HasCommitted() &&
+        !navigation_handle->IsErrorPage() &&
+        url.SchemeIs(url::kDataScheme) &&
+        url.spec().find("DDG") != std::string::npos &&
+        url.spec().find("replay") != std::string::npos) {
+      std::string html;
+      const base::FilePath dump(
+          "/accounts/1000/shared/misc/berry-replay.html");
+      if (base::ReadFileToString(dump, &html) && !html.empty()) {
+        std::string base_url = "https://duckduckgo.com/";
+        std::string base_file;
+        if (base::ReadFileToString(
+                base::FilePath("/accounts/1000/shared/misc/berry-replay.base"),
+                &base_file) &&
+            !base_file.empty()) {
+          base_url = base_file;
+        }
+        if (html.find("<base") == std::string::npos) {
+          const size_t head = html.find("<head");
+          const size_t gt =
+              head == std::string::npos ? std::string::npos : html.find('>', head);
+          if (gt != std::string::npos) {
+            html.insert(gt + 1, "<base href=\"" + base_url + "\">");
+          }
+        }
+        std::string json;
+        base::EscapeJSONString(html, true, &json);
+        const std::string js =
+            "document.open();document.write(" + json + ");document.close();";
+        fprintf(stderr, "QNX: inject replay html=%zu js=%zu base=%s\n",
+                html.size(), js.size(), base_url.c_str());
+        fflush(stderr);
+        navigation_handle->GetRenderFrameHost()->ExecuteJavaScriptForTests(
+            base::UTF8ToUTF16(js), base::NullCallback());
+      }
+    }
     // Navigator can report hidden after first paint; mobile/desktop YouTube
     // players abort googlevideo fetches when visibility != visible.
     if (!navigation_handle->IsErrorPage() && url.SchemeIsHTTPOrHTTPS()) {
@@ -1951,6 +2065,29 @@ void Shell::DidFinishLoad(RenderFrameHost* render_frame_host,
                 (int)base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpDom));
   if (!render_frame_host->IsInPrimaryMainFrame())
     return;
+#if BUILDFLAG(IS_QNX)
+  if (!pending_mp_home_.is_empty() && validated_url.SchemeIs(url::kDataScheme)) {
+    GURL home = pending_mp_home_;
+    pending_mp_home_ = GURL();
+    // file:// is a different origin than data: and starts a new renderer;
+    // that first fat commit is dropped. Inline the HTML as data: in this
+    // process. Base URL keeps icon.png and relative assets on the file origin.
+    std::string html;
+    if (home.SchemeIsFile() &&
+        base::ReadFileToString(base::FilePath(home.path()), &html) &&
+        !html.empty()) {
+      fprintf(stderr, "QNX: MP after slim, LoadData home %zu bytes\n",
+              html.size());
+      fflush(stderr);
+      LoadDataWithBaseURL(home, html, home.GetWithoutFilename());
+    } else {
+      fprintf(stderr, "QNX: MP after slim, fallback LoadURL %s\n",
+              home.spec().substr(0, 120).c_str());
+      fflush(stderr);
+      LoadURL(home);
+    }
+  }
+#endif
   if (!base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpDom))
     return;
   if (base::QnxBerryDaemonEnabled())

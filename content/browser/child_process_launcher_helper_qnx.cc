@@ -25,6 +25,7 @@
 #include <spawn.h>
 #include <string>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 extern char** environ;
@@ -50,6 +51,7 @@ void AddCloseSuperfluousFds(posix_spawn_file_actions_t* actions,
     open_max = 1024;
 
   int closed = 0;
+  int addclose_fail = 0;
   for (int fd = 0; fd < static_cast<int>(open_max); ++fd) {
     if (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO)
       continue;
@@ -67,12 +69,53 @@ void AddCloseSuperfluousFds(posix_spawn_file_actions_t* actions,
     if (fcntl(fd, F_GETFD) == -1)
       continue;
 
-    posix_spawn_file_actions_addclose(actions, fd);
-    ++closed;
+    if (posix_spawn_file_actions_addclose(actions, fd) != 0)
+      ++addclose_fail;
+    else
+      ++closed;
   }
-  fprintf(stderr, "QNX:LaunchChild will close %d inherited fds in child\n",
-          closed);
+  fprintf(stderr,
+          "QNX:LaunchChild will close %d inherited fds in child (addclose_fail=%d)\n",
+          closed, addclose_fail);
 }
+
+// posix_spawn on some QNX versions silently drops extra file actions, so
+// addclose alone is not enough. Mark every non-stdio parent fd CLOEXEC for
+// the duration of spawn; dup2 in the child clears CLOEXEC on the remapped
+// dests, then exec closes the rest.
+class ScopedCloexecExceptStdio {
+ public:
+  ScopedCloexecExceptStdio(long open_max,
+                           const base::FileHandleMappingVector& remaps) {
+    if (open_max <= 0 || open_max > 4096)
+      open_max = 1024;
+    for (int fd = 3; fd < static_cast<int>(open_max); ++fd) {
+      bool skip = false;
+      for (const auto& remap : remaps) {
+        if (fd == remap.first || fd == remap.second) {
+          skip = true;
+          break;
+        }
+      }
+      if (skip)
+        continue;
+      int flags = fcntl(fd, F_GETFD);
+      if (flags == -1)
+        continue;
+      saved_.push_back({fd, flags});
+      if (!(flags & FD_CLOEXEC))
+        fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
+    }
+  }
+  ~ScopedCloexecExceptStdio() {
+    for (const auto& s : saved_)
+      fcntl(s.first, F_SETFD, s.second);
+  }
+  int marked() const { return static_cast<int>(saved_.size()); }
+
+ private:
+  std::vector<std::pair<int, int>> saved_;
+};
 
 }  // namespace
 
@@ -145,6 +188,10 @@ ChildProcessLauncherHelper::LaunchProcessOnLauncherThread(
   *is_synchronous_launch = true;
   Process process;
   const std::string proc_type = GetProcessType();
+  if (proc_type != switches::kGpuProcess) {
+    command_line()->RemoveSwitch("ozone-platform");
+    command_line()->RemoveSwitch("use-gl");
+  }
   const auto& argv = command_line()->argv();
   fprintf(stderr, "QNX:LaunchChild type=%s pid_target=%d argc=%zu\n",
           proc_type.c_str(), child_process_id(),
@@ -196,20 +243,44 @@ ChildProcessLauncherHelper::LaunchProcessOnLauncherThread(
   // O_CLOEXEC on the destination so it survives exec; all other inherited fds
   // are O_CLOEXEC and close automatically. exec also resets caught signal
   // handlers to default, so no POSIX_SPAWN_SETSIGDEF is needed.
-  posix_spawn_file_actions_t file_actions;
-  posix_spawn_file_actions_init(&file_actions);
-  posix_spawn_file_actions_addopen(&file_actions, STDIN_FILENO, "/dev/null",
-                                   O_RDONLY, 0);
-  for (const auto& remap : options->fds_to_remap) {
-    posix_spawn_file_actions_adddup2(&file_actions, remap.first, remap.second);
-  }
-  AddCloseSuperfluousFds(&file_actions, options->fds_to_remap);
+  auto init_remap_actions = [&](posix_spawn_file_actions_t* actions) {
+    posix_spawn_file_actions_init(actions);
+    posix_spawn_file_actions_addopen(actions, STDIN_FILENO, "/dev/null",
+                                     O_RDONLY, 0);
+    for (const auto& remap : options->fds_to_remap)
+      posix_spawn_file_actions_adddup2(actions, remap.first, remap.second);
+  };
 
+  posix_spawn_file_actions_t file_actions;
+  init_remap_actions(&file_actions);
+  // Do not mass-addclose dozens of fds. QNX posix_spawn returns EBADF (9)
+  // once the action list grows (renderer spawn failed, white screen).
+  // CLOEXEC on leftover parent fds covers inheritance across exec. Restore
+  // those flags before any remaps-only retry so spawn can still see remap
+  // sources if QNX closes CLOEXEC fds before applying file actions.
   pid_t child_pid = 0;
   const char* exe_path = argv_cstr[0];
-  int spawn_rc = posix_spawn(&child_pid, exe_path, &file_actions,
-                             /*attrp=*/nullptr, argv_cstr.data(), envp.data());
+  int spawn_rc = 0;
+  {
+    ScopedCloexecExceptStdio cloexec(sysconf(_SC_OPEN_MAX),
+                                     options->fds_to_remap);
+    fprintf(stderr, "QNX:LaunchChild marked %d parent fds CLOEXEC for spawn\n",
+            cloexec.marked());
+    spawn_rc = posix_spawn(&child_pid, exe_path, &file_actions,
+                           /*attrp=*/nullptr, argv_cstr.data(), envp.data());
+  }
   posix_spawn_file_actions_destroy(&file_actions);
+  if (spawn_rc == EBADF) {
+    fprintf(stderr,
+            "QNX:LaunchChild type=%s spawn EBADF, retry remaps-only\n",
+            proc_type.c_str());
+    posix_spawn_file_actions_t retry_actions;
+    init_remap_actions(&retry_actions);
+    child_pid = 0;
+    spawn_rc = posix_spawn(&child_pid, exe_path, &retry_actions,
+                           /*attrp=*/nullptr, argv_cstr.data(), envp.data());
+    posix_spawn_file_actions_destroy(&retry_actions);
+  }
 
   if (spawn_rc == 0 && child_pid > 0) {
     process.process = base::Process(child_pid);

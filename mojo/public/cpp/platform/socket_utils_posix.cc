@@ -4,6 +4,8 @@
 
 #include "mojo/public/cpp/platform/socket_utils_posix.h"
 
+#include <errno.h>
+#include <stdio.h>
 #include <stddef.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -126,7 +128,15 @@ ssize_t SendmsgWithHandles(base::PlatformFile socket,
     DCHECK_GE(descriptors[i].get(), 0);
     reinterpret_cast<int*>(CMSG_DATA(cmsg))[i] = descriptors[i].get();
   }
-  return HANDLE_EINTR(sendmsg(socket, &msg, kSendmsgFlags));
+  ssize_t sent = HANDLE_EINTR(sendmsg(socket, &msg, kSendmsgFlags));
+#if BUILDFLAG(IS_QNX)
+  if (sent < 0) {
+    fprintf(stderr, "QNX: SendmsgWithHandles nfd=%zu errno=%d\n",
+            descriptors.size(), errno);
+    fflush(stderr);
+  }
+#endif
+  return sent;
 }
 
 ssize_t SocketRecvmsg(base::PlatformFile socket,

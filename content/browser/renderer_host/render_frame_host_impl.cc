@@ -3,6 +3,9 @@
 // found in the LICENSE file.
 
 #include "content/browser/renderer_host/render_frame_host_impl.h"
+#if BUILDFLAG(IS_QNX)
+#include "content/browser/renderer_host/qnx_mp_replay_lock.h"
+#endif
 
 #if BUILDFLAG(IS_QNX)
 #include <unistd.h>
@@ -50,6 +53,9 @@
 #include "base/trace_event/optional_trace_event.h"
 #include "base/types/optional_util.h"
 #include "build/build_config.h"
+#if BUILDFLAG(IS_QNX)
+#include <cstdio>
+#endif
 #include "base/qnx_trace.h"
 #include "base/run_loop.h"
 #include "base/threading/platform_thread.h"
@@ -333,11 +339,10 @@ namespace {
 
 void WaitForRendererProcessReady(RenderFrameHostImpl* frame_host) {
   const base::TimeTicks deadline =
-      base::TimeTicks::Now() + base::Seconds(15);
+      base::TimeTicks::Now() + base::Seconds(2);
   int iterations = 0;
   while (base::TimeTicks::Now() < deadline) {
     base::RunLoop().RunUntilIdle();
-    base::PlatformThread::Sleep(base::Milliseconds(10));
     ++iterations;
     if (frame_host->GetProcess()->IsReady()) {
       QNX_NAV_LOG_FMT("QNX:RFHI:NavClient process ready rph=%d iter=%d\n",
@@ -350,20 +355,16 @@ void WaitForRendererProcessReady(RenderFrameHostImpl* frame_host) {
 }
 
 void PumpAfterNavigationClientGetInterface(RenderFrameHostImpl* frame_host) {
-  // Renderer ContentMain + BindNavigationClient typically land ~4s after the
-  // process channel connects; a shorter pump sends CommitNavigation before bind.
-  const base::TimeTicks deadline =
-      base::TimeTicks::Now() + base::Seconds(6);
-  int iterations = 0;
-  while (base::TimeTicks::Now() < deadline) {
+  // Flush the GetInterface handshake only. Do NOT Sleep on the UI thread —
+  // a long wait here starves Screen/Navigator and blacks the BB10 display.
+  // IsRenderFrameLive() also cannot become true until commit continues after
+  // this returns. First LoadURL is deferred until RenderThreadImpl::Init.
+  for (int i = 0; i < 20; ++i)
     base::RunLoop().RunUntilIdle();
-    base::PlatformThread::Sleep(base::Milliseconds(10));
-    ++iterations;
-  }
-  QNX_NAV_LOG_FMT(
-      "QNX:RFHI:NavClient post-GetInterface pump rph=%d iter=%d live=%d\n",
-      frame_host->GetProcess()->GetID(), iterations,
-      static_cast<int>(frame_host->IsRenderFrameLive()));
+  fprintf(stderr, "QNX: RFHI NavClient pump done rph=%d live=%d\n",
+          frame_host->GetProcess()->GetID(),
+          static_cast<int>(frame_host->IsRenderFrameLive()));
+  fflush(stderr);
 }
 
 }  // namespace
@@ -9128,6 +9129,16 @@ void RenderFrameHostImpl::BeginNavigation(
   // `IsInactiveAndDisallowActivation()` check cause both pending deletion and
   // bfcached states to return early.
   DCHECK(owner_);
+#if BUILDFLAG(IS_QNX)
+  if (BerryQnxReplayShouldDrop(unvalidated_common_params->url) &&
+      unvalidated_common_params->navigation_type !=
+          blink::mojom::NavigationType::SAME_DOCUMENT) {
+    fprintf(stderr, "QNX: drop renderer nav during replay %s\n",
+            unvalidated_common_params->url.spec().c_str());
+    fflush(stderr);
+    return;
+  }
+#endif
   if (owner_->GetRenderFrameHostManager().is_attaching_inner_delegate()) {
     // Avoid starting any new navigations since this frame is in the process of
     // attaching an inner delegate.
@@ -11381,8 +11392,9 @@ RenderFrameHostImpl::GetNavigationClientFromInterfaceProvider() {
           switches::kSingleProcess)) {
     // Request NavigationClient only after the renderer IPC channel is up.
     WaitForRendererProcessReady(this);
-    QNX_NAV_LOG_FMT("QNX:RFHI:NavClient GetInterface rph=%d\n",
-                    GetProcess()->GetID());
+    fprintf(stderr, "QNX: RFHI NavClient GetInterface rph=%d\n",
+            GetProcess()->GetID());
+    fflush(stderr);
     GetRemoteAssociatedInterfaces()->GetInterface(&navigation_client_remote);
     PumpAfterNavigationClientGetInterface(this);
     return navigation_client_remote;

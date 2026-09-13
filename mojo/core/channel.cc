@@ -5,6 +5,7 @@
 #include "mojo/core/channel.h"
 
 #include <stddef.h>
+#include <cstdio>
 #include <string.h>
 
 #include <limits>
@@ -81,6 +82,12 @@ Channel::AlignedBuffer MakeAlignedBuffer(size_t size) {
   // aligned for storing any type of object with a fundamental alignment
   // requirement. Buffers have no additional alignment requirement beyond that.
   void* ptr = base::AllocNonScannable(size);
+#if BUILDFLAG(IS_QNX)
+  if (!ptr) {
+    fprintf(stderr, "QNX: Mojo MakeAlignedBuffer FAILED size=%zu\n", size);
+    fflush(stderr);
+  }
+#endif
   // Even though the allocator is configured in such a way that it crashes
   // rather than return nullptr, ASAN and friends don't know about that. This
   // CHECK() prevents Clusterfuzz from complaining. crbug.com/1180576.
@@ -977,6 +984,15 @@ Channel::DispatchResult Channel::TryDispatchMessage(
     if (header_size < sizeof(header) || num_bytes < header_size) {
       return DispatchResult::kError;
     }
+#if BUILDFLAG(IS_QNX)
+    // Garbled CommitNavigation headers have asked for ~800MB and CHECK-crashed
+    // the renderer (white screen). Drop the channel instead.
+    if (num_bytes > 16 * 1024 * 1024) {
+      fprintf(stderr, "QNX: Mojo reject ipcz num_bytes=%zu\n", num_bytes);
+      fflush(stderr);
+      return DispatchResult::kError;
+    }
+#endif
 
     if (buffer.size() < num_bytes) {
       *size_hint = num_bytes - buffer.size();
@@ -1007,6 +1023,14 @@ Channel::DispatchResult Channel::TryDispatchMessage(
     LOG(ERROR) << "Invalid message size: " << legacy_header->num_bytes;
     return DispatchResult::kError;
   }
+#if BUILDFLAG(IS_QNX)
+  if (legacy_header->num_bytes > 16 * 1024 * 1024) {
+    fprintf(stderr, "QNX: Mojo reject num_bytes=%u\n",
+            legacy_header->num_bytes);
+    fflush(stderr);
+    return DispatchResult::kError;
+  }
+#endif
 
   if (buffer.size() < legacy_header->num_bytes) {
     // Not enough data available to read the full message. Hint to the

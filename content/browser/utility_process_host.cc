@@ -340,7 +340,9 @@ bool UtilityProcessHost::StartProcess() {
       switches::kTimeZoneForTesting,
       switches::kUtilityStartupDialog,
       switches::kUseANGLE,
+#if !BUILDFLAG(IS_QNX)
       switches::kUseGL,
+#endif
       switches::kV,
       switches::kVModule,
 #if BUILDFLAG(IS_ANDROID)

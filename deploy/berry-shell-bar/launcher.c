@@ -800,7 +800,7 @@ int main(int argc, char** argv) {
    * binary) rather than the content_shell.bin log-and-exec wrapper: the wrapper
    * does no env setup and only adds an extra execv hop that silently failed for
    * children (they spawned but never reached main()). */
-  char* argv_buf[56];
+  char* argv_buf[64];
   int n = 0;
   argv_buf[n++] = shell;
   argv_buf[n++] = (char*)"--no-sandbox";
@@ -810,6 +810,11 @@ int main(int argc, char** argv) {
   if (!use_single_process) {
     argv_buf[n++] = subprocess_path;
     argv_buf[n++] = (char*)"--in-process-gpu";
+    /* New origins used to spawn a second renderer that never got
+     * CommitNavigation (home painted, icon taps did nothing). Reuse the
+     * one working renderer for every site. */
+    argv_buf[n++] = (char*)"--renderer-process-limit=1";
+    argv_buf[n++] = (char*)"--disable-site-isolation-trials";
   }
   /* Startup / load-speed flags (safe on QNX; see deploy/HARDENING.md). */
   argv_buf[n++] = (char*)"--disable-background-networking";
@@ -842,6 +847,10 @@ int main(int argc, char** argv) {
     }
     fprintf(stderr,
             "BerryShell: video debug = on (berry-video.debug, nav ChunkDone on)\n");
+  } else if (!use_single_process) {
+    /* MP bring-up: keep Chromium LOG/ERROR visible so child FieldTrial/Mojo
+     * failures are not swallowed. */
+    argv_buf[n++] = (char*)"--enable-logging=stderr";
   } else if (access("/accounts/1000/shared/misc/berry-kbd.debug", F_OK) != 0 &&
              access("/accounts/1000/shared/misc/berry-nav.debug", F_OK) != 0) {
     /* Verbose logging to berry-kbd.log costs measurable CPU/IO on BB10; keep

@@ -3539,7 +3539,9 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     switches::kTrySupportedChannelLayouts,
     switches::kRaiseTimerFrequency,
 #endif
-#if BUILDFLAG(IS_OZONE)
+#if BUILDFLAG(IS_OZONE) && !BUILDFLAG(IS_QNX)
+    // QNX ozone (qnx_screen) must stay in the browser. Forwarding this to the
+    // renderer makes it init Screen/EGL, which hangs (white screen, heap=0).
     switches::kOzonePlatform,
 #endif
 #if defined(ENABLE_IPC_FUZZER)

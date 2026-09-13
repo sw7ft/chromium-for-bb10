@@ -2165,6 +2165,10 @@ void RenderFrameImpl::BindNavigationClient(
     mojo::PendingAssociatedReceiver<mojom::NavigationClient> receiver) {
   QNX_NAV_LOG_FMT("QNX:RFI:BindNavClient pid=%d\n",
                   static_cast<int>(getpid()));
+#if BUILDFLAG(IS_QNX)
+  fprintf(stderr, "QNX: RFI BindNavClient pid=%d\n", (int)getpid());
+  fflush(stderr);
+#endif
   navigation_client_impl_ = std::make_unique<NavigationClient>(this);
   navigation_client_impl_->Bind(std::move(receiver));
 #if BUILDFLAG(IS_QNX)
@@ -2675,6 +2679,11 @@ void RenderFrameImpl::CommitNavigation(
     mojom::StorageInfoPtr storage_info,
     mojom::NavigationClient::CommitNavigationCallback commit_callback) {
   QNX_NAV_LOG("QNX:RFI:CommitNav enter\n");
+#if BUILDFLAG(IS_QNX)
+  fprintf(stderr, "QNX: RFI CommitNav enter pid=%d url=%s\n", (int)getpid(),
+          common_params->url.possibly_invalid_spec().substr(0, 120).c_str());
+  fflush(stderr);
+#endif
   DCHECK(navigation_client_impl_);
   DCHECK(!blink::IsRendererDebugURL(common_params->url));
   DCHECK(!NavigationTypeUtils::IsSameDocument(common_params->navigation_type));
@@ -3818,6 +3827,10 @@ void RenderFrameImpl::DidCommitNavigation(
     const blink::ParsedPermissionsPolicy& permissions_policy_header,
     const blink::DocumentPolicyFeatureState& document_policy_header) {
   QNX_NAV_LOG("QNX:RFI:DidCommitNav\n");
+#if BUILDFLAG(IS_QNX)
+  fprintf(stderr, "QNX: RFI DidCommitNav pid=%d\n", (int)getpid());
+  fflush(stderr);
+#endif
   CHECK_EQ(NavigationCommitState::kWillCommit, navigation_commit_state_);
   navigation_commit_state_ = NavigationCommitState::kDidCommit;
 

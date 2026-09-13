@@ -53,6 +53,10 @@
 #include "base/values.h"
 #include "base/qnx_trace.h"
 #include "build/build_config.h"
+#if BUILDFLAG(IS_QNX)
+#include <stdio.h>
+#include <unistd.h>
+#endif
 #include "build/chromeos_buildflags.h"
 #include "cc/base/histograms.h"
 #include "cc/base/switches.h"
@@ -678,6 +682,13 @@ RenderThreadImpl::RenderThreadImpl(
 void RenderThreadImpl::Init() {
   TRACE_EVENT0("startup", "RenderThreadImpl::Init");
   QNX_TRACE_MSG("QNX:RTI:1 Init\n");
+#if BUILDFLAG(IS_QNX)
+  fprintf(stderr, "QNX: RTI Init begin pid=%d ozone=%s\n", (int)getpid(),
+          base::CommandLine::ForCurrentProcess()
+              ->GetSwitchValueASCII("ozone-platform")
+              .c_str());
+  fflush(stderr);
+#endif
 
   SCOPED_UMA_HISTOGRAM_TIMER("Renderer.RenderThreadImpl.Init");
 
@@ -712,9 +723,17 @@ void RenderThreadImpl::Init() {
       &CreateSingleSampleMetricsProvider, child_process_host()));
 
   QNX_TRACE_MSG("QNX:RTI:2 GPU\n");
+#if BUILDFLAG(IS_QNX)
+  fprintf(stderr, "QNX: RTI GPU bind pid=%d\n", (int)getpid());
+  fflush(stderr);
+#endif
   mojo::PendingRemote<viz::mojom::Gpu> remote_gpu;
   BindHostReceiver(remote_gpu.InitWithNewPipeAndPassReceiver());
   gpu_ = viz::Gpu::Create(std::move(remote_gpu), GetIOTaskRunner());
+#if BUILDFLAG(IS_QNX)
+  fprintf(stderr, "QNX: RTI GPU created pid=%d\n", (int)getpid());
+  fflush(stderr);
+#endif
 
   // Establish the GPU channel now, so its ready when needed and we don't have
   // to wait on a sync call.
@@ -730,8 +749,16 @@ void RenderThreadImpl::Init() {
   // modify the definition of |ExposeRendererInterfacesToBrowser()| to ensure
   // security review coverage.
   QNX_TRACE_MSG("QNX:RTI:3 WebKit\n");
+#if BUILDFLAG(IS_QNX)
+  fprintf(stderr, "QNX: RTI WebKit begin pid=%d\n", (int)getpid());
+  fflush(stderr);
+#endif
   mojo::BinderMap binders;
   InitializeWebKit(&binders);
+#if BUILDFLAG(IS_QNX)
+  fprintf(stderr, "QNX: RTI WebKit done pid=%d\n", (int)getpid());
+  fflush(stderr);
+#endif
 
   vc_manager_ = std::make_unique<blink::WebVideoCaptureImplManager>();
 
@@ -865,6 +892,16 @@ void RenderThreadImpl::Init() {
             std::move(pending_factory)));
   }
   QNX_TRACE_MSG("QNX:RTI:6 Done\n");
+#if BUILDFLAG(IS_QNX)
+  fprintf(stderr, "QNX: RTI Init done pid=%d\n", (int)getpid());
+  fflush(stderr);
+  // Browser polls this instead of blocking the UI thread for WebKit init.
+  FILE* ready = fopen("/dev/shmem/berry-rti-ready", "w");
+  if (ready) {
+    fputs("1", ready);
+    fclose(ready);
+  }
+#endif
   UpdateForegroundCrashKey(
       /*foreground=*/!blink::kLaunchingProcessIsBackgrounded);
 }
@@ -1007,6 +1044,10 @@ void RenderThreadImpl::InitializeWebKit(mojo::BinderMap* binders) {
 #endif
 
   QNX_TRACE_MSG("QNX:IWK:1 platform\n");
+#if BUILDFLAG(IS_QNX)
+  fprintf(stderr, "QNX: IWK platform pid=%d\n", (int)getpid());
+  fflush(stderr);
+#endif
   blink_platform_impl_ =
       std::make_unique<RendererBlinkPlatformImpl>(main_thread_scheduler_.get());
   // This, among other things, enables any feature marked "test" in
@@ -1019,10 +1060,18 @@ void RenderThreadImpl::InitializeWebKit(mojo::BinderMap* binders) {
   SetRuntimeFeaturesDefaultsAndUpdateFromArgs(command_line);
 
   QNX_TRACE_MSG("QNX:IWK:2 blinkInit\n");
+#if BUILDFLAG(IS_QNX)
+  fprintf(stderr, "QNX: IWK blink::Initialize pid=%d\n", (int)getpid());
+  fflush(stderr);
+#endif
   blink::Initialize(blink_platform_impl_.get(), binders,
                     main_thread_scheduler_.get());
 
   QNX_TRACE_MSG("QNX:IWK:3 v8isolate\n");
+#if BUILDFLAG(IS_QNX)
+  fprintf(stderr, "QNX: IWK isolate ready pid=%d\n", (int)getpid());
+  fflush(stderr);
+#endif
   v8::Isolate* isolate = blink::MainThreadIsolate();
 #if BUILDFLAG(IS_QNX)
   // Safe from here on: the main isolate exists. Lets the stall heartbeat start

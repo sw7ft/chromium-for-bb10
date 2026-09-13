@@ -5,6 +5,7 @@
 #include "content/shell/browser/shell_content_browser_client.h"
 
 #include <stddef.h>
+#include <cstdio>
 
 #include <functional>
 #include <memory>
@@ -60,6 +61,7 @@
 #include "content/public/browser/navigation_throttle.h"
 #include "content/public/browser/network_service_instance.h"
 #include "content/public/browser/page_navigator.h"
+#include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents_view_delegate.h"
@@ -106,6 +108,7 @@
 #include "ui/base/ui_base_switches.h"
 #include "url/gurl.h"
 #include "url/origin.h"
+#include "url/url_constants.h"
 
 #if BUILDFLAG(IS_ANDROID)
 #include "base/android/apk_assets.h"
@@ -638,6 +641,40 @@ void ShellContentBrowserClient::AppendExtraCommandLineSwitches(
 }
 
 #if BUILDFLAG(IS_QNX)
+void ShellContentBrowserClient::RenderProcessWillLaunch(
+    RenderProcessHost* host) {
+  // data: home is a unique opaque origin; ChildProcessSecurityPolicy then
+  // rejects https navigations (about:blank#blocked / ERR_ABORTED). Grant the
+  // usual web schemes so the one reused renderer can leave the start page.
+  ChildProcessSecurityPolicy* policy = ChildProcessSecurityPolicy::GetInstance();
+  policy->GrantRequestScheme(host->GetID(), url::kHttpScheme);
+  policy->GrantRequestScheme(host->GetID(), url::kHttpsScheme);
+  policy->GrantRequestScheme(host->GetID(), url::kDataScheme);
+  policy->GrantRequestScheme(host->GetID(), url::kFileScheme);
+  policy->GrantRequestScheme(host->GetID(), url::kBlobScheme);
+  fprintf(stderr, "QNX: granted web schemes to renderer id=%d\n",
+          host->GetID());
+  fflush(stderr);
+}
+
+bool ShellContentBrowserClient::ShouldLockProcessToSite(
+    BrowserContext* browser_context,
+    const GURL& effective_url) {
+  // MP home is a data: document. A locked process cannot commit https, so
+  // icon taps abort (ERR_ABORTED) and the page never changes.
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kSingleProcess)) {
+    return false;
+  }
+  return true;
+}
+
+bool ShellContentBrowserClient::ShouldDisableSiteIsolation(
+    SiteIsolationMode site_isolation_mode) {
+  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kSingleProcess);
+}
+
 TtsPlatform* ShellContentBrowserClient::GetTtsPlatform() {
   // Route all TTS through a safe no-op platform; see ShellTtsPlatform above.
   return ShellTtsPlatform::GetInstance();

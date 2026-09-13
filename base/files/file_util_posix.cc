@@ -1188,6 +1188,16 @@ int GetMaximumPathComponentLength(const FilePath& path) {
 #if !BUILDFLAG(IS_ANDROID)
 // This is implemented in file_util_android.cc for that platform.
 bool GetShmemTempDir(bool executable, FilePath* path) {
+#if BUILDFLAG(IS_QNX)
+  // BB10 POSIX shm is /dev/shmem (/tmp is a symlink to it). Chromium builds
+  // anonymous regions as temp files; shell_main then forces TMPDIR into the
+  // app sandbox, which works in-process but mmap/fd-pass across posix_spawn
+  // children does not (renderer hangs after pak load → white screen).
+  if (access("/dev/shmem", W_OK | X_OK) == 0) {
+    *path = FilePath("/dev/shmem");
+    return true;
+  }
+#endif
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_AIX)
   bool disable_dev_shm = false;
 #if !BUILDFLAG(IS_CHROMEOS)

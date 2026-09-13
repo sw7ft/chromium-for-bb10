@@ -23,8 +23,7 @@
 #include "ipc/ipc_channel.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/native_widget_types.h"
-
-class GURL;
+#include "url/gurl.h"
 
 namespace content {
 class FileSelectListener;
@@ -274,6 +273,11 @@ class Shell : public WebContentsDelegate, public WebContentsObserver {
   base::OneShotTimer dump_timer_;
   bool dom_already_dumped_ = false;
   bool timeout_armed_ = false;
+
+#if BUILDFLAG(IS_QNX)
+  // MP: real landing URL, loaded after the slim data: probe commits.
+  GURL pending_mp_home_;
+#endif
 
   // A container of all the open windows. We use a vector so we can keep track
   // of ordering.

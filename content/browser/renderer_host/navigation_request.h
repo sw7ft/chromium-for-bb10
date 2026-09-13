@@ -1764,11 +1764,18 @@ class CONTENT_EXPORT NavigationRequest
   void StopQnxCommitRetry();
   void OnQnxCommitRetry();
   bool TrySendQnxPendingCommit();
+  void StartQnxHttpsBodyReplay();
+  void OnQnxHttpsBodyReadable(MojoResult result);
+  void FinishQnxHttpsBodyReplay();
   std::unique_ptr<QnxPendingCommit> qnx_pending_commit_;
   base::RepeatingTimer qnx_commit_retry_timer_;
   int qnx_commit_retry_attempts_ = 0;
   bool qnx_commit_post_send_done_ = false;
   bool qnx_commit_sent_ = false;
+  bool qnx_nav_client_bound_ = false;
+  bool qnx_replay_draining_ = false;
+  std::string qnx_replay_buf_;
+  std::unique_ptr<mojo::SimpleWatcher> qnx_replay_watcher_;
 #endif
 
   std::vector<std::string> TakeRemovedRequestHeaders() {
