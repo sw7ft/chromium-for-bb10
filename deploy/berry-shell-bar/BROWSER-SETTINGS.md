@@ -124,6 +124,7 @@ proportionally (720 = profile default, 1440 = 2×, 420 = lightweight).
 | `berry-x-fullfps.enable` | Uncapped frame rate (~60 fps) |
 | `berry-x-slow10/12/15/45.enable` | Cap frame rate to 10/12/15/45 fps (**45 default**) |
 | `berry-x-1thread.enable` / `berry-x-2thread.enable` | Raster thread count |
+| `berry-mp.enable` | Run the renderer in its own process (**off by default**). Experimental; also `QNX_MULTI_PROCESS=1` for SSH runs |
 | `berry-lowend.disable` | Turn **off** low-end device mode (on by default) |
 | `berry-gpu.disable` | Force software rendering (GPU/EGL **on by default**) |
 | `berry-gpu.enable` | Legacy; redundant (GPU is default on) |
