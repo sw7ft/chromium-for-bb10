@@ -125,13 +125,15 @@ proportionally (720 = profile default, 1440 = 2×, 420 = lightweight).
 | `berry-x-slow10/12/15/45.enable` | Cap frame rate to 10/12/15/45 fps (**45 default**) |
 | `berry-x-1thread.enable` / `berry-x-2thread.enable` | Raster thread count |
 | `berry-mp.enable` | Run the renderer in its own process (**off by default**). Experimental; also `QNX_MULTI_PROCESS=1` for SSH runs |
-| `berry-toolbar.disable` | Hide the URL toolbar and give pages the full window (toolbar **on** by default). Leaves no Back button, so it is for kiosk/reading use |
+| `berry-fb-mobile.enable` | Serve `www.facebook.com` the mobile UA (**off by default**). Much lighter page; may break the Messenger checkpoint/verify flow that needs desktop UA |
+| `berry-heap-mb` (text file) | V8 old-space cap in MB, clamped 128..1024 (default 256). 32-bit process: above ~512 risks address-space exhaustion, and larger heaps mean longer mark-compact pauses |
 | `berry-lowend.disable` | Turn **off** low-end device mode (on by default) |
 | `berry-gpu.disable` | Force software rendering (GPU/EGL **on by default**) |
 | `berry-gpu.enable` | Legacy; redundant (GPU is default on) |
 | `berry-lowend.enable` | Legacy; redundant (low-end is default on) |
 | `berry-sw.disable` | Turn **off** Service Workers (on by default for YouTube/PWA caching) |
 | `berry-sw.enable` | Legacy; redundant (SW is default on) |
+| `berry-fps.enable` | Per-second present + message pump timing (`QNX_FPS=1`). Catches stalls that never reach the renderer main-thread heartbeat |
 | `berry-video.debug` | Verbose media logging (`--enable-logging=stderr --v=1`) |
 | `berry-quic.enable` | Enable HTTP/3 (QUIC) |
 | `berry-mp.enable` | Multi-process mode (experimental) |

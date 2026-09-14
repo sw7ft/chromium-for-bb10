@@ -836,8 +836,12 @@ bool BerryHostPrefersDesktopUA(const GURL& url) {
   // desktop UA for ALL www.facebook.com paths so verification ("finish signing
   // in on Facebook") works; path-gating left mobile UA and surfaced a bogus
   // "incorrect password" on messenger.com instead of the real checkpoint UI.
+  // Desktop www.facebook.com is a heavy bundle and the prime suspect for the
+  // login stall on Passport hardware. berry-fb-mobile.enable serves the mobile
+  // UA instead, which trades the checkpoint flow above for a much lighter page.
   if (host == "facebook.com" || host == "www.facebook.com")
-    return true;
+    return access("/accounts/1000/shared/misc/berry-fb-mobile.enable", F_OK) !=
+           0;
   // YouTube: desktop UA by default on www.youtube.com — progressive HTTPS
   // videoplayback (fmt=18) without SABR/PO tokens. Mobile/m.youtube uses SABR
   // which content_shell cannot decode. Opt into mobile with berry-youtube-mobile.enable.
@@ -1166,6 +1170,21 @@ std::string BerryBuildSettingsHtml() {
     return s;
   };
 
+  std::string heap = BerryReadTextMarker("berry-heap-mb");
+  if (heap.empty())
+    heap = "256";
+  auto heapbtn = [&](const char* val, const char* label) -> std::string {
+    std::string s = "<a class='res";
+    if (heap == val)
+      s += " cur";
+    s += "' href='https://berry.set/?k=heapmb&v=";
+    s += val;
+    s += "'>";
+    s += label;
+    s += "</a>";
+    return s;
+  };
+
   std::string ua = BerryReadTextMarker("berry-ua");
   std::string home = BerryReadTextMarker("berry-home-url");
 
@@ -1313,10 +1332,24 @@ std::string BerryBuildSettingsHtml() {
   h += toggle("Multi-process",
               "Experimental: renderer in its own process (default off)", "mp",
               BerryHasMarker("berry-mp.enable"));
-  h += toggle("URL toolbar",
-              "Back/forward and address bar. Off gives pages the full screen, "
-              "but leaves no Back button (default on)",
-              "toolbar", !BerryHasMarker("berry-toolbar.disable"));
+  h += toggle("Facebook mobile site",
+              "Lighter page, may break Messenger login verification "
+              "(default off)",
+              "fbmobile", BerryHasMarker("berry-fb-mobile.enable"));
+  h += "</div>";
+
+  h += "<div class='sec'>JS memory</div><div class='card'>";
+  h += "<div class='resrow'>";
+  h += heapbtn("256", "256<br><small>default</small>");
+  h += heapbtn("384", "384<br><small>roomy</small>");
+  h += heapbtn("512", "512<br><small>heavy</small>");
+  h += heapbtn("768", "768<br><small>risky</small>");
+  h += heapbtn("1024", "1GB<br><small>max</small>");
+  h += "</div>";
+  h += "<div class='row'><div class='lbl'><b>V8 heap cap</b><i>Bigger helps "
+       "pages that run out of memory, but 32-bit address space is ~2GB shared "
+       "with graphics and network, and GC pauses grow with heap size.</i>"
+       "</div></div>";
   h += "</div>";
 
   h += "<div class='sec'>Developer</div><div class='card'>";
@@ -1326,6 +1359,10 @@ std::string BerryBuildSettingsHtml() {
               "videodebug", BerryHasMarker("berry-video.debug"));
   h += toggle("Input debug log", "Touch/keyboard tracing (slow)", "kbddebug",
               BerryHasMarker("berry-kbd.debug"));
+  h += toggle("Frame/pump timing log",
+              "Per-second present + message pump timing. Shows stalls that "
+              "miss the renderer main-thread heartbeat",
+              "fpslog", BerryHasMarker("berry-fps.enable"));
   h += toggle("Ship log on boot",
               "POST previous session's log to the endpoint below", "logship",
               !BerryHasMarker("berry-logship.disable"));
@@ -1643,8 +1680,10 @@ void BerryHandleSet(Shell* shell, const GURL& url) {
     BerrySetMarker("berry-stall-log.disable", !on);
   else if (k == "mp")
     BerrySetMarker("berry-mp.enable", on);
-  else if (k == "toolbar")
-    BerrySetMarker("berry-toolbar.disable", !on);
+  else if (k == "fbmobile")
+    BerrySetMarker("berry-fb-mobile.enable", on);
+  else if (k == "fpslog")
+    BerrySetMarker("berry-fps.enable", on);
   else if (k == "mic")
     BerrySetMarker("berry-mic.enable", on);
   else if (k == "videodebug")
@@ -1694,6 +1733,13 @@ void BerryHandleSet(Shell* shell, const GURL& url) {
     BerrySetTextMarker("berry-home-url", vdec);
   else if (k == "logshipurl")
     BerrySetTextMarker("berry-logship-url", vdec);
+  else if (k == "heapmb") {
+    // Blank clears the marker and restores the 256MB default. The launcher
+    // re-validates the range, so a bad value here cannot brick a launch.
+    const int mb = atoi(vdec.c_str());
+    if (vdec.empty() || (mb >= 128 && mb <= 1024))
+      BerrySetTextMarker("berry-heap-mb", vdec);
+  }
   else if (k == "device") {
     if (vdec == "auto") {
       /* Auto = no marker; the launcher detects the panel via libscreen. */

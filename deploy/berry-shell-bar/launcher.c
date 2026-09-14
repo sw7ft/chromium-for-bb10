@@ -642,11 +642,11 @@ int main(int argc, char** argv) {
             "BerryShell: PGO collect armed (profiles -> shared/misc/pgo/)\n");
   }
 
-  fprintf(stderr, "BerryShell: Berry Browser build 100 (PGO+ThinLTO)\n");
+  fprintf(stderr, "BerryShell: Berry Browser build 106 (PGO+ThinLTO)\n");
 
   /* Ship the previous session's log tail (crash backtraces included) to the
    * configured endpoint. Forked; never blocks boot. */
-  berry_ship_log(100);
+  berry_ship_log(106);
 
   fprintf(stderr, "BerryShell: app dir = %s\n", dir);
   fprintf(stderr, "BerryShell: work dir (cwd) = %s\n", work);
@@ -907,10 +907,15 @@ int main(int argc, char** argv) {
     snprintf(
         block_rules, sizeof(block_rules),
         "--host-resolver-rules="
-        "MAP crashlogs.whatsapp.net 0.0.0.0,"
-        "MAP pixel.facebook.com 0.0.0.0,"
-        "MAP analytics.facebook.com 0.0.0.0,"
-        "MAP metric.facebook.com 0.0.0.0");
+        /* ^NOTFOUND fails resolution outright (ERR_NAME_NOT_RESOLVED, no
+         * socket). 0.0.0.0 resolves *successfully*, so the stack then opens a
+         * TCP connection to 0.0.0.0 and waits out the connect timeout -- the
+         * opposite of fast-fail, and a stall on any page whose JS awaits one
+         * of these. See net/dns/mapped_host_resolver.cc. */
+        "MAP crashlogs.whatsapp.net ^NOTFOUND,"
+        "MAP pixel.facebook.com ^NOTFOUND,"
+        "MAP analytics.facebook.com ^NOTFOUND,"
+        "MAP metric.facebook.com ^NOTFOUND");
     argv_buf[n++] = block_rules;
     fprintf(stderr,
             "BerryShell: telemetry blocklist = on (analytics only, graph OK)\n");
@@ -1035,15 +1040,37 @@ int main(int argc, char** argv) {
     } else {
       const int big_heap = !marker_exists("berry-heap.default");
       const int liftoff = marker_exists("berry-wasm-liftoff.enable");
+      /* berry-heap-mb overrides the 256MB default. content_shell is a 32-bit
+       * ARM process, so the whole address space is ~2GB and V8 shares it with
+       * Skia, net, the code cache and the GPU stack -- a 1GB old-space can
+       * exhaust it and fail an mmap instead of OOMing cleanly. Mark-compact
+       * pause time also scales with live heap, so a bigger cap makes a
+       * GC-bound main-thread freeze worse, not better. Clamped to 128..1024. */
+      int heap_mb = 256;
+      char heap_buf[16];
+      if (read_marker_text("berry-heap-mb", heap_buf, sizeof(heap_buf))) {
+        const int req = atoi(heap_buf);
+        if (req >= 128 && req <= 1024)
+          heap_mb = req;
+        else
+          fprintf(stderr,
+                  "BerryShell: js heap = ignoring berry-heap-mb '%s' "
+                  "(outside 128..1024)\n",
+                  heap_buf);
+      }
+      char heap_flag[40] = "";
+      if (big_heap)
+        snprintf(heap_flag, sizeof(heap_flag), "--max-old-space-size=%d",
+                 heap_mb);
       if (big_heap || liftoff) {
         snprintf(jsflags_arg, sizeof(jsflags_arg), "--js-flags=%s%s%s",
-                 big_heap ? "--max-old-space-size=256" : "",
-                 (big_heap && liftoff) ? " " : "",
+                 heap_flag, (big_heap && liftoff) ? " " : "",
                  liftoff ? "--no-wasm-tier-up --wasm-lazy-validation" : "");
         argv_buf[n++] = jsflags_arg;
       }
       if (big_heap)
-        fprintf(stderr, "BerryShell: js heap = 256MB old-space (default)\n");
+        fprintf(stderr, "BerryShell: js heap = %dMB old-space%s\n", heap_mb,
+                heap_mb == 256 ? " (default)" : " (berry-heap-mb)");
       if (liftoff)
         fprintf(stderr,
                 "BerryShell: wasm = liftoff-only (berry-wasm-liftoff)\n");
