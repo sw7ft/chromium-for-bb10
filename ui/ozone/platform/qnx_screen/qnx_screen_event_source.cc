@@ -8,7 +8,6 @@
 #include <screen/screen.h>
 #include <sys/keycodes.h>
 #include <unistd.h>
-#include <algorithm>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -492,18 +491,15 @@ void QnxScreenEventSource::RepaintToolbar() {
     return;
 
   // Create a Skia surface wrapping the screen buffer for toolbar area only
-  const int toolbar_height =
-      std::min(GetQnxScreenOverlayHeight(), buf_size[1]);
-  if (toolbar_height <= 0)
-    return;
-  SkImageInfo info = SkImageInfo::MakeN32Premul(buf_size[0], toolbar_height);
+  constexpr int kToolbarHeight = 56;
+  SkImageInfo info = SkImageInfo::MakeN32Premul(buf_size[0], kToolbarHeight);
   auto surface = SkSurfaces::WrapPixels(info, ptr, stride);
   if (!surface)
     return;
 
   overlay_cb(surface->getCanvas());
 
-  int dirty[4] = {0, 0, buf_size[0], toolbar_height};
+  int dirty[4] = {0, 0, buf_size[0], kToolbarHeight};
   screen_post_window(window->screen_window(), buf[0], 1, dirty, 0);
 }
 

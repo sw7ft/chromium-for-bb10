@@ -12,19 +12,11 @@ namespace content {
 
 class BerryBrowserChrome {
  public:
-  // The metrics below were tuned against a 540px short axis (the launcher's
-  // default resolution tier) and are scaled to the actual render surface. A
-  // fixed pixel height does not survive the tier picker: at the 1440 tier a
-  // 56px bar is about 3mm tall and impossible to hit, at the 420 tier it is
-  // about 11mm and eats the screen.
-  static constexpr int kReferenceShortAxis = 540;
-  static constexpr int kToolbarHeightAtReference = 56;
-  static constexpr int kButtonWidthAtReference = 44;
+  static constexpr int kToolbarHeight = 56;
+  static constexpr int kButtonWidth = 44;
 
   BerryBrowserChrome(int width, int height);
   ~BerryBrowserChrome();
-
-  int toolbar_height() const { return toolbar_height_; }
 
   void SetUrl(const std::string& url);
   const std::string& url() const { return url_; }
@@ -68,10 +60,6 @@ class BerryBrowserChrome {
                    const char* label, bool enabled);
 
   int width_, height_;
-  int toolbar_height_;
-  int button_width_;
-  int url_font_size_;
-  int button_font_size_;
   std::string url_;
   std::string edit_text_;
   std::string committed_url_;

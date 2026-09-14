@@ -58,29 +58,16 @@ bool g_last_can_back = false;
 bool g_last_can_forward = false;
 base::TimeTicks g_last_chrome_url_repaint;
 
-// No chrome: the engine-drawn URL toolbar (BerryBrowserChrome) is never
-// created, so the page renders full-screen and gets the whole window. All
-// g_chrome accesses below are null-guarded, so a null toolbar simply means no
-// overlay paint, no toolbar hit-testing, and full-window web content sizing
-// (see CreatePlatformWindow / SetContents).
-//
-// Two ways in: BERRY_APP_MODE=1 for single-site web apps (e.g. the WhatsApp
-// .bar), and the berry-toolbar.disable setting for users who want the extra
-// screen space in the browser itself.
-//
-// Note this is all-or-nothing on purpose. An auto-hiding bar was tried and
-// abandoned: the toolbar survives in the Screen buffer only because the inset
-// web content never draws over those rows, so a bar floating above full-window
-// content gets overwritten by the next page frame. Keeping it alive needs a
-// strip re-post after every frame, which is what made the old
-// QnxScreenEventSource::RepaintToolbar flicker.
-bool BerryNoChrome() {
+// "App mode": when BERRY_APP_MODE=1 the engine-drawn URL toolbar
+// (BerryBrowserChrome) is never created, so single-site web apps (e.g. the
+// WhatsApp .bar) render full-screen with no browser chrome -- the page gets the
+// whole window. All g_chrome accesses below are null-guarded, so a null toolbar
+// simply means no overlay paint, no toolbar hit-testing, and full-window web
+// content sizing (see CreatePlatformWindow / SetContents).
+bool BerryAppModeNoChrome() {
   static const bool no_chrome = [] {
     const char* e = getenv("BERRY_APP_MODE");
-    if (e && e[0] == '1')
-      return true;
-    return access("/accounts/1000/shared/misc/berry-toolbar.disable", F_OK) ==
-           0;
+    return e && e[0] == '1';
   }();
   return no_chrome;
 }
@@ -593,15 +580,8 @@ void ShellPlatformDelegate::CreatePlatformWindow(
     int rw = initial_size.width() > 0 ? initial_size.width() : 720;
     int rh = initial_size.height() > 0 ? initial_size.height() : 720;
     ui::QnxScreenGetRenderSize(&rw, &rh);
-    if (!BerryNoChrome() && !g_chrome)
+    if (!BerryAppModeNoChrome() && !g_chrome)
       g_chrome = std::make_unique<BerryBrowserChrome>(rw, rh);
-    // The toolbar height scales with the render surface, so the toolbar-only
-    // repaint path has to be told how tall it is. No chrome means 0 rows.
-    ui::SetQnxScreenOverlayHeight(g_chrome ? g_chrome->toolbar_height() : 0);
-    fprintf(stderr, "BerryShell: toolbar = %s (render=%dx%d h=%d)\n",
-            g_chrome ? "on" : "off", rw, rh,
-            g_chrome ? g_chrome->toolbar_height() : 0);
-    fflush(stderr);
     g_url_bar_editing = false;
   }
 }
@@ -627,10 +607,8 @@ void ShellPlatformDelegate::CleanUp(Shell* shell) {
         break;
       }
     }
-    if (!g_active_shell) {
+    if (!g_active_shell)
       g_chrome.reset();
-      ui::SetQnxScreenOverlayHeight(0);
-    }
   }
   shell_data_map_.erase(shell);
 }
