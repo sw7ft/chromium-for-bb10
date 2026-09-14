@@ -239,6 +239,27 @@
     font-weight: 700; border: none; cursor: pointer;
     background: rgba(255,255,255,0.1); color: #fff;
   }
+
+  /* Floating beta/info tip. Sits below the modal layer (z-index 100) so an
+     open dialog covers it. */
+  .beta-fab {
+    position: fixed; bottom: 12px; right: 12px; z-index: 90;
+    width: 36px; height: 36px; padding: 0;
+    border-radius: 999px; border: 1px solid rgba(255,255,255,0.16);
+    background: #77216f; color: #fff;
+    font-size: 17px; font-weight: 700; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.45); cursor: pointer;
+  }
+  .beta-fab:active { background: #e95420; }
+  .beta-modal p {
+    margin: 0 0 11px; font-size: 14px; line-height: 1.5; color: #e8d0e0;
+  }
+  .beta-modal a {
+    color: #ff7a3d; font-weight: 600; text-decoration: none;
+    word-break: break-word;
+  }
+  .beta-cheer { text-align: center; font-weight: 700; color: #ff7a3d; }
 </style>
 </head>
 <body>
@@ -500,6 +521,44 @@
   requestAnimationFrame(function() {
     document.getElementById('omni').focus();
     if (location.hash === '#favorites') document.getElementById('fav-open').click();
+  });
+})();
+</script>
+
+<button class="beta-fab" id="beta-open" aria-label="About this beta">&hearts;</button>
+<div class="modal-bg" id="beta-bg">
+  <div class="modal beta-modal">
+    <h2>Berry Browser beta</h2>
+    <p>This is a beta browser. Please feel free to follow progress at
+      <a href="https://github.com/sw7ft/berry-browser">github.com/sw7ft/berry-browser</a>
+      and open issues as tickets to report bugs.</p>
+    <p>It really helps to have lots of users posting their issues there, so I
+      can solve them one by one.</p>
+    <p>Also consider supporting development via my Patreon:
+      <a href="https://www.patreon.com/c/Sw7ft">patreon.com/c/Sw7ft</a></p>
+    <p>And please consider supporting the legacy of work of bb10root at
+      <a href="https://www.patreon.com/bb10root/">patreon.com/bb10root</a>
+      &mdash; another BB10 warrior who truly deserves the credit.</p>
+    <p class="beta-cheer">And thank you all &mdash; long live the BlackBerry!</p>
+    <div class="modal-btns">
+      <button class="btn-done" id="beta-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  var bg = document.getElementById('beta-bg');
+  function show(on) { bg.classList[on ? 'add' : 'remove']('open'); }
+  document.getElementById('beta-open').addEventListener('click', function() {
+    show(true);
+  });
+  document.getElementById('beta-close').addEventListener('click', function() {
+    show(false);
+  });
+  // Tap the backdrop (but not the card) to dismiss.
+  bg.addEventListener('click', function(e) {
+    if (e.target === bg) show(false);
   });
 })();
 </script>

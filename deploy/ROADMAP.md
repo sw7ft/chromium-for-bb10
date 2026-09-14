@@ -20,6 +20,88 @@ and is **stale on build numbers** — trust this file for engine/perf state.
 
 ---
 
+## Progress update — builds 98–106 (Sep 13, 2026)
+
+Current ship build is **106** (`3.0.2.106`), same PGO+ThinLTO binary lineage as
+97. Engine build config is unchanged; everything below is runtime or UI.
+
+### Multi-process is no longer blocked
+
+The reason MP was "unproven" is found and fixed. On QNX, `sendmsg()` carrying
+`SCM_RIGHTS` **silently truncates** the payload past a threshold, so large
+Mojo messages (notably `CommitNavigation`) desynchronised the channel and the
+renderer died with a white screen and garbled message headers. Diagnosed with
+a standalone `deploy/qnx-socket-probe.c`; fixed by clamping `iov_len` to 2048
+bytes on handle-carrying sends. MP now runs, exposed as a Settings toggle,
+**default off** pending a long soak.
+
+This matters beyond speed: single-process means a renderer JS stall freezes
+chrome, input and compositor together, which is exactly the Facebook symptom
+below. MP contains it.
+
+### Toolbar / swipe-reveal experiment: tried, reverted
+
+Build 100 added a swipe-down reveal for the URL bar; build 101 reverted the
+whole thing back to build 98 behaviour. Recorded so it is not re-attempted
+blind: the toolbar survives in the Screen window buffer only because the inset
+web content never draws over those rows. A bar floating above full-window
+content is overwritten by the next page frame, and keeping it alive needs a
+strip re-post every frame — which is what made `RepaintToolbar` flicker badly
+enough to be disabled originally. A GL-composited version was also tried and
+withdrawn. Preserved at tag `berry-toolbar-experiment-backup`.
+
+### Facebook login freeze — open, root cause not yet confirmed
+
+Symptom: page paints its icons, then the renderer main thread freezes. Not a
+crash (renderer survives) and not the account gate (no error page). Two fixes
+shipped, neither confirmed, because the device log has been unreachable:
+
+- **Telemetry blocklist was not fast-failing.** It mapped `pixel.facebook.com`
+  and friends to `0.0.0.0`, which *resolves successfully* and then blocks on a
+  TCP connect to `0.0.0.0` until timeout — the opposite of the stated intent.
+  Now `^NOTFOUND`, which fails instantly with `ERR_NAME_NOT_RESOLVED` and no
+  socket. See `net/dns/mapped_host_resolver.cc`.
+- **Desktop UA on all of `www.facebook.com`** (build 66, needed for the
+  Messenger checkpoint flow) drops login into the full desktop bundle. Left as
+  default; `berry-fb-mobile.enable` opts out for A/B.
+
+**Likely regression window:** build 67 removed two stale markers left on the
+device since Jul 10 debugging, `berry-quic.disable` and `berry-block.disable`.
+The telemetry blocklist had therefore never actually run while Facebook worked,
+and went live at exactly the build where Facebook broke. Turning **Block
+telemetry** off reproduces the pre-67 state and is the first thing to try.
+
+### New diagnostics and knobs (all Settings-exposed, no SSH needed)
+
+| Marker | Settings | Purpose |
+|---|---|---|
+| `berry-heap-mb` | JS memory | V8 old-space cap, 256/384/512/768/1024 picker |
+| `berry-fb-mobile.enable` | Performance | Mobile UA for `www.facebook.com` |
+| `berry-fps.enable` | Developer | Per-second frame/pump timing; catches stalls that miss the main-thread heartbeat |
+
+### Perf audit (Sep 13) — checked, for the record
+
+- `is_official_build` is **not** a missed win. `default_optimization` resolves
+  to `:optimize` for any non-debug build and `optimize_for_size` is false on
+  QNX, so we already get `-O2`. The "97 is the compiler ceiling" call stands.
+- Most low-end-mode GPU penalties are `IS_ANDROID`-gated and never fire here.
+  One is not: `ImageDecodeCacheUtils` forces the low-end decoded-image working
+  set despite the Passport's 3GB, so images re-decode on scroll. Testable with
+  the existing **Low-end mode** toggle.
+- `init_stack_vars` defaults true for QNX, adding
+  `-ftrivial-auto-var-init=pattern` everywhere. Setting it false is a real but
+  unmeasured win; costs a full ThinLTO+PGO rebuild, and removes a
+  determinism aid we have leaned on while chasing SIGSEGVs.
+
+### Blocked on
+
+Device log. The USB bridge (`host.docker.internal:2222` → `169.254.0.1:22`)
+has been down all session, so `QNX:MT stall=...-> GC | non-GC(JS/paint)` — the
+line that decides GC tuning vs bundle size — is unread. `berry-kbd.log` lives
+on the shared partition and can be pulled over USB mass storage without SSH.
+
+---
+
 ## What is done (do not re-litigate)
 
 - **ThinLTO** (build 95): clang-17 bitcode + toolchain `ld` → `ld.lld-17`.
