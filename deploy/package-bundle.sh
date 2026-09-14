@@ -9,10 +9,12 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SRC_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-BUILD_DIR="$SRC_DIR/out/qnx-arm"
+# out/qnx-arm is the old pre-ThinLTO tree and is usually stale; point this at
+# the ship build (out/qnx-arm-pgo) unless you specifically want a plain build.
+BUILD_DIR="${BERRY_BUILD_DIR:-$SRC_DIR/out/qnx-arm-pgo}"
 QNX_TOOLCHAIN="/root/qnx800"
 NODE_SRC="${NODE_SRC:-/root/bb10-nodeJS-V22/deploy-term49/node}"
-BUNDLE_VERSION="v1"
+BUNDLE_VERSION="${BERRY_BUNDLE_VERSION:-v2}"
 
 STAGING="$SCRIPT_DIR/berry-browser-bundle"
 BUNDLE_NAME="berry-browser-bundle"
@@ -21,7 +23,12 @@ ZIP_OUT="$SCRIPT_DIR/berry-browser-bundle-${BUNDLE_VERSION}.zip"
 rm -rf "$STAGING"
 mkdir -p "$STAGING/www" "$STAGING/node"
 
-echo "=== content_shell headless ==="
+echo "=== content_shell headless (from $BUILD_DIR) ==="
+if [ ! -x "$BUILD_DIR/content_shell" ]; then
+  echo "ERROR: no content_shell in $BUILD_DIR" >&2
+  echo "Build it first, or set BERRY_BUILD_DIR." >&2
+  exit 1
+fi
 cp "$BUILD_DIR/content_shell" "$STAGING/"
 if [ -f "$BUILD_DIR/libtest_trace_processor.so" ]; then
   echo "Copying libtest_trace_processor.so..."
@@ -62,16 +69,16 @@ commit=${GIT_COMMIT:-unknown}
 VEOF
 
 cat > "$STAGING/INSTALL.txt" <<INSTEOF
-Berry Browser Bundle v1 for BlackBerry Passport (BB10 / QNX ARM32)
+Berry Browser Bundle ${BUNDLE_VERSION} for BlackBerry Passport (BB10 / QNX ARM32)
 ===================================================================
 
-Release artifact: `berry-browser-bundle-v1.zip` (see also `VERSION` file).
+Release artifact: berry-browser-bundle-${BUNDLE_VERSION}.zip (see also VERSION file).
 
 Release: ${BUNDLE_VERSION}
 See VERSION file for build date and commit.
 
 Contents:
-  content_shell   Chromium headless engine (~91 MB)
+  content_shell   Chromium 120 headless engine, ThinLTO + on-device PGO (~83 MB)
   node/           Node.js v22 (--jitless) for Berry Proxy
   proxy-server.js Localhost proxy for the stock BB10 browser
   run.sh          Headless DOM dump CLI
