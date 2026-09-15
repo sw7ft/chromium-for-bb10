@@ -642,11 +642,11 @@ int main(int argc, char** argv) {
             "BerryShell: PGO collect armed (profiles -> shared/misc/pgo/)\n");
   }
 
-  fprintf(stderr, "BerryShell: Berry Browser build 106 (PGO+ThinLTO)\n");
+  fprintf(stderr, "BerryShell: Berry Browser build 107 (PGO+ThinLTO)\n");
 
   /* Ship the previous session's log tail (crash backtraces included) to the
    * configured endpoint. Forked; never blocks boot. */
-  berry_ship_log(106);
+  berry_ship_log(107);
 
   fprintf(stderr, "BerryShell: app dir = %s\n", dir);
   fprintf(stderr, "BerryShell: work dir (cwd) = %s\n", work);
@@ -1005,6 +1005,31 @@ int main(int argc, char** argv) {
   if (!marker_exists("berry-lowend.disable")) {
     argv_buf[n++] = (char*)"--enable-low-end-device-mode";
     fprintf(stderr, "BerryShell: low-end device mode = ON (default)\n");
+    /* ...but undo the one low-end penalty that actually hurts here. Low-end
+     * mode pins the renderer's decoded-image working set to 32MB
+     * (DecodedImageWorkingSetBudgetBytesForLowEndDevice) instead of the 128MB
+     * default, so images past that are dropped and re-decoded on every scroll.
+     * The Passport has 3GB; it misses the 256MB tier (needs 4GB) but easily
+     * affords the 128MB default. Restoring just this budget keeps low-end
+     * mode's other savings -- smaller V8 heap, leaner tile caches -- intact.
+     * These are field-trial params (cc/tiles/image_decode_cache_utils.cc), so
+     * a command-line override is enough; no engine change.
+     *
+     * Single merged --enable-features switch for the same reason
+     * --disable-features is merged above: Chromium keeps only the LAST
+     * occurrence, so anything new must be appended here, not added as a
+     * second switch. Opt out: berry-imgcache.disable. */
+    if (!marker_exists("berry-imgcache.disable")) {
+      static char enable_features[320];
+      snprintf(enable_features, sizeof(enable_features),
+               "--enable-features=ImageDecodeConfigurableFeature:"
+               "DecodedImageWorkingSetBudgetBytesForLowEndDevice/%d",
+               128 * 1024 * 1024);
+      argv_buf[n++] = enable_features;
+      fprintf(stderr,
+              "BerryShell: decoded-image budget = 128MB (was 32MB under "
+              "low-end; berry-imgcache.disable to revert)\n");
+    }
   }
   /* Larger HTTP cache for repeat visits (YouTube thumbs, Maps tiles, SW shells).
    * Opt out: berry-disk-cache.disable */

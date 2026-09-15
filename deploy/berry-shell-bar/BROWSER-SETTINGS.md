@@ -128,6 +128,7 @@ proportionally (720 = profile default, 1440 = 2×, 420 = lightweight).
 | `berry-fb-mobile.enable` | Serve `www.facebook.com` the mobile UA (**off by default**). Much lighter page; may break the Messenger checkpoint/verify flow that needs desktop UA |
 | `berry-heap-mb` (text file) | V8 old-space cap in MB, clamped 128..1024 (default 256). 32-bit process: above ~512 risks address-space exhaustion, and larger heaps mean longer mark-compact pauses |
 | `berry-lowend.disable` | Turn **off** low-end device mode (on by default) |
+| `berry-imgcache.disable` | Revert the decoded-image working set to low-end mode's 32MB (default restores the 128MB budget, so images are not re-decoded on every scroll) |
 | `berry-gpu.disable` | Force software rendering (GPU/EGL **on by default**) |
 | `berry-gpu.enable` | Legacy; redundant (GPU is default on) |
 | `berry-lowend.enable` | Legacy; redundant (low-end is default on) |
