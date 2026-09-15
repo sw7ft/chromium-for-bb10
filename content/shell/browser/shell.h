@@ -239,6 +239,8 @@ class Shell : public WebContentsDelegate, public WebContentsObserver {
 #if BUILDFLAG(IS_ANDROID)
   void LoadProgressChanged(double progress) override;
 #endif
+  void PrimaryMainFrameRenderProcessGone(
+      base::TerminationStatus status) override;
   void TitleWasSet(NavigationEntry* entry) override;
   void RenderFrameCreated(RenderFrameHost* frame_host) override;
   void DidFinishLoad(RenderFrameHost* render_frame_host,

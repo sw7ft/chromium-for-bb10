@@ -2313,6 +2313,85 @@ void Shell::LoadProgressChanged(double progress) {
 }
 #endif
 
+void Shell::PrimaryMainFrameRenderProcessGone(base::TerminationStatus status) {
+  // Only reachable in multi-process mode -- in single-process the renderer
+  // shares this process, so its death takes the browser with it and nothing
+  // here runs. content_shell ships no crash UI whatsoever, so without this the
+  // window is left blank and dead, and with the toolbar off there is no reload
+  // or home affordance to escape with. That gap is what made MP worse than SP
+  // from the user's seat even though the browser process survived.
+  const char* reason = "stopped unexpectedly";
+  switch (status) {
+    case base::TERMINATION_STATUS_PROCESS_CRASHED:
+      reason = "crashed";
+      break;
+    case base::TERMINATION_STATUS_PROCESS_WAS_KILLED:
+      reason = "was killed by the system";
+      break;
+    case base::TERMINATION_STATUS_OOM:
+      // The ChromeOS/Android oom-kill variants are BUILDFLAG-gated and do not
+      // exist on QNX; this is the only OOM status available here.
+      reason = "ran out of memory";
+      break;
+    case base::TERMINATION_STATUS_LAUNCH_FAILED:
+      reason = "could not be started";
+      break;
+    case base::TERMINATION_STATUS_ABNORMAL_TERMINATION:
+      reason = "exited abnormally";
+      break;
+    default:
+      break;
+  }
+
+  const GURL failed = web_contents() ? web_contents()->GetVisibleURL() : GURL();
+  // Goes to berry-kbd.log, so a crash is attributable after the fact.
+  fprintf(stderr, "QNX:RENDERER GONE status=%d (%s) url=%s\n",
+          static_cast<int>(status), reason, failed.spec().c_str());
+  fflush(stderr);
+
+  const std::string native = BerryNativeDir();
+  std::string html =
+      "<!DOCTYPE html><html><head><meta name='viewport' "
+      "content='width=device-width,initial-scale=1'>"
+      "<title>Page stopped</title><style>"
+      "body{margin:0;padding:28px 20px;background:#2c001e;color:#f6f0f4;"
+      "font:16px/1.5 -apple-system,'Slate',sans-serif;}"
+      "h1{font-size:21px;margin:0 0 14px;}"
+      "p{margin:0 0 18px;color:#e8d0e0;}"
+      "code{background:rgba(255,255,255,0.08);padding:2px 6px;"
+      "border-radius:5px;word-break:break-all;font-size:13px;}"
+      "a{display:block;text-align:center;text-decoration:none;color:#fff;"
+      "background:#77216f;padding:15px;border-radius:11px;font-weight:600;"
+      "margin-bottom:11px;}a.alt{background:rgba(255,255,255,0.12);}"
+      "</style></head><body>";
+  html += "<h1>This page stopped running</h1><p>The page ";
+  html += reason;
+  html += ".</p>";
+  if (failed.is_valid() && !failed.spec().empty() &&
+      failed.spec() != "about:blank") {
+    html += "<p><code>" + BerryHtmlEscape(failed.spec()) + "</code></p>";
+    html += "<a href='" + BerryHtmlEscape(failed.spec()) + "'>Try again</a>";
+  }
+  if (!native.empty())
+    html += "<a class='alt' href='file://" + native + "/home.html'>Home</a>";
+  html += "<a class='alt' href='https://berry.settings/'>Settings</a>";
+  html += "</body></html>";
+
+  const std::string path = std::string(kBerryMiscDir) + ".berry-crash.html";
+  FILE* f = fopen(path.c_str(), "w");
+  if (!f) {
+    // Nothing else we can do; leaving the dead window is still better than
+    // taking the browser down with it.
+    return;
+  }
+  fwrite(html.data(), 1, html.size(), f);
+  fclose(f);
+
+  GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&Shell::LoadURL, base::Unretained(this),
+                                GURL("file://" + path)));
+}
+
 void Shell::TitleWasSet(NavigationEntry* entry) {
   if (entry)
     g_platform->SetTitle(this, entry->GetTitle());
