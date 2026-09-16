@@ -642,11 +642,11 @@ int main(int argc, char** argv) {
             "BerryShell: PGO collect armed (profiles -> shared/misc/pgo/)\n");
   }
 
-  fprintf(stderr, "BerryShell: Berry Browser build 108 (PGO+ThinLTO)\n");
+  fprintf(stderr, "BerryShell: Berry Browser build 109 (PGO+ThinLTO)\n");
 
   /* Ship the previous session's log tail (crash backtraces included) to the
    * configured endpoint. Forked; never blocks boot. */
-  berry_ship_log(108);
+  berry_ship_log(109);
 
   fprintf(stderr, "BerryShell: app dir = %s\n", dir);
   fprintf(stderr, "BerryShell: work dir (cwd) = %s\n", work);
@@ -800,7 +800,11 @@ int main(int argc, char** argv) {
    * binary) rather than the content_shell.bin log-and-exec wrapper: the wrapper
    * does no env setup and only adds an extra execv hop that silently failed for
    * children (they spawned but never reached main()). */
-  char* argv_buf[64];
+  /* 60 push sites below, none inside a loop, so the worst case is 60 entries
+   * including the NULL terminator. 64 left only four spare with no bounds
+   * check anywhere; the headroom is free (pointers on the stack) and every new
+   * flag was eating into it. */
+  char* argv_buf[96];
   int n = 0;
   argv_buf[n++] = shell;
   argv_buf[n++] = (char*)"--no-sandbox";
@@ -824,7 +828,14 @@ int main(int argc, char** argv) {
   argv_buf[n++] = (char*)"--disable-client-side-phishing-detection";
   argv_buf[n++] = (char*)"--disable-default-apps";
   argv_buf[n++] = (char*)"--disable-domain-reliability";
-  argv_buf[n++] = (char*)"--disable-hang-monitor";
+  /* The hang monitor is pointless in single-process -- the renderer shares
+   * this process, so there is no live browser side to notice or act. In
+   * multi-process it is the only thing that detects a wedged renderer, and
+   * disabling it unconditionally meant Shell::RendererUnresponsive never fired
+   * once, which is why a hung page (Facebook login) left no trace in the log
+   * at all. Keep it off for SP, on for MP. */
+  if (use_single_process)
+    argv_buf[n++] = (char*)"--disable-hang-monitor";
   argv_buf[n++] = (char*)"--disable-prompt-on-repost";
   argv_buf[n++] = (char*)"--disable-sync";
   argv_buf[n++] = (char*)"--disable-translate";

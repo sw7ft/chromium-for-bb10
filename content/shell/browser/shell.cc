@@ -2152,7 +2152,27 @@ void Shell::RendererUnresponsive(
     WebContents* source,
     RenderWidgetHost* render_widget_host,
     base::RepeatingClosure hang_monitor_restarter) {
-  LOG(WARNING) << "renderer unresponsive";
+  // LOG(WARNING) alone never reached berry-kbd.log, because the launcher runs
+  // with --disable-logging. Write straight to stderr with a greppable prefix
+  // so a hang is attributable to a URL after the fact -- this is the signal
+  // that was missing while chasing the Facebook login freeze.
+  //
+  // Deliberately no auto-recovery: a hang is not fatal, and pages routinely
+  // come back. Navigating away from a page that would have finished would be
+  // worse than waiting. The recovery page is reserved for renderer *death*
+  // (PrimaryMainFrameRenderProcessGone).
+  static int s_hangs = 0;
+  const GURL url = source ? source->GetVisibleURL() : GURL();
+  fprintf(stderr, "QNX:RENDERER HUNG #%d url=%s\n", ++s_hangs,
+          url.spec().c_str());
+  fflush(stderr);
+}
+
+void Shell::RendererResponsive(WebContents* source,
+                               RenderWidgetHost* render_widget_host) {
+  const GURL url = source ? source->GetVisibleURL() : GURL();
+  fprintf(stderr, "QNX:RENDERER BACK url=%s\n", url.spec().c_str());
+  fflush(stderr);
 }
 
 void Shell::ActivateContents(WebContents* contents) {

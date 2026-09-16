@@ -167,6 +167,8 @@ class Shell : public WebContentsDelegate, public WebContentsObserver {
       WebContents* source,
       RenderWidgetHost* render_widget_host,
       base::RepeatingClosure hang_monitor_restarter) override;
+  void RendererResponsive(WebContents* source,
+                          RenderWidgetHost* render_widget_host) override;
   void ActivateContents(WebContents* contents) override;
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_APPLE)
   std::unique_ptr<ColorChooser> OpenColorChooser(
