@@ -1,0 +1,655 @@
+diff --git a/BUILD.gn b/BUILD.gn
+index 01159bc..e72fa29 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -1263,7 +1263,21 @@ config("toolchain") {
+ 
+     if (current_cpu != "arm") {
+       # These defines ares used for the ARM simulator.
+-      if (arm_float_abi == "hard") {
++      #
++      # They also decide which C calling convention mksnapshot bakes into the
++      # embedded builtins: mksnapshot runs on the build host, so it takes this
++      # branch, and MacroAssembler::use_eabi_hardfloat() falls back to
++      # USE_EABI_HARDFLOAT there. QNX/BB10 code is always softfp
++      # (//build/config/qnx passes -mfloat-abi=softfp), but arm_float_abi is
++      # left unset for that target and resolves to "hard". The builtins then
++      # passed doubles to C in d0/d1 while the C functions read r0-r3, so every
++      # builtin that calls C with a double -- Math.sin/cos/tan/exp/log/pow/
++      # atan2/..., and the % and ** operators on non-Smi numbers -- returned
++      # garbage until the caller got optimized (the on-device JIT asks
++      # OS::ArmUsingHardFloat() and gets softfp right).
++      if (target_os == "qnx") {
++        defines += [ "USE_EABI_HARDFLOAT=0" ]
++      } else if (arm_float_abi == "hard") {
+         defines += [ "USE_EABI_HARDFLOAT=1" ]
+       } else if (arm_float_abi == "softfp") {
+         defines += [ "USE_EABI_HARDFLOAT=0" ]
+diff --git a/src/base/platform/memory.h b/src/base/platform/memory.h
+index 48b0d70..eb72242 100644
+--- a/src/base/platform/memory.h
++++ b/src/base/platform/memory.h
+@@ -23,9 +23,9 @@
+ #include <malloc.h>
+ #endif  // !V8_OS_DARWIN
+ 
+-#if (V8_OS_POSIX && !V8_OS_AIX && !V8_OS_SOLARIS) || V8_OS_WIN
++#if (V8_OS_POSIX && !V8_OS_AIX && !V8_OS_SOLARIS && !V8_OS_QNX) || V8_OS_WIN
+ #define V8_HAS_MALLOC_USABLE_SIZE 1
+-#endif  // (V8_OS_POSIX && !V8_OS_AIX && !V8_OS_SOLARIS) || V8_OS_WIN
++#endif  // (V8_OS_POSIX && !V8_OS_AIX && !V8_OS_SOLARIS && !V8_OS_QNX) || V8_OS_WIN
+ 
+ namespace v8::base {
+ 
+diff --git a/src/base/platform/platform-posix.cc b/src/base/platform/platform-posix.cc
+index 5d33c18..7d66e9f 100644
+--- a/src/base/platform/platform-posix.cc
++++ b/src/base/platform/platform-posix.cc
+@@ -62,6 +62,10 @@
+ #include <sys/prctl.h>  // for prctl
+ #endif
+ 
++#if V8_OS_QNX
++#include <sys/storage.h>  // for __tls() / _thread_local_storage (stack top)
++#endif
++
+ #if defined(V8_OS_FUCHSIA)
+ #include <zircon/process.h>
+ #else
+@@ -571,6 +575,9 @@ bool OS::DiscardSystemPages(void* address, size_t size) {
+   if (ret != 0 && errno == EINVAL) {
+     ret = madvise(reinterpret_cast<caddr_t>(address), size, MADV_DONTNEED);
+   }
++#elif defined(V8_OS_QNX)
++  // QNX doesn't support madvise; treat as no-op success.
++  int ret = 0;
+ #else
+   int ret = madvise(address, size, MADV_DONTNEED);
+ #endif
+@@ -1322,6 +1329,24 @@ bool MainThreadIsCurrentThread() {
+ 
+ // static
+ Stack::StackSlot Stack::ObtainCurrentThreadStackStart() {
++#if defined(__QNX__)
++  // QNX doesn't support pthread_getattr_np. Returning nullptr here disables
++  // conservative stack scanning: cppgc/V8 then cannot keep raw on-stack
++  // GC pointers (e.g. CallbackInvokeHelper::callback_) alive across a GC that
++  // runs during a nested JS call, leading to use-after-free crashes (observed
++  // as null/garbage derefs in v8::Object::GetIsolate on heavy SPAs).
++  //
++  // The thread's TLS block sits at the very top (highest address) of the
++  // thread's stack (see the comment on struct _thread_local_storage in
++  // <sys/storage.h>). The stack grows down from there, so the address of the
++  // TLS block is a valid upper bound for the scan range. Add the struct size so
++  // the bound is at or above every real stack slot.
++  struct _thread_local_storage* tls = __tls();
++  if (!tls)
++    return nullptr;
++  return reinterpret_cast<void*>(reinterpret_cast<uint8_t*>(tls) +
++                                 sizeof(struct _thread_local_storage));
++#else
+   pthread_attr_t attr;
+   int error = pthread_getattr_np(pthread_self(), &attr);
+   if (error) {
+@@ -1351,6 +1376,7 @@ Stack::StackSlot Stack::ObtainCurrentThreadStackStart() {
+   }
+ #endif  // !defined(V8_LIBC_GLIBC)
+   return stack_start;
++#endif  // !defined(__QNX__)
+ }
+ 
+ #endif  // !defined(V8_OS_FREEBSD) && !defined(V8_OS_DARWIN) &&
+diff --git a/src/base/strings.h b/src/base/strings.h
+index c3015e7..95018ae 100644
+--- a/src/base/strings.h
++++ b/src/base/strings.h
+@@ -5,6 +5,8 @@
+ #ifndef V8_BASE_STRINGS_H_
+ #define V8_BASE_STRINGS_H_
+ 
++#include <cstdarg>
++
+ #include "src/base/base-export.h"
+ #include "src/base/macros.h"
+ #include "src/base/vector.h"
+diff --git a/src/compiler/graph-visualizer.cc b/src/compiler/graph-visualizer.cc
+index dfe935e..263a07c 100644
+--- a/src/compiler/graph-visualizer.cc
++++ b/src/compiler/graph-visualizer.cc
+@@ -294,7 +294,7 @@ void JsonPrintAllSourceWithPositionsWasm(
+   os << "\"inlinings\": {";
+   for (size_t i = 0; i < positions.size(); ++i) {
+     if (i != 0) os << ", ";
+-    DCHECK(source_map.contains(positions[i].inlinee_func_index));
++    DCHECK(source_map.count(positions[i].inlinee_func_index) > 0);
+     size_t source_id = source_map.find(positions[i].inlinee_func_index)->second;
+     SourcePosition inlining_pos = positions[i].caller_pos;
+     os << '"' << i << "\": {\"inliningId\": " << i
+diff --git a/src/compiler/machine-operator-reducer.cc b/src/compiler/machine-operator-reducer.cc
+index 15b28ea..95113db 100644
+--- a/src/compiler/machine-operator-reducer.cc
++++ b/src/compiler/machine-operator-reducer.cc
+@@ -560,7 +560,7 @@ Reduction MachineOperatorReducer::Reduce(Node* node) {
+       Float32BinopMatcher m(node);
+       if (signalling_nan_propagation_ == kPropagateSignallingNan &&
+           m.right().Is(0) &&
+-          (std::copysign(1.0, m.right().ResolvedValue()) > 0)) {
++          (std::copysign(1.0, static_cast<double>(m.right().ResolvedValue())) > 0)) {
+         return Replace(m.left().node());  // x - 0 => x
+       }
+       if (m.right().IsNaN()) {  // x - NaN => NaN
+diff --git a/src/compiler/turboshaft/type-parser.h b/src/compiler/turboshaft/type-parser.h
+index fa0a747..360264e 100644
+--- a/src/compiler/turboshaft/type-parser.h
++++ b/src/compiler/turboshaft/type-parser.h
+@@ -7,6 +7,37 @@
+ 
+ #include "src/compiler/turboshaft/types.h"
+ 
++// QNX's libstdc++ 9.3 is missing std::stoul/stoull/stof/stod.
++#ifdef __QNX__
++#include <cstdlib>
++namespace std {
++  inline unsigned long stoul(const std::string& s, std::size_t* pos = nullptr, int base = 10) {
++    char* end = nullptr;
++    unsigned long result = ::strtoul(s.c_str(), &end, base);
++    if (pos) *pos = static_cast<std::size_t>(end - s.c_str());
++    return result;
++  }
++  inline unsigned long long stoull(const std::string& s, std::size_t* pos = nullptr, int base = 10) {
++    char* end = nullptr;
++    unsigned long long result = ::strtoull(s.c_str(), &end, base);
++    if (pos) *pos = static_cast<std::size_t>(end - s.c_str());
++    return result;
++  }
++  inline float stof(const std::string& s, std::size_t* pos = nullptr) {
++    char* end = nullptr;
++    float result = ::strtof(s.c_str(), &end);
++    if (pos) *pos = static_cast<std::size_t>(end - s.c_str());
++    return result;
++  }
++  inline double stod(const std::string& s, std::size_t* pos = nullptr) {
++    char* end = nullptr;
++    double result = ::strtod(s.c_str(), &end);
++    if (pos) *pos = static_cast<std::size_t>(end - s.c_str());
++    return result;
++  }
++}
++#endif
++
+ namespace v8::internal::compiler::turboshaft {
+ 
+ // TypeParser is used to construct a Type from a string literal.
+diff --git a/src/execution/isolate.cc b/src/execution/isolate.cc
+index 8eab851..735c20f 100644
+--- a/src/execution/isolate.cc
++++ b/src/execution/isolate.cc
+@@ -5,6 +5,8 @@
+ #include "src/execution/isolate.h"
+ 
+ #include <stdlib.h>
++#include "base/qnx_trace.h"
++#define QNX_TRACE(msg) QNX_TRACE_MSG(msg)
+ 
+ #include <atomic>
+ #include <cstdint>
+@@ -4515,6 +4517,7 @@ void Isolate::VerifyStaticRoots() {
+ bool Isolate::Init(SnapshotData* startup_snapshot_data,
+                    SnapshotData* read_only_snapshot_data,
+                    SnapshotData* shared_heap_snapshot_data, bool can_rehash) {
++  QNX_TRACE_MSG("QNX:Init:0 entry\n");
+   TRACE_ISOLATE(init);
+ 
+ #ifdef V8_COMPRESS_POINTERS_IN_SHARED_CAGE
+@@ -4563,24 +4566,32 @@ bool Isolate::Init(SnapshotData* startup_snapshot_data,
+   FOR_EACH_ISOLATE_ADDRESS_NAME(ASSIGN_ELEMENT)
+ #undef ASSIGN_ELEMENT
+ 
+-  // We need to initialize code_pages_ before any on-heap code is allocated to
+-  // make sure we record all code allocations.
++  QNX_TRACE_MSG("QNX:Init:0a preCodeRanges\n");
+   InitializeCodeRanges();
++  QNX_TRACE_MSG("QNX:Init:0b postCodeRanges\n");
+ 
++  QNX_TRACE_MSG("QNX:Init:0b1 compCache\n");
+   compilation_cache_ = new CompilationCache(this);
++  QNX_TRACE_MSG("QNX:Init:0b2 descLookup\n");
+   descriptor_lookup_cache_ = new DescriptorLookupCache();
++  QNX_TRACE_MSG("QNX:Init:0b3 globalHandles\n");
+   global_handles_ = new GlobalHandles(this);
+   eternal_handles_ = new EternalHandles();
+   bootstrapper_ = new Bootstrapper(this);
+   handle_scope_implementer_ = new HandleScopeImplementer(this);
++  QNX_TRACE_MSG("QNX:Init:0b4 stubCaches\n");
+   load_stub_cache_ = new StubCache(this);
+   store_stub_cache_ = new StubCache(this);
+   materialized_object_store_ = new MaterializedObjectStore(this);
+   regexp_stack_ = new RegExpStack();
+   date_cache_ = new DateCache();
++  QNX_TRACE_MSG("QNX:Init:0b5 heapProf\n");
+   heap_profiler_ = new HeapProfiler(heap());
++  QNX_TRACE_MSG("QNX:Init:0b6 interp\n");
+   interpreter_ = new interpreter::Interpreter(this);
++  QNX_TRACE_MSG("QNX:Init:0b7 bigint\n");
+   bigint_processor_ = bigint::Processor::New(new BigIntPlatform(this));
++  QNX_TRACE_MSG("QNX:Init:0b8 postAlloc\n");
+ 
+   if (is_shared_space_isolate_) {
+     global_safepoint_ = std::make_unique<GlobalSafepoint>(this);
+@@ -4601,28 +4612,35 @@ bool Isolate::Init(SnapshotData* startup_snapshot_data,
+   simulator_data_ = new SimulatorData;
+ #endif
+ 
+-  // Enable logging before setting up the heap
++  QNX_TRACE_MSG("QNX:Init:0b9 preLogger\n");
+   v8_file_logger_->SetUp(this);
+-
++  QNX_TRACE_MSG("QNX:Init:0b9a postLogger\n");
+   metrics_recorder_ = std::make_shared<metrics::Recorder>();
++  QNX_TRACE_MSG("QNX:Init:0b10 preStackGuard\n");
+ 
+   {
+     // Ensure that the thread has a valid stack guard.  The v8::Locker object
+     // will ensure this too, but we don't have to use lockers if we are only
+     // using one thread.
+     ExecutionAccess lock(this);
++    QNX_TRACE_MSG("QNX:Init:0b10a preInitThread\n");
+     stack_guard()->InitThread(lock);
++    QNX_TRACE_MSG("QNX:Init:0b10b postInitThread\n");
+   }
+ 
+   // Create LocalIsolate/LocalHeap for the main thread and set state to Running.
++  QNX_TRACE_MSG("QNX:Init:0b10c preLocalIsolate\n");
+   main_thread_local_isolate_.reset(new LocalIsolate(this, ThreadKind::kMain));
++  QNX_TRACE_MSG("QNX:Init:0b10d postLocalIsolate\n");
+ 
+   {
+     IgnoreLocalGCRequests ignore_gc_requests(heap());
++    QNX_TRACE_MSG("QNX:Init:0b10e preUnpark\n");
+     main_thread_local_heap()->Unpark();
++    QNX_TRACE_MSG("QNX:Init:0b10f postUnpark\n");
+   }
++  QNX_TRACE_MSG("QNX:Init:0c preHeapSetUp\n");
+ 
+-  // Requires a LocalHeap to be set up to register a GC epilogue callback.
+   inner_pointer_to_code_cache_ = new InnerPointerToCodeCache(this);
+ 
+   // Lock clients_mutex_ in order to prevent shared GCs from other clients
+@@ -4647,9 +4665,10 @@ bool Isolate::Init(SnapshotData* startup_snapshot_data,
+     heap_.SetIsMarkingFlag(true);
+   }
+ 
+-  // Set up the object heap.
++  QNX_TRACE_MSG("QNX:Init:0d preHeapSetUp\n");
+   DCHECK(!heap_.HasBeenSetUp());
+   heap_.SetUp(main_thread_local_heap());
++  QNX_TRACE_MSG("QNX:Init:0e postHeapSetUp\n");
+   InitializeIsShortBuiltinCallsEnabled();
+   if (!create_heap_objects) {
+     // Must be done before deserializing RO space, since RO space may contain
+@@ -4673,7 +4692,9 @@ bool Isolate::Init(SnapshotData* startup_snapshot_data,
+     trusted_pointer_table().InitializeSpace(heap()->trusted_pointer_space());
+ #endif  // V8_COMPRESS_POINTERS
+   }
++  QNX_TRACE_MSG("QNX:Init:1 ReadOnlyHeap::SetUp\n");
+   ReadOnlyHeap::SetUp(this, read_only_snapshot_data, can_rehash);
++  QNX_TRACE_MSG("QNX:Init:2 SetUpSpaces\n");
+   heap_.SetUpSpaces(isolate_data_.new_allocation_info_,
+                     isolate_data_.old_allocation_info_);
+ 
+@@ -4811,14 +4832,17 @@ bool Isolate::Init(SnapshotData* startup_snapshot_data,
+   tiering_manager_ = new TieringManager(this);
+ 
+   if (!create_heap_objects) {
+-    // If we are deserializing, read the state into the now-empty heap.
++    QNX_TRACE_MSG("QNX:Init:3 SharedHeapDeserialize\n");
+     SharedHeapDeserializer shared_heap_deserializer(
+         this, shared_heap_snapshot_data, can_rehash);
+     shared_heap_deserializer.DeserializeIntoIsolate();
++    QNX_TRACE_MSG("QNX:Init:4 SharedHeap done\n");
+ 
++    QNX_TRACE_MSG("QNX:Init:5 StartupDeserialize\n");
+     StartupDeserializer startup_deserializer(this, startup_snapshot_data,
+                                              can_rehash);
+     startup_deserializer.DeserializeIntoIsolate();
++    QNX_TRACE_MSG("QNX:Init:6 Startup done\n");
+   }
+   if (DEBUG_BOOL) VerifyStaticRoots();
+   load_stub_cache_->Initialize();
+@@ -6198,6 +6222,10 @@ bool StringEqualsLocales(Isolate* isolate, const std::string& str,
+ 
+ const std::string& Isolate::DefaultLocale() {
+   if (default_locale_.empty()) {
++#if defined(__QNX__)
++    // ICU icu::Locale ctor can hang on QNX (locale init). Bypass and use en-US.
++    set_default_locale("en-US");
++#else
+     icu::Locale default_locale;
+     // Translate ICU's fallback locale to a well-known locale.
+     if (strcmp(default_locale.getName(), "en_US_POSIX") == 0 ||
+@@ -6209,6 +6237,7 @@ const std::string& Isolate::DefaultLocale() {
+                              ? "und"
+                              : Intl::ToLanguageTag(default_locale).FromJust());
+     }
++#endif
+     DCHECK(!default_locale_.empty());
+   }
+   return default_locale_;
+diff --git a/src/execution/local-isolate.cc b/src/execution/local-isolate.cc
+index 596541b..b3bf76c 100644
+--- a/src/execution/local-isolate.cc
++++ b/src/execution/local-isolate.cc
+@@ -4,6 +4,14 @@
+ 
+ #include "src/execution/local-isolate.h"
+ 
++#include "base/qnx_trace.h"
++
++#if defined(__QNX__)
++#define QNX_LI_TRACE(msg) QNX_TRACE_MSG(msg)
++#else
++#define QNX_LI_TRACE(msg) do {} while(0)
++#endif
++
+ #include "src/bigint/bigint.h"
+ #include "src/execution/isolate.h"
+ #include "src/execution/thread-id.h"
+@@ -28,6 +36,7 @@ LocalIsolate::LocalIsolate(Isolate* isolate, ThreadKind kind)
+       default_locale_(isolate->DefaultLocale())
+ #endif
+ {
++  QNX_LI_TRACE("QNX:LI:2 ctor body\n");
+ #ifdef V8_RUNTIME_CALL_STATS
+   if (kind == ThreadKind::kMain) {
+     runtime_call_stats_ = isolate->counters()->runtime_call_stats();
+diff --git a/src/execution/thread-id.cc b/src/execution/thread-id.cc
+index ec4e95a..3102c72 100644
+--- a/src/execution/thread-id.cc
++++ b/src/execution/thread-id.cc
+@@ -6,6 +6,14 @@
+ #include "src/base/lazy-instance.h"
+ #include "src/base/platform/platform.h"
+ 
++#include "base/qnx_trace.h"
++
++#if defined(__QNX__)
++#define QNX_TID_TRACE(msg) QNX_TRACE_MSG(msg)
++#else
++#define QNX_TID_TRACE(msg) do {} while(0)
++#endif
++
+ namespace v8 {
+ namespace internal {
+ 
+@@ -24,10 +32,12 @@ ThreadId ThreadId::TryGetCurrent() {
+ 
+ // static
+ int ThreadId::GetCurrentThreadId() {
++  QNX_TID_TRACE("QNX:TID:1 entry\n");
+   if (thread_id == 0) {
+     thread_id = next_thread_id.fetch_add(1);
+     CHECK_LE(1, thread_id);
+   }
++  QNX_TID_TRACE("QNX:TID:2 done\n");
+   return thread_id;
+ }
+ 
+diff --git a/src/heap/local-heap.cc b/src/heap/local-heap.cc
+index b46b04f..512293c 100644
+--- a/src/heap/local-heap.cc
++++ b/src/heap/local-heap.cc
+@@ -7,6 +7,14 @@
+ #include <atomic>
+ #include <memory>
+ 
++#include "base/qnx_trace.h"
++
++#if defined(__QNX__)
++#define QNX_LH_TRACE(msg) QNX_TRACE_MSG(msg)
++#else
++#define QNX_LH_TRACE(msg) do {} while(0)
++#endif
++
+ #include "src/base/logging.h"
+ #include "src/base/optional.h"
+ #include "src/base/platform/mutex.h"
+@@ -60,6 +68,7 @@ LocalHeap::LocalHeap(Heap* heap, ThreadKind kind,
+   DCHECK_IMPLIES(!is_main_thread(), heap_->deserialization_complete());
+   if (!is_main_thread()) SetUp();
+ 
++  QNX_LH_TRACE("QNX:LH:1 preAddLocalHeap\n");
+   heap_->safepoint()->AddLocalHeap(this, [this] {
+     if (!is_main_thread()) {
+       saved_marking_barrier_ =
+@@ -73,6 +82,7 @@ LocalHeap::LocalHeap(Heap* heap, ThreadKind kind,
+       SetUpSharedMarking();
+     }
+   });
++  QNX_LH_TRACE("QNX:LH:2 postAddLocalHeap\n");
+ 
+   if (persistent_handles_) {
+     persistent_handles_->Attach(this);
+diff --git a/src/inspector/string-16.cc b/src/inspector/string-16.cc
+index 6df9963..d53fbdb 100644
+--- a/src/inspector/string-16.cc
++++ b/src/inspector/string-16.cc
+@@ -17,6 +17,13 @@
+ #include "src/inspector/v8-string-conversions.h"
+ #include "src/numbers/conversions.h"
+ 
++// QNX's libstdc++ 9.3 is missing std::strtoll in <cstdlib>.
++#ifdef __QNX__
++namespace std {
++  inline long long strtoll(const char* s, char** e, int b) { return ::strtoll(s, e, b); }
++}
++#endif
++
+ namespace v8_inspector {
+ 
+ namespace {
+diff --git a/src/logging/local-logger.cc b/src/logging/local-logger.cc
+index 1c023cf..faa1af0 100644
+--- a/src/logging/local-logger.cc
++++ b/src/logging/local-logger.cc
+@@ -4,6 +4,14 @@
+ 
+ #include "src/logging/local-logger.h"
+ 
++#include "base/qnx_trace.h"
++
++#if defined(__QNX__)
++#define QNX_LL_TRACE(msg) QNX_TRACE_MSG(msg)
++#else
++#define QNX_LL_TRACE(msg) do {} while(0)
++#endif
++
+ #include "src/execution/isolate.h"
+ #include "src/objects/map.h"
+ 
+@@ -15,7 +23,9 @@ LocalLogger::LocalLogger(Isolate* isolate)
+     : v8_file_logger_(isolate->v8_file_logger()),
+       is_logging_(v8_file_logger_->is_logging()),
+       is_listening_to_code_events_(
+-          v8_file_logger_->is_listening_to_code_events()) {}
++          v8_file_logger_->is_listening_to_code_events()) {
++  QNX_LL_TRACE("QNX:LL:1 done\n");
++}
+ 
+ void LocalLogger::ScriptDetails(Tagged<Script> script) {
+   v8_file_logger_->ScriptDetails(script);
+diff --git a/src/logging/log.cc b/src/logging/log.cc
+index c500878..ba5acec 100644
+--- a/src/logging/log.cc
++++ b/src/logging/log.cc
+@@ -64,6 +64,14 @@
+ #endif
+ #endif  // V8_OS_WIN
+ 
++#include "base/qnx_trace.h"
++
++#if defined(__QNX__)
++#define QNX_LOG_TRACE(msg) QNX_TRACE_MSG(msg)
++#else
++#define QNX_LOG_TRACE(msg) do {} while (0)
++#endif
++
+ namespace v8 {
+ namespace internal {
+ 
+@@ -2225,9 +2233,22 @@ bool V8FileLogger::SetUp(Isolate* isolate) {
+   if (is_initialized_) return true;
+   is_initialized_ = true;
+ 
++  QNX_LOG_TRACE("QNX:SetUp:1 entry\n");
++
++  std::string log_file_name_str;
++#if defined(__QNX__)
++  // QNX: PrepareLogFileName or LogFile (tmpfile/FOpen) can hang. Use stdout.
++  QNX_LOG_TRACE("QNX:SetUp:2 preLogFile\n");
++  log_file_ = std::make_unique<LogFile>(this, LogFile::kLogToConsole);
++  QNX_LOG_TRACE("QNX:SetUp:3 postLogFile\n");
++  log_file_name_str = "-";
++  (void)isolate;
++#else
+   std::ostringstream log_file_name;
+   PrepareLogFileName(log_file_name, isolate, v8_flags.logfile);
+-  log_file_ = std::make_unique<LogFile>(this, log_file_name.str());
++  log_file_name_str = log_file_name.str();
++  log_file_ = std::make_unique<LogFile>(this, log_file_name_str);
++#endif
+ 
+ #if V8_OS_LINUX
+   if (v8_flags.perf_basic_prof) {
+@@ -2258,13 +2279,25 @@ bool V8FileLogger::SetUp(Isolate* isolate) {
+ #endif  // ENABLE_GDB_JIT_INTERFACE
+ 
+   if (v8_flags.ll_prof) {
++    QNX_LOG_TRACE("QNX:SetUp:4 preLLProf\n");
+     ll_logger_ =
+-        std::make_unique<LowLevelLogger>(isolate, log_file_name.str().c_str());
++        std::make_unique<LowLevelLogger>(isolate, log_file_name_str.c_str());
+     CHECK(logger()->AddListener(ll_logger_.get()));
+   }
++  QNX_LOG_TRACE("QNX:SetUp:5 preTicker\n");
++#if defined(__QNX__)
++  // QNX: Ticker constructor (SamplingThread) hangs. Skip for now; --prof disabled.
++  // ticker_ remains nullptr; sampler() returns null, handled by callers.
++  (void)isolate;
++  (void)v8_flags;
++#else
+   ticker_ = std::make_unique<Ticker>(isolate, v8_flags.prof_sampling_interval);
++#endif
++  QNX_LOG_TRACE("QNX:SetUp:6 postTicker\n");
+   if (v8_flags.log) UpdateIsLogging(true);
++  QNX_LOG_TRACE("QNX:SetUp:7 preTimer\n");
+   timer_.Start();
++  QNX_LOG_TRACE("QNX:SetUp:8 postTimer\n");
+   if (v8_flags.prof_cpp) {
+     CHECK(v8_flags.log);
+     CHECK(is_logging());
+diff --git a/src/objects/js-temporal-objects.cc b/src/objects/js-temporal-objects.cc
+index 4ab49d6..424b182 100644
+--- a/src/objects/js-temporal-objects.cc
++++ b/src/objects/js-temporal-objects.cc
+@@ -1382,24 +1382,24 @@ Handle<String> TemporalDurationToString(Isolate* isolate,
+       RoundTowardsZero(dur.time_duration.nanoseconds / 1000);
+   // 3. Set nanoseconds to remainder(nanoseconds, 1000).
+   dur.time_duration.nanoseconds =
+-      std::fmod(dur.time_duration.nanoseconds, 1000);
++      std::fmod(dur.time_duration.nanoseconds, 1000.0);
+   // 4. Set milliseconds to milliseconds + RoundTowardsZero(microseconds /
+   // 1000).
+   double milliseconds_add = RoundTowardsZero(
+       dur.time_duration.microseconds / 1000 + microseconds_add / 1000);
+   // 5. Set microseconds to remainder(microseconds, 1000).
+   dur.time_duration.microseconds =
+-      std::fmod(std::fmod(dur.time_duration.microseconds, 1000) +
+-                    std::fmod(microseconds_add, 1000),
+-                1000);
++      std::fmod(std::fmod(dur.time_duration.microseconds, 1000.0) +
++                    std::fmod(microseconds_add, 1000.0),
++                1000.0);
+   // 6. Set seconds to seconds + RoundTowardsZero(milliseconds / 1000).
+   double seconds_add = RoundTowardsZero(dur.time_duration.milliseconds / 1000 +
+                                         milliseconds_add / 1000);
+   // 7. Set milliseconds to remainder(milliseconds, 1000).
+   dur.time_duration.milliseconds =
+-      std::fmod(std::fmod(dur.time_duration.milliseconds, 1000) +
+-                    std::fmod(milliseconds_add, 1000),
+-                1000);
++      std::fmod(std::fmod(dur.time_duration.milliseconds, 1000.0) +
++                    std::fmod(milliseconds_add, 1000.0),
++                1000.0);
+ 
+   // 8. Let datePart be "".
+   IncrementalStringBuilder date_part(isolate);
+diff --git a/src/snapshot/snapshot.cc b/src/snapshot/snapshot.cc
+index b3db155..25e636d 100644
+--- a/src/snapshot/snapshot.cc
++++ b/src/snapshot/snapshot.cc
+@@ -25,6 +25,10 @@
+ #include "src/snapshot/startup-serializer.h"
+ #include "src/utils/memcopy.h"
+ #include "src/utils/version.h"
++#include "base/qnx_trace.h"
++
++#include "base/qnx_trace.h"
++#define QNX_TRACE(msg) QNX_TRACE_MSG(msg)
+ 
+ #ifdef V8_SNAPSHOT_COMPRESSION
+ #include "src/snapshot/snapshot-compression.h"
+@@ -172,13 +176,16 @@ bool Snapshot::VersionIsValid(const v8::StartupData* data) {
+ 
+ bool Snapshot::Initialize(Isolate* isolate) {
+   if (!isolate->snapshot_available()) return false;
++  QNX_TRACE_MSG("QNX:Snap:1 entry\n");
+ 
+   const v8::StartupData* blob = isolate->snapshot_blob();
++  QNX_TRACE_MSG("QNX:Snap:2 checkVersion\n");
+   SnapshotImpl::CheckVersion(blob);
+   if (Snapshot::ShouldVerifyChecksum(blob)) {
++    QNX_TRACE_MSG("QNX:Snap:2a verifyChecksum\n");
+     CHECK(VerifyChecksum(blob));
+   }
+-
++  QNX_TRACE_MSG("QNX:Snap:3 extract\n");
+   base::Vector<const uint8_t> startup_data =
+       SnapshotImpl::ExtractStartupData(blob);
+   base::Vector<const uint8_t> read_only_data =
+@@ -186,15 +193,22 @@ bool Snapshot::Initialize(Isolate* isolate) {
+   base::Vector<const uint8_t> shared_heap_data =
+       SnapshotImpl::ExtractSharedHeapData(blob);
+ 
++  QNX_TRACE_MSG("QNX:Snap:4 decompress\n");
+   SnapshotData startup_snapshot_data(MaybeDecompress(isolate, startup_data));
++  QNX_TRACE_MSG("QNX:Snap:4a startup done\n");
+   SnapshotData read_only_snapshot_data(
+       MaybeDecompress(isolate, read_only_data));
++  QNX_TRACE_MSG("QNX:Snap:4b readOnly done\n");
+   SnapshotData shared_heap_snapshot_data(
+       MaybeDecompress(isolate, shared_heap_data));
++  QNX_TRACE_MSG("QNX:Snap:4c shared done\n");
+ 
+-  return isolate->InitWithSnapshot(
++  QNX_TRACE_MSG("QNX:Snap:5 InitWithSnapshot\n");
++  bool ok = isolate->InitWithSnapshot(
+       &startup_snapshot_data, &read_only_snapshot_data,
+       &shared_heap_snapshot_data, ExtractRehashability(blob));
++  QNX_TRACE_MSG("QNX:Snap:6 done\n");
++  return ok;
+ }
+ 
+ MaybeHandle<Context> Snapshot::NewContextFromSnapshot(
+diff --git a/src/wasm/std-object-sizes.h b/src/wasm/std-object-sizes.h
+index 6b16ef2..a0111cd 100644
+--- a/src/wasm/std-object-sizes.h
++++ b/src/wasm/std-object-sizes.h
+@@ -62,7 +62,7 @@ inline size_t ContentSize(std::unordered_set<T> set) {
+ // When one of these checks fails, that probably means you've added fields to
+ // a class guarded by it. Update the respective EstimateCurrentMemoryConsumption
+ // function accordingly, and then update the check's expected size.
+-#if V8_TARGET_ARCH_X64 && defined(__clang__) && V8_TARGET_OS_LINUX &&          \
++#if V8_TARGET_ARCH_X64 && defined(__clang__) && defined(V8_TARGET_OS_LINUX) && \
+     !V8_USE_ADDRESS_SANITIZER && !V8_USE_MEMORY_SANITIZER && defined(DEBUG) && \
+     V8_COMPRESS_POINTERS && !defined(V8_GC_MOLE) && defined(_LIBCPP_VERSION)
+ #define UPDATE_WHEN_CLASS_CHANGES(classname, size)                       \
