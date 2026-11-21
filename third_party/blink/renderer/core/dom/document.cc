@@ -3853,7 +3853,21 @@ void Document::ImplicitClose() {
 void Document::FinishImplicitClose() {
 #if defined(__QNX__) || defined(__QNXNTO__)
   QNX_TRACE_MSG("QNX:ImCl:4 preLoad\n");
-  if (domWindow())
+  // Posting this from ImplicitClose() changes one ordering that pages rely on.
+  // Upstream fires the load event of a subframe's initial about:blank document
+  // synchronously, inside the appendChild() that inserted the <iframe>, i.e.
+  // before script can attach a handler or set src. Deferred, it used to arrive
+  // after
+  //     body.appendChild(frame); frame.onload = start; frame.src = url;
+  // and run `start` against about:blank while `url` was still loading. That
+  // broke Speedometer 3.0 outright, and the same pattern is common for
+  // auth, payment and upload iframes. If the frame has already been pointed
+  // elsewhere, this event is one upstream would have delivered before any such
+  // handler existed, so drop it rather than deliver it late.
+  const bool superseded_blank_subframe =
+      GetFrame() && !GetFrame()->IsMainFrame() && Url().IsAboutBlankURL() &&
+      GetFrame()->Loader().HasProvisionalNavigation();
+  if (domWindow() && !superseded_blank_subframe)
     domWindow()->DispatchWindowLoadEvent();
   QNX_TRACE_MSG("QNX:ImCl:4b postLoad\n");
 #endif
