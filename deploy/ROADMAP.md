@@ -20,6 +20,79 @@ and is **stale on build numbers** — trust this file for engine/perf state.
 
 ---
 
+## Progress update — builds 110–112 (Nov 20, 2026)
+
+Current ship build is **112** (`3.0.2.112`), from `out/qnx-arm-pgo-o2`. Three
+engine changes since 109, and the first on-device benchmark numbers. The
+harness is in `deploy/berrybench`; it runs engines headless over SSH with
+software rendering, so its numbers are relative, not what the installed app
+scores.
+
+### "97 is the compiler ceiling" was wrong
+
+Every build up to 109 linked with `--lto-O0`. Build 110 links `content_shell`
+with `--lto-O2` (see [THINLTO.md](THINLTO.md)): 8% less time on ten DOM-heavy
+Speedometer 3.0 suites. The claims below that there is nothing left in the
+build configuration predate this.
+
+### Wrong math in cold JavaScript (fixed in 111)
+
+`Math.sin/cos/tan/asin/acos/atan/atan2/exp/expm1/log/log1p/log2/log10/cbrt/
+sinh/cosh/tanh/pow`, `%` on non-integers and `**` returned garbage until the
+calling function had run often enough to be optimized (`Math.pow(2,10)` gave
+2.0000000000002, `5.5 % 2` gave 5.5). `mksnapshot` bakes the C calling
+convention for these into the embedded builtins from `USE_EABI_HARDFLOAT`,
+which followed gn's `arm_float_abi` (unset, so "hard") while the QNX target
+is compiled `-mfloat-abi=softfp`. Fixed in `v8/BUILD.gn`; the whole V8 port is
+now exported as `deploy/patches/v8-qnx-bb10.patch`. Present in every earlier
+build. `selftest.py` in the harness: 2/26 before, 26/26 after.
+
+`out/qnx-arm-pgo` (the O0 fallback) has not been rebuilt since; it picks the
+fix up on its next build.
+
+### Late load event on a re-pointed iframe (fixed in 112)
+
+The port posts `Document::FinishImplicitClose` instead of running it inline,
+so the load event of an iframe's initial `about:blank` arrived after script
+had already set `onload` and `src`, and the handler ran against the blank
+document. Speedometer 3.0 could not start a suite. The stale event is now
+dropped. `iframetest.py`: 4/7 before, 7/7 after. Unmodified Speedometer 3.0
+runs all 20 suites.
+
+### `--no-optimize-for-size`
+
+Low-end device mode forces V8's `--optimize-for-size`. Turning it off through
+the `berry-jsflags` marker (`--max-old-space-size=256
+--no-optimize-for-size`) is the largest single gain measured: 23% less time
+on the ten suites on top of the O2 link, 17% on all 20. On swiftapp.ca the
+four startup stalls went from 24.4 s (build 106) to 15.4 s (build 112 with
+the marker), with the JS heap peaking at 120 MB instead of 64 MB. **Not yet
+the launcher default** — next build.
+
+### Baseline for the next comparison (build 112 with the marker, Nov 20)
+
+| Site | Stalls over 1.5 s | Total | Longest |
+|---|---|---|---|
+| m.facebook.com | 3 | 5.9 s | 2.7 s |
+| messenger.com (login to first chat) | 10 | 29.5 s | 5.5 s |
+| amazon.ca (home, Black Friday, search, product) | 7 | 26.6 s | 7.3 s |
+| swiftapp.ca (cold start) | 4 | 15.4 s | 5.3 s |
+
+Messenger and Facebook log in and work on 112. GC is 3–10% of the remaining
+stall time; the rest is script and layout and has not been profiled yet.
+
+### Open
+
+- Profile what the main thread does during the remaining stalls.
+- swiftapp.ca throws `Set.difference is not a function`. V8 12.0 has the Set
+  methods staged; `--harmony-set-methods` enables them (checked on the bench
+  engine).
+- The iframe fix drops the stale event rather than restoring upstream's
+  synchronous timing. An iframe that is inserted, given a handler afterwards
+  and never navigated still gets one event that Chrome would not deliver.
+
+---
+
 ## Progress update — builds 98–106 (Sep 13, 2026)
 
 Current ship build is **106** (`3.0.2.106`), same PGO+ThinLTO binary lineage as
@@ -190,7 +263,8 @@ result. Treat MP as unproven.
 |-----|-------|-------|
 | `out/qnx-arm-lto` | ThinLTO only (build 95) | fallback if PGO binary is suspect |
 | `out/qnx-arm-pgilto` | PGI instrumented (build 96) | profiling only; sluggish |
-| `out/qnx-arm-pgo` | **PGO + ThinLTO (build 97)** | **yes** |
+| `out/qnx-arm-pgo` | PGO + ThinLTO, `--lto-O0` link (builds 97–109) | fallback |
+| `out/qnx-arm-pgo-o2` | **PGO + ThinLTO, `--lto-O2` link (build 110+)** | **yes** |
 
 ---
 
