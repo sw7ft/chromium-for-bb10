@@ -1,0 +1,6 @@
+# Run output and local scratch; the scripts and results/ are tracked.
+__pycache__/
+logs/
+*.out
+*.log
+content_shell.*
