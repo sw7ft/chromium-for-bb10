@@ -687,6 +687,16 @@ if (is_android) {
         "-Wl,--wrap=abort",
         "-Wl,--allow-multiple-definition",
       ]
+
+      # Opt the browser binary into ThinLTO's link-step optimization, the same
+      # way chrome and headless_shell do. Without this every target links with
+      # -Wl,--lto-O0, which skips cross-module inlining and the passes ThinLTO
+      # defers to the link (loop vectorization, unrolling). It only takes
+      # effect when thin_lto_enable_optimizations = true is set in args.gn
+      # (that arg defaults to false on QNX); otherwise this resolves to the
+      # same -Wl,--lto-O0 as before.
+      configs -= [ "//build/config/compiler:thinlto_optimize_default" ]
+      configs += [ "//build/config/compiler:thinlto_optimize_max" ]
     }
 
     defines = []
