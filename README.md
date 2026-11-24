@@ -12,9 +12,9 @@ blocking, and an Ubuntu-styled home screen.
 
 ## Download — Berry Browser (V3)
 
-**Latest: v3.0.2 build 112** — [`releases/BerryBrowserV3-3.0.2-build112.bar`](releases/BerryBrowserV3-3.0.2-build112.bar) (~60 MB)
+**Latest: v3.0.2 build 114** — [`releases/BerryBrowserV3-3.0.2-build114.bar`](releases/BerryBrowserV3-3.0.2-build114.bar) (~60 MB)
 
-Previous: [build 84](releases/BerryBrowserV3-3.0.2-build84.bar).
+Previous: [build 112](releases/BerryBrowserV3-3.0.2-build112.bar), [build 84](releases/BerryBrowserV3-3.0.2-build84.bar).
 
 Install like any BB10 sideload:
 
@@ -23,19 +23,29 @@ Install like any BB10 sideload:
    device and install with an on-device file manager that supports `.bar`.
 3. Launch **Berry Browser** from the home screen.
 
-New in build 112 (tested on a Passport):
+New in build 114 (tested on a Passport):
 
-- **JavaScript math is correct.** Until now `Math.sin`, `Math.pow`,
-  `Math.exp`, `Math.log` and related functions, `%` on non-integers and `**`
-  could return wrong values until a function had run a thousand times or
-  more. Code that depends on them — timestamps, animation easing, libraries
-  such as underscore — could misbehave.
-- **Iframes that are inserted and then pointed at a URL** no longer get a
-  stray `load` event for the blank page first.
-- **Faster engine.** The browser binary is now optimised at link time as well
-  as profile-guided: about 8% less time on the DOM-heavy Speedometer 3.0
-  suites than build 109, measured on the phone. Speedometer 3.0 now runs to
-  completion.
+- **Faster.** The engine no longer makes a memory call that costs
+  milliseconds on BB10 and frees nothing: 9.8% less time on the DOM-heavy
+  Speedometer 3.0 suites than the same engine with the call, measured on the
+  phone, and a heavy shopping page loaded faster in every paired run.
+- **Copy and paste.** Long-press a word for a Cut / Copy / Paste / Select all
+  menu. It uses the BB10 clipboard, so text goes both ways between the
+  browser and other apps. Selecting text no longer crashes the browser.
+- **Share to Berry Browser.** The app registers as a Share target as well as
+  "Open in": a shared link opens, shared text is searched for a link, and
+  text without one becomes a search. (Whether it shows up in every app's
+  Share menu has not been confirmed on a device yet.)
+- **On-screen Shift.** Switching Shift off again no longer leaves the next
+  letter capital.
+- **New buffers start empty.** `new Uint8Array(n)` and similar could come
+  back holding old data from a buffer that had been freed.
+
+In build 112: correct JavaScript math before a function is optimised
+(`Math.sin`, `Math.pow`, `%`, `**` and others), no stray `load` event on
+iframes that are inserted and then pointed at a URL, and a link-time
+optimised engine (about 8% less time on the same Speedometer suites than
+build 109).
 
 Since build 84: profile-guided + ThinLTO engine (95–97), Alt number/symbol
 layer on Q10/Q20 keyboards (85), WebAudio fail-safe that stops a class of
@@ -134,8 +144,9 @@ Skia toolbar, `.bar` packaging, root CAs, GPU — has since landed on `berry-v3`
 ```
 ├── README.md
 ├── releases/
-│   ├── BerryBrowserV3-3.0.2-build112.bar # installable Berry Browser app, latest (~60 MB)
-│   └── BerryBrowserV3-3.0.2-build84.bar  # previous release
+│   ├── BerryBrowserV3-3.0.2-build114.bar # installable Berry Browser app, latest (~60 MB)
+│   ├── BerryBrowserV3-3.0.2-build112.bar # previous release
+│   └── BerryBrowserV3-3.0.2-build84.bar  # older release
 ├── browser-content-shell-131.zip  # pre-built headless binary package (72 MB)
 ├── patches/
 │   └── qnx-port.patch          # unified diff (~21k lines)
