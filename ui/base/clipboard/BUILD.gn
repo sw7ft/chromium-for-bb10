@@ -175,6 +175,12 @@ component("clipboard") {
         "//ui/base",
         "//ui/ozone",
       ]
+      if (is_qnx) {
+        sources += [
+          "qnx_platform_clipboard.cc",
+          "qnx_platform_clipboard.h",
+        ]
+      }
     }
   }
 

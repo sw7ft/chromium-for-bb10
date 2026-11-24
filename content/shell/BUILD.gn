@@ -415,12 +415,16 @@ static_library("content_shell_lib") {
     sources += [
       "browser/berry_browser_chrome.cc",
       "browser/berry_browser_chrome.h",
+      "browser/berry_edit_menu.cc",
+      "browser/berry_edit_menu.h",
       "browser/berry_geolocation_qnx.cc",
       "browser/berry_geolocation_qnx.h",
       "browser/berry_maps_qnx.cc",
       "browser/berry_maps_qnx.h",
       "browser/berry_pgo_stub_qnx.cc",
       "browser/berry_shared_text.h",
+      "browser/berry_test_hooks.cc",
+      "browser/berry_test_hooks.h",
       "browser/qnx_berry_daemon_host.cc",
       "browser/qnx_berry_daemon_host.h",
       "browser/shell_fixed_location_provider.cc",
@@ -430,10 +434,14 @@ static_library("content_shell_lib") {
     ]
     deps += [
       "//gpu/qnx:qnx_gpu",
+      "//skia",
       "//ui/aura",
       "//ui/aura:test_support",
+      "//ui/compositor",
       "//ui/events",
+      "//ui/gfx/codec",
       "//ui/ozone/platform/qnx_screen:qnx_screen",
+      "//ui/touch_selection",
       "//ui/wm",
     ]
   } else if (use_aura) {

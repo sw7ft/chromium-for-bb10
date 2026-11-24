@@ -41,6 +41,10 @@
 #include "ui/ozone/public/ozone_platform.h"
 #include "ui/ozone/public/platform_clipboard.h"
 
+#if BUILDFLAG(IS_QNX)
+#include "ui/base/clipboard/qnx_platform_clipboard.h"
+#endif
+
 namespace ui {
 
 namespace {
@@ -368,10 +372,16 @@ ClipboardOzone::ClipboardOzone() {
         std::make_unique<ClipboardOzone::AsyncClipboardOzone>(
             platform_clipboard, this);
   } else {
-    static base::NoDestructor<StubPlatformClipboard> stub_platform_clipboard;
+#if BUILDFLAG(IS_QNX)
+    // Neither ozone platform used on BB10 (qnx_screen, headless) has a
+    // clipboard of its own; share the phone's.
+    static base::NoDestructor<QnxPlatformClipboard> fallback_clipboard;
+#else
+    static base::NoDestructor<StubPlatformClipboard> fallback_clipboard;
+#endif
     async_clipboard_ozone_ =
         std::make_unique<ClipboardOzone::AsyncClipboardOzone>(
-            stub_platform_clipboard.get(), this);
+            fallback_clipboard.get(), this);
   }
 }
 

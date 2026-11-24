@@ -476,14 +476,10 @@ int CalculateIdleTime() { return 0; }
 bool CheckIdleStateIsLocked() { return false; }
 }  // namespace ui
 
-// QNX has no platform clipboard backend; use Chromium's in-memory clipboard so
-// selection/copy paths (e.g. updating the selection buffer on click) work and
-// don't CHECK-fail on a null clipboard.
-#include "ui/base/clipboard/clipboard.h"
-#include "ui/base/clipboard/clipboard_non_backed.h"
-namespace ui {
-Clipboard* Clipboard::Create() { return new ClipboardNonBacked; }
-}  // namespace ui
+// ui::Clipboard::Create() used to be stubbed here to return
+// ClipboardNonBacked. It now comes from ui/base/clipboard/
+// clipboard_factory_ozone.cc, which gives BB10 its system clipboard (see the
+// comment there for why the in-memory one crashed on text selection).
 
 #include "ui/shell_dialogs/select_file_dialog.h"
 namespace ui {

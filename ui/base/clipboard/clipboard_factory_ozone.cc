@@ -16,6 +16,17 @@
 namespace ui {
 
 Clipboard* Clipboard::Create() {
+#if BUILDFLAG(IS_QNX)
+  // The BB10 ozone platforms have no PlatformClipboard, which upstream takes
+  // to mean "no system clipboard" and answers with ClipboardNonBacked. That
+  // is wrong twice over here. BB10 does have a system clipboard, which
+  // ClipboardOzone reaches through QnxPlatformClipboard. And
+  // ClipboardNonBacked claims an X11-style selection buffer that it only
+  // creates on Linux, so as soon as the user selected text in a page
+  // (RenderWidgetHostViewAura mirrors the selection into that buffer) it hit
+  // a CHECK and took the browser down.
+  return new ClipboardOzone;
+#else
   // On Linux Desktop and Lacros, Ozone's Clipboard impl is always used.
   // On Linux builds of ash-chrome, use platform-backed implementation iff
   // use-system-clipboard command line switch is passed.
@@ -34,6 +45,7 @@ Clipboard* Clipboard::Create() {
   NOTREACHED() << "System clipboard integration should be in place.";
 #endif
   return new ClipboardNonBacked;
+#endif  // BUILDFLAG(IS_QNX)
 }
 
 }  // namespace ui

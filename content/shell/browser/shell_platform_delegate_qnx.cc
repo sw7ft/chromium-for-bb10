@@ -14,6 +14,7 @@
 
 #include "base/containers/contains.h"
 #include "base/functional/bind.h"
+#include "base/no_destructor.h"
 #include "base/qnx_hard_watchdog.h"
 #include "base/qnx_trace.h"
 #include "base/strings/escape.h"
@@ -27,7 +28,9 @@
 #include "content/public/browser/visibility.h"
 #include "content/public/browser/web_contents.h"
 #include "content/shell/browser/berry_browser_chrome.h"
+#include "content/shell/browser/berry_edit_menu.h"
 #include "content/shell/browser/berry_shared_text.h"
+#include "content/shell/browser/berry_test_hooks.h"
 #include "content/shell/browser/shell.h"
 #include "content/shell/browser/shell_platform_data_aura.h"
 #include "ui/aura/window.h"
@@ -49,6 +52,7 @@ namespace content {
 namespace {
 
 Shell* g_active_shell = nullptr;
+BerryEditMenuRunner* g_edit_menu = nullptr;
 std::unique_ptr<BerryBrowserChrome> g_chrome;
 std::map<std::string, Shell*> g_group_to_shell;
 base::Lock g_chrome_lock;
@@ -597,6 +601,11 @@ void ShellPlatformDelegate::Initialize(const gfx::Size& default_window_size) {
   ui::SetQnxScreenInvokeUriCallback(QnxInvokeUriCallback);
   ui::SetQnxScreenActiveGroupCallback(QnxActiveGroupCallback);
   navigator_set_close_prompt("Berry Browser", "Close Berry Browser?");
+
+  // The engine's touch selection looks this up when text is selected.
+  static base::NoDestructor<BerryEditMenuRunner> edit_menu;
+  g_edit_menu = edit_menu.get();
+  BerryStartTestHooks(platform_->aura->host());
 }
 
 void ShellPlatformDelegate::CreatePlatformWindow(
@@ -623,6 +632,12 @@ void ShellPlatformDelegate::CreatePlatformWindow(
     ui::QnxScreenGetRenderSize(&rw, &rh);
     if (!BerryAppModeNoChrome() && !g_chrome)
       g_chrome = std::make_unique<BerryBrowserChrome>(rw, rh);
+    // The toolbar is offered every touch in its strip first (QnxTouchCallback),
+    // so a menu placed there could not be tapped reliably.
+    if (g_edit_menu) {
+      g_edit_menu->set_top_inset(g_chrome ? BerryBrowserChrome::kToolbarHeight
+                                          : 0);
+    }
     g_url_bar_editing = false;
   }
 }
