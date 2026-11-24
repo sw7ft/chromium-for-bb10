@@ -9,6 +9,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/timer/timer.h"
 #include "ui/events/platform/platform_event_source.h"
+#include "ui/ozone/platform/qnx_screen/qnx_shift_state.h"
 
 namespace ui {
 
@@ -31,8 +32,8 @@ class QnxScreenEventSource : public PlatformEventSource {
   bool bps_initialized_ = false;
   raw_ptr<QnxScreenWindowManager> window_manager_;
   base::RepeatingTimer poll_timer_;
-  // BB10 touch keyboard: tap-Shift often omits KEYMOD_SHIFT on the next letter.
-  bool shift_latched_ = false;
+  // On-screen Shift: remembers a tap until the character it applies to.
+  QnxShiftState shift_state_;
 };
 
 }  // namespace ui

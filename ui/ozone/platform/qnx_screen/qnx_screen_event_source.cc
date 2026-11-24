@@ -8,9 +8,12 @@
 #include <screen/screen.h>
 #include <sys/keycodes.h>
 #include <unistd.h>
+#include <algorithm>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <string>
 #include "base/qnx_trace.h"
 #include "base/qnx_pump_activity.h"
 #include "base/time/time.h"
@@ -48,8 +51,55 @@ static void QnxKbdLogf(const char* fmt, ...) {
   int n = vsnprintf(b, sizeof(b), fmt, ap);
   va_end(ap);
   if (n > 0)
-    ::write(2, b, n);
+    ::write(2, b, std::min(n, static_cast<int>(sizeof(b)) - 1));
 }
+
+// Key and invocation trace only, without the per-touch-event lines above:
+// QNX_KEY_TRACE=1 (launcher marker berry-keys.debug). Records how the keyboard
+// delivers Shift, never which characters were typed or what was shared.
+static bool QnxKeyTrace() {
+  static const bool v = getenv("QNX_KEY_TRACE") != nullptr;
+  return v || QnxKbdDbg();
+}
+static void QnxKeyTracef(const char* fmt, ...) {
+  if (!QnxKeyTrace())
+    return;
+  char b[192];
+  va_list ap;
+  va_start(ap, fmt);
+  int n = vsnprintf(b, sizeof(b), fmt, ap);
+  va_end(ap);
+  if (n > 0)
+    ::write(2, b, std::min(n, static_cast<int>(sizeof(b)) - 1));
+}
+
+// Names a key for the diagnostic log without recording what was typed: a
+// character is reduced to its class (the log can sit in shared storage while
+// the user signs in to sites), a control or modifier key keeps its code.
+static void QnxKbdDescribeSym(int sym, char* out, size_t len) {
+  const char* cls = nullptr;
+  if (sym >= 'a' && sym <= 'z')
+    cls = "lower";
+  else if (sym >= 'A' && sym <= 'Z')
+    cls = "UPPER";
+  else if (sym >= '0' && sym <= '9')
+    cls = "digit";
+  else if (sym == ' ')
+    cls = "space";
+  else if (sym >= 0x20 && sym < 0xE000)
+    cls = "char";
+  if (cls)
+    snprintf(out, len, "%s", cls);
+  else
+    snprintf(out, len, "0x%x", sym);
+}
+
+static_assert(kQnxSymLeftShift == KEYCODE_LEFT_SHIFT, "keycodes.h mismatch");
+static_assert(kQnxSymRightShift == KEYCODE_RIGHT_SHIFT, "keycodes.h mismatch");
+static_assert(kQnxSymCapsLock == KEYCODE_CAPS_LOCK, "keycodes.h mismatch");
+static_assert(kQnxModShift == KEYMOD_SHIFT, "keycodes.h mismatch");
+static_assert(kQnxModShiftLock == KEYMOD_SHIFT_LOCK, "keycodes.h mismatch");
+static_assert(kQnxModCapsLock == KEYMOD_CAPS_LOCK, "keycodes.h mismatch");
 
 QnxScreenEventSource::QnxScreenEventSource(screen_context_t ctx,
                                            QnxScreenWindowManager* wm)
@@ -119,6 +169,10 @@ void QnxScreenEventSource::PollEvents() {
       QnxKbdLogf("KBD:evt type=%d\n", type);
       ProcessEvent(se);
     } else if (domain == virtualkeyboard_get_domain()) {
+      if (bps_event_get_code(event) == VIRTUALKEYBOARD_EVENT_HIDDEN) {
+        QnxKeyTracef("KBD:vkb hidden\n");
+        shift_state_.Reset();
+      }
       QnxDispatchVirtualKeyboardBpsEvent(event);
     } else if (domain == navigator_get_domain()) {
       // We registered with navigator_request_events() so the hardware keyboard
@@ -390,33 +444,42 @@ void QnxScreenEventSource::ProcessKeyboardEvent(screen_event_t ev) {
   int mods = 0;
   screen_get_event_property_iv(ev, SCREEN_PROPERTY_KEY_MODIFIERS, &mods);
 
-  bool down = (kflags & SCREEN_FLAG_KEY_DOWN) != 0;
+  const bool down = (kflags & SCREEN_FLAG_KEY_DOWN) != 0;
+  const bool repeat = (kflags & SCREEN_FLAG_KEY_REPEAT) != 0;
 
-  auto key_cb = GetQnxScreenKeyCallback();
-  if (key_cb && key_cb(sym, down))
-    return;
-
-  // Touch keyboard: tap Shift then a letter often arrives without KEYMOD_SHIFT.
-  if (sym == KEYCODE_LEFT_SHIFT || sym == KEYCODE_RIGHT_SHIFT) {
-    if (down)
-      shift_latched_ = true;
-  }
-
-  const bool shift_mod =
-      (mods & (KEYMOD_SHIFT | KEYMOD_SHIFT_LOCK | KEYMOD_CAPS_LOCK)) != 0;
-  const bool shift_effective = shift_mod || shift_latched_;
+  // Work out Shift before anyone sees the key, so the address bar and the
+  // page get the same character.
+  const bool was_armed = shift_state_.armed();
+  const QnxShiftState::Result shift =
+      shift_state_.Apply(sym, mods, down, repeat);
   const bool alt_mod = (mods & KEYMOD_ALT) != 0;
 
-  int effective_sym = sym;
+  int effective_sym = shift.sym;
   if (alt_mod) {
     // Q10/Q20/Classic Alt layer: if the OS keymap did not already translate
-    // the symbol (sym is still the plain letter), do it here.
+    // the symbol (sym is still the plain letter), do it here. Alt wins over
+    // Shift, as it did before.
     int alt_sym = QnxAltLayerSym(sym);
     if (alt_sym)
       effective_sym = alt_sym;
   }
-  if (effective_sym == sym && shift_effective && sym >= 'a' && sym <= 'z')
-    effective_sym = sym - 'a' + 'A';
+
+  if (QnxKeyTrace()) {
+    int cap = 0;
+    screen_get_event_property_iv(ev, SCREEN_PROPERTY_KEY_CAP, &cap);
+    char sym_s[12], cap_s[12], out_s[12];
+    QnxKbdDescribeSym(sym, sym_s, sizeof(sym_s));
+    QnxKbdDescribeSym(cap, cap_s, sizeof(cap_s));
+    QnxKbdDescribeSym(effective_sym, out_s, sizeof(out_s));
+    QnxKeyTracef(
+        "KBD:key sym=%s cap=%s flags=0x%x mods=0x%x armed=%d>%d out=%s\n",
+        sym_s, cap_s, kflags, mods, was_armed ? 1 : 0,
+        shift_state_.armed() ? 1 : 0, out_s);
+  }
+
+  auto key_cb = GetQnxScreenKeyCallback();
+  if (key_cb && key_cb(effective_sym, down))
+    return;
 
   QnxKeyMap m = MapQnxKey(effective_sym);
   if (m.valid) {
@@ -429,21 +492,16 @@ void QnxScreenEventSource::ProcessKeyboardEvent(screen_event_t ev) {
     if (m.key_code == VKEY_UNKNOWN && m.dom_code != DomCode::NONE)
       m.key_code = DomCodeToUsLayoutKeyboardCode(m.dom_code);
   }
-  QNX_TRACE_FMT("QNX:Key: sym=0x%x down=%d vk=%d mods=0x%x valid=%d\n", sym,
-                down ? 1 : 0, m.key_code, mods, m.valid ? 1 : 0);
-  QnxKbdLogf("KBD:key sym=0x%x down=%d vk=%d dc=%u mods=0x%x valid=%d\n", sym,
-             down ? 1 : 0, m.key_code,
-             static_cast<unsigned>(static_cast<uint32_t>(m.dom_code)), mods,
-             m.valid ? 1 : 0);
   if (!m.valid)
     return;
 
-  if (down && sym >= 'a' && sym <= 'z' && shift_effective)
-    shift_latched_ = false;
-
+  // Only a Shift that applies to this key is reported with it. An armed tap
+  // or Caps Lock must not turn Enter into Shift+Enter.
   int flags = 0;
-  if (shift_mod || shift_effective)
+  if (shift.shifted)
     flags |= EF_SHIFT_DOWN;
+  if (shift.caps_lock)
+    flags |= EF_CAPS_LOCK_ON;
   if (mods & KEYMOD_CTRL)
     flags |= EF_CONTROL_DOWN;
   // Do NOT set EF_ALT_DOWN for printable characters: on BB10 keyboards Alt is

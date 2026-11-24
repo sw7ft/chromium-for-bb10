@@ -615,6 +615,14 @@ int main(int argc, char** argv) {
     }
     if (access("/accounts/1000/shared/misc/berry-nav.debug", F_OK) == 0)
       setenv("QNX_NAV_DEBUG", "1", 1);
+    /* Key trace alone: one line per key event naming the kind of key (letter,
+     * digit, Shift...) and its modifier bits, never the character. For working
+     * out how a keyboard delivers Shift without the cost, or the page
+     * addresses, of the full berry-kbd.debug trace. Even the kinds of keys
+     * say something about what was typed (the shape of a password), so the
+     * marker is for a short test and should be removed straight after. */
+    if (access("/accounts/1000/shared/misc/berry-keys.debug", F_OK) == 0)
+      setenv("QNX_KEY_TRACE", "1", 1);
     /* Standalone GPU probe runs EGL init on the MAIN thread early in
      * ContentMain. Off by default (it leaves a stray EGL context current that
      * can confuse the real GLOzone GL init). Enable for diagnosis by creating
