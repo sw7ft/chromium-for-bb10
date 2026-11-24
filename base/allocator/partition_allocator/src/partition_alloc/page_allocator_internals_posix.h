@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cerrno>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 
 #include <sys/mman.h>
@@ -418,7 +419,24 @@ void DiscardSystemPagesInternal(uintptr_t address, size_t length) {
   //
   // Therefore, we just do the simple thing: MADV_DONTNEED.
 #if defined(__QNX__)
-  PA_PCHECK(0 == posix_madvise(ptr, length, POSIX_MADV_DONTNEED));
+  // QNX: do nothing. There is no way to hand pages back short of unmapping
+  // them: the system charges memory when it is mapped, not when it is first
+  // touched, and posix_madvise(POSIX_MADV_DONTNEED) frees nothing (free
+  // memory is unchanged and the pages keep their contents). It is far from
+  // free, though. Measured on a Passport (BB10, QNX 8.0.0): about 80 us per 4K
+  // page for the call, i.e. 5 ms for 256K and 320 ms for 16M, spent blocked
+  // on the process manager, and then about 60 us per page to fault each page
+  // back in, against 8 us to touch a brand new page. During a heavy page load
+  // these calls were 10% of the renderer main thread's time.
+  //
+  // BERRY_PA_DISCARD=1 restores the call, for A/B measurements only.
+  static const bool really_discard = [] {
+    const char* e = getenv("BERRY_PA_DISCARD");
+    return e && e[0] == '1';
+  }();
+  if (really_discard) {
+    PA_PCHECK(0 == posix_madvise(ptr, length, POSIX_MADV_DONTNEED));
+  }
 #else
   PA_PCHECK(0 == madvise(ptr, length, MADV_DONTNEED));
 #endif

@@ -258,7 +258,13 @@ void DecommitAndZeroSystemPages(void* address,
 // recommitted. Do not assume that this will not change over time.
 constexpr PA_COMPONENT_EXPORT(
     PARTITION_ALLOC) bool DecommittedMemoryIsAlwaysZeroed() {
-#if BUILDFLAG(IS_APPLE)
+#if BUILDFLAG(IS_APPLE) || defined(__QNX__)
+  // QNX: decommitted pages keep their contents. Neither
+  // posix_madvise(POSIX_MADV_DONTNEED) nor a protection change clears them
+  // (checked on a Passport, QNX 8.0.0: every page still held its old bytes), so memory
+  // that comes back from a decommitted slot span must be cleared by hand.
+  // Claiming "always zeroed" here made zero-filled allocations hand out stale
+  // data, e.g. `new Uint8Array(65536)` with a previous buffer's contents.
   return false;
 #else
   return true;
