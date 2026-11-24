@@ -20,6 +20,104 @@ and is **stale on build numbers** — trust this file for engine/perf state.
 
 ---
 
+## Progress update — builds 113–114 (Nov 23, 2026)
+
+Current ship build is **114** (`3.0.2.114`), from `out/qnx-arm-pgo-o2`. 113 is
+three input fixes; 114 is the first result of profiling a page load.
+
+### Copy and paste, Share, on-screen Shift (113)
+
+- **Copy and paste.** A long press selects a word and now shows a Cut / Copy /
+  Paste / Select all menu (`berry_edit_menu.cc`). The clipboard is the BB10
+  system clipboard through libclipboard (`qnx_platform_clipboard.cc`); plain
+  text is what crosses to other apps. Before this, selecting text by long
+  press or double tap hit a CHECK in the in-memory clipboard and killed the
+  browser. Not done: copy link on a long-pressed link or image, copy/paste in
+  the address bar.
+- **Share.** The descriptor registers for `bb.action.SHARE` as well as Open.
+  A shared link is opened; shared text is searched for a link, and without
+  one becomes a search (`berry_shared_text.h`).
+- **Shift.** A tap on the touch keyboard's Shift could stay remembered after
+  Shift was switched off again, so the next letter came out capital
+  (`qnx_shift_state.h`).
+
+Tests: `edittest.py` drives a bench engine with injected touches and
+invocations (`BERRY_TEST_CMD`, never set by the launcher), 24/24 on the
+build 113 and 114 engines; `shift_state_test.cc` and `shared_text_test.cc`
+run on the build host. On the phone, copy/paste and Shift are confirmed on
+113. **Not confirmed:** that BB10 lists the app in other apps' Share menus.
+
+### Page discards that freed nothing (114)
+
+Profiling the Amazon search page (Chrome trace, per-thread CPU, QNX kernel
+trace) showed the renderer main thread blocked on the process manager for
+7–10% of a heavy load, inside `posix_madvise(POSIX_MADV_DONTNEED)` from
+PartitionAlloc's decommit path. Measured on the Passport with
+`deploy/berrybench/memprobe.c`: the call takes about 80 µs per 4K page (5 ms per
+256K, 320 ms per 16M), free memory does not change (QNX charges memory at
+mmap time), the pages keep their contents, and touching them again costs
+about 60 µs per page against 8 µs for a fresh one. The call is now skipped on
+QNX; `BERRY_PA_DISCARD=1` in the environment restores it for A/B runs.
+
+Same binary, call on against off, bench engine with the `berry-jsflags`
+setting below:
+
+| Test | Call on | Call off | Change |
+|---|---|---|---|
+| Speedometer 3.0, ten DOM-heavy suites, 9 iterations each | 11,778 ms | 10,625 ms | 9.8% less |
+| amazon.ca search, repeat visit, 3 interleaved pairs | 10.8–11.6 s | 7.6–8.9 s | about 30% less |
+
+Every iteration with the call off beat every one with it on. The Amazon page
+is a weaker measure: later runs of the same build ranged from 6.5 to 14.1 s
+as the network changed (`results/pageload-114.jsonl`). In the kernel trace
+the main thread's time blocked on other processes fell from 11.0% to 4.9%
+and time waiting on mutexes from 3.7% to 0.7%.
+
+### Zero-filled allocations returned old data (fixed in 114)
+
+`DecommittedMemoryIsAlwaysZeroed()` was true on QNX, so PartitionAlloc
+skipped clearing memory that came back from a decommitted slot span, and
+decommitted pages keep their contents here. `new Uint8Array(n)` could come
+back holding a previous buffer's bytes. `zerotest.py`: 149/600 (4K),
+599/600 (64K) and 191/192 (256K) buffers dirty on the 113 engine, 0 on 114.
+Present in every earlier build.
+
+### Checked and left alone
+
+- **Field-trial testing config.** The build is not official, so
+  `fieldtrial_testing_config.json` is applied (443 studies; QNX is mapped to
+  linux), which among other things turns on V8's MinorMS young-generation
+  collector. `--disable-field-trial-config` switches all of it off. On the
+  ten suites, 9 iterations each (`results/ab2.jsonl`): default 10,864 ms,
+  `--no-minor-ms` 10,328 (−4.9%), `--no-turboshaft-instruction-selection`
+  10,650 (−2.0%), `--no-maglev` 11,102 (+2.2%), everything off 10,503
+  (−3.3%). But an allocation-heavy page was slower with the old Scavenger in
+  three of three pairs (4.4/6.8/6.0 s against 5.5/10.6/8.4 s), and the
+  Amazon page showed no difference. Nothing changed in the launcher.
+- **libc malloc tuning** (`MALLOC_MEMORY_HOLD`, `MALLOC_ARENA_SIZE`): no
+  measurable effect.
+
+### Open
+
+- Only 29 of 126 scripts used the V8 code cache on a third visit to the
+  Amazon page. Not investigated.
+- BoringSSL reads 32 bytes from the system random-number service on every
+  `RAND_bytes` call: 0.6–0.9% of the main thread during a load.
+- Remaining `mmap`/`munmap` traffic is about 2.5% of the main thread.
+- Navigation timing (DNS, connect, response start) is not filled in by the
+  port; `QNX: DidFinishNav` log lines are the reliable result of a load.
+- Still not the launcher default: `--no-optimize-for-size`. Still open from
+  110–112: `Set.difference`, the iframe event timing.
+- Not measured: memory over a long session on 114, frame times on the GPU
+  path of the installed app.
+
+The profiling tools are in `deploy/berrybench`: `pageprof.py` (one load:
+trace, CPU per thread, thread states), `profsum.py`, `ttsum.py`, `kevcap.py`
+and `kevsum.py` (kernel trace). The `pidin` state sampler loads the process
+manager and overstates waits on it; use `SAMPLE=0` for timing runs.
+
+---
+
 ## Progress update — builds 110–112 (Nov 20, 2026)
 
 Current ship build is **112** (`3.0.2.112`), from `out/qnx-arm-pgo-o2`. Three
