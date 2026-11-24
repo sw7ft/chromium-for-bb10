@@ -1,6 +1,10 @@
-# Run output and local scratch; the scripts and results/ are tracked.
+# Run output and local scratch; the scripts and results/*.jsonl are tracked.
 __pycache__/
 logs/
 *.out
 *.log
 content_shell.*
+# Per-run traces, CPU samples and kernel event logs (up to 50 MB each). The
+# figures quoted from them are in results/*.jsonl.
+results/prof-*
+results/kev-*

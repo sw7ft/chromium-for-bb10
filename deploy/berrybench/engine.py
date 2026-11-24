@@ -25,8 +25,9 @@ def phone(cmd, timeout=60):
 
 def stop_all():
     """Stop bench engines only. Never touches the installed content_shell.exe."""
-    phone("slay -f cs-o0 2>/dev/null; slay -f cs-o2 2>/dev/null; slay -f cs-fix 2>/dev/null; sleep 1")
-    phone("slay -f -9 cs-o0 2>/dev/null; slay -f -9 cs-o2 2>/dev/null; slay -f -9 cs-fix 2>/dev/null; true")
+    names = ("cs-o0", "cs-o2", "cs-fix", "cs-new")
+    phone("; ".join("slay -f %s 2>/dev/null" % n for n in names) + "; sleep 1")
+    phone("; ".join("slay -f -9 %s 2>/dev/null" % n for n in names) + "; true")
 
 
 def wipe_profile():

@@ -3,6 +3,8 @@
 
 usage: sp3_bench.py <label> <rounds> <iterations> <suites|all> <cfg> [<cfg> ...]
   cfg = <engine>:<name>:<jsflags or ->        e.g. cs-o0:old:--max-old-space-size=256
+        <name> may carry engine environment: "old@BERRY_PA_DISCARD=1"
+        or an extra engine switch:           "stable@EXTRA=--disable-field-trial-config"
 
 Configurations are run interleaved (A B A B ...) so thermal drift and
 background activity on the phone hit all of them equally. Each run is a fresh
@@ -19,8 +21,11 @@ from sp3_probe_shim import SHIM_JS
 
 label, rounds, iters, suites = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4]
 cfgs = []
+ENVS = {}
 for c in sys.argv[5:]:
     eng, name, jsf = c.split(":", 2)
+    name, _, env = name.partition("@")
+    ENVS[name] = env
     cfgs.append((eng, name, None if jsf == "-" else jsf))
 
 url = "https://browserbench.org/Speedometer3.0/?iterationCount=%d&startAutomatically=true" % iters
@@ -35,7 +40,9 @@ def run_once(eng, name, jsf, rnd):
     stop_all()
     wipe_profile()
     with Engine(eng, jsflags=jsf, log_path="logs/%s-%s-r%d.log" % (label, name, rnd),
-                extra="--content-shell-host-window-size=540x540") as e:
+                env=" ".join(t for t in ENVS.get(name, "").split() if not t.startswith("EXTRA=")),
+                extra="--content-shell-host-window-size=540x540 " + " ".join(
+                    t[6:] for t in ENVS.get(name, "").split() if t.startswith("EXTRA="))) as e:
         e.start()
         c = e.cdp
         if os.environ.get("SHIM", "1") == "1":
