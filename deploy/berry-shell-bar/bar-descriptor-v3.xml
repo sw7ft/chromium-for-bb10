@@ -7,7 +7,7 @@
     <name>Berry Browser</name>
     <versionNumber>3.0.2</versionNumber>
     <buildId>112</buildId>
-    <description>Chromium browser for BlackBerry 10. Pin web links to the home screen; other apps can Open http/https URLs here.</description>
+    <description>Chromium browser for BlackBerry 10. Pin web links to the home screen; other apps can open or share links here.</description>
     <author>sw7ft</author>
 
     <!-- Native entry point: a tiny launcher that sets LD_LIBRARY_PATH / CA
@@ -57,6 +57,18 @@
             <action>bb.action.VIEW</action>
             <mime-type>*</mime-type>
             <property var="uris" value="berrybrowser:,http://,https://"/>
+        </filter>
+        <!-- Share from another app: a link as the URI... -->
+        <filter>
+            <action>bb.action.SHARE</action>
+            <mime-type>*</mime-type>
+            <property var="uris" value="http://,https://"/>
+        </filter>
+        <!-- ...or text (a link, or words to search for) as the data. -->
+        <filter>
+            <action>bb.action.SHARE</action>
+            <mime-type>text/plain</mime-type>
+            <property var="uris" value="data://"/>
         </filter>
     </invoke-target>
 

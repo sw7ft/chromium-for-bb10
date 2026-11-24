@@ -420,6 +420,7 @@ static_library("content_shell_lib") {
       "browser/berry_maps_qnx.cc",
       "browser/berry_maps_qnx.h",
       "browser/berry_pgo_stub_qnx.cc",
+      "browser/berry_shared_text.h",
       "browser/qnx_berry_daemon_host.cc",
       "browser/qnx_berry_daemon_host.h",
       "browser/shell_fixed_location_provider.cc",

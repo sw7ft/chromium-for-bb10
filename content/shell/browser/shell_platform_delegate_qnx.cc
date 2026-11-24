@@ -27,6 +27,7 @@
 #include "content/public/browser/visibility.h"
 #include "content/public/browser/web_contents.h"
 #include "content/shell/browser/berry_browser_chrome.h"
+#include "content/shell/browser/berry_shared_text.h"
 #include "content/shell/browser/shell.h"
 #include "content/shell/browser/shell_platform_data_aura.h"
 #include "ui/aura/window.h"
@@ -197,67 +198,107 @@ void QnxActiveGroupCallback(const char* group, bool visible) {
   BerryActivateShell(it->second);
 }
 
+GURL GoogleSearchUrl(const std::string& query);
+GURL ResolveUserUrl(const std::string& input);
+
+// What an invocation asks us to open. |raw| is a URL from a pin, from another
+// app's "Open in", or from a cold start -- or, for a Share, free text that
+// may only contain a link somewhere.
+GURL BerryInvokeDestination(const std::string& raw, bool* new_window) {
+  *new_window = false;
+  const GURL direct = DecodeBerryInvokeUri(raw.c_str(), new_window);
+  const bool from_pin = raw.find("berrybrowser://") == 0;
+  if (direct.is_valid() &&
+      (from_pin || direct.SchemeIsHTTPOrHTTPS() || direct.SchemeIsFile())) {
+    if (from_pin)
+      *new_window = true;
+    return direct;
+  }
+  // Shared text. Only ever turn it into a web address or a search: text that
+  // merely looks like "scheme:something" must not be navigated to as is.
+  *new_window = false;
+  const std::string link = BerryFirstLinkInText(raw);
+  if (!link.empty()) {
+    const GURL g(link);
+    if (g.is_valid() && g.SchemeIsHTTPOrHTTPS())
+      return g;
+  }
+  const std::string query = BerrySharedTextAsQuery(raw);
+  if (query.empty())
+    return GURL();
+  const GURL g = ResolveUserUrl(query);
+  if (g.is_valid() && g.SchemeIsHTTPOrHTTPS())
+    return g;
+  return GoogleSearchUrl(query);
+}
+
+void BerryOpenInvoked(std::string raw, int attempt) {
+  // An invocation that starts the app can be delivered before the first
+  // window exists. Wait for it rather than lose the page.
+  if (Shell::windows().empty()) {
+    constexpr int kMaxAttempts = 40;
+    if (attempt >= kMaxAttempts) {
+      QNX_NAV_LOG_FMT("BerryNav: invoke drop (no window) len=%zu\n",
+                      raw.size());
+      return;
+    }
+    GetUIThreadTaskRunner({})->PostDelayedTask(
+        FROM_HERE, base::BindOnce(&BerryOpenInvoked, std::move(raw), attempt + 1),
+        base::Milliseconds(250));
+    return;
+  }
+
+  bool force_new = false;
+  const GURL dest = BerryInvokeDestination(raw, &force_new);
+  if (!dest.is_valid()) {
+    QNX_NAV_LOG_FMT("BerryNav: invoke drop len=%zu\n", raw.size());
+    return;
+  }
+
+  // A window already on this exact page is simply brought forward.
+  for (Shell* s : Shell::windows()) {
+    if (!s->web_contents())
+      continue;
+    const GURL cur = s->web_contents()->GetLastCommittedURL();
+    if (cur.is_valid() && cur.EqualsIgnoringRef(dest)) {
+      QNX_NAV_LOG_FMT("BerryNav: invoke show existing windows=%zu\n",
+                      Shell::windows().size());
+      BerryShowShell(s);
+      return;
+    }
+  }
+
+  // Home-screen pins (berrybrowser://...) always get a card of their own,
+  // even when the existing card is still on home.html. Anything else takes
+  // over a window that has nothing in it (the home page, settings) and only
+  // opens another when every window is showing a page.
+  Shell* idle = nullptr;
+  if (!force_new) {
+    for (Shell* s : Shell::windows()) {
+      if (s->web_contents() && BerryShellHoldsPlaceholder(s)) {
+        idle = s;
+        break;
+      }
+    }
+  }
+  QNX_NAV_LOG_FMT("BerryNav: invoke dest=\"%s\" new=%d idle=%d windows=%zu\n",
+                  dest.spec().c_str(), force_new ? 1 : 0, idle ? 1 : 0,
+                  Shell::windows().size());
+  if (idle) {
+    idle->LoadURL(dest);
+    BerryShowShell(idle);
+    return;
+  }
+  BrowserContext* ctx =
+      Shell::windows().front()->web_contents()->GetBrowserContext();
+  Shell::CreateNewWindow(ctx, dest, nullptr, gfx::Size());
+}
+
 void QnxInvokeUriCallback(const char* uri) {
   if (!uri || !uri[0])
     return;
-  std::string raw(uri);
   GetUIThreadTaskRunner({})->PostTask(
-      FROM_HERE, base::BindOnce(
-                     [](std::string raw) {
-                       bool want_new = false;
-                       const GURL dest =
-                           DecodeBerryInvokeUri(raw.c_str(), &want_new);
-                       if (!dest.is_valid()) {
-                         QNX_NAV_LOG_FMT(
-                             "BerryNav: invoke drop raw=\"%s\"\n",
-                             raw.c_str());
-                         return;
-                       }
-                       // Home-screen pins (berrybrowser://…&win=1, or any
-                       // berrybrowser:// open) must NOT steal the existing
-                       // card — even if that card is still on home.html.
-                       // Only reuse a window already showing this exact URL.
-                       const bool force_new =
-                           want_new ||
-                           raw.find("berrybrowser://") == 0;
-                       Shell* reuse = nullptr;
-                       for (Shell* s : Shell::windows()) {
-                         if (!s->web_contents())
-                           continue;
-                         const GURL cur =
-                             s->web_contents()->GetLastCommittedURL();
-                         if (cur.is_valid() &&
-                             cur.EqualsIgnoringRef(dest)) {
-                           reuse = s;
-                           break;
-                         }
-                       }
-                       if (!force_new && !reuse) {
-                         for (Shell* s : Shell::windows()) {
-                           if (BerryShellHoldsPlaceholder(s)) {
-                             reuse = s;
-                             break;
-                           }
-                         }
-                       }
-                       QNX_NAV_LOG_FMT(
-                           "BerryNav: invoke dest=\"%s\" new=%d reuse=%d "
-                           "windows=%zu\n",
-                           dest.spec().c_str(), force_new ? 1 : 0,
-                           reuse ? 1 : 0, Shell::windows().size());
-                       if (reuse) {
-                         BerryShowShell(reuse);
-                         return;
-                       }
-                       if (Shell::windows().empty())
-                         return;
-                       BrowserContext* ctx = Shell::windows()
-                                                 .front()
-                                                 ->web_contents()
-                                                 ->GetBrowserContext();
-                       Shell::CreateNewWindow(ctx, dest, nullptr, gfx::Size());
-                     },
-                     std::move(raw)));
+      FROM_HERE, base::BindOnce(&BerryOpenInvoked, std::string(uri), 0));
 }
 
 GURL GoogleSearchUrl(const std::string& query) {

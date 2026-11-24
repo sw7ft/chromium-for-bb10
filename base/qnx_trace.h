@@ -126,6 +126,8 @@ inline bool QnxDecodeProbeEnabled() {
     if (base::QnxNavLogEnabled()) {            \
       char _qn[512];                           \
       int _ql = snprintf(_qn, sizeof(_qn), fmt, __VA_ARGS__); \
+      if (_ql >= static_cast<int>(sizeof(_qn))) /* truncated */ \
+        _ql = sizeof(_qn) - 1;                 \
       if (_ql > 0)                             \
         ::write(2, _qn, _ql);                  \
     }                                          \

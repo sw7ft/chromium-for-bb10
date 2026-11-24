@@ -30,9 +30,11 @@ using QnxScreenVisibilityCallback = void (*)(bool visible);
 void SetQnxScreenVisibilityCallback(QnxScreenVisibilityCallback cb);
 QnxScreenVisibilityCallback GetQnxScreenVisibilityCallback();
 
-// Fired when the Navigator delivers an invocation (NAVIGATOR_INVOKE_TARGET),
-// e.g. the user tapped a pinned home-screen shortcut created with
-// navigator_add_uri(). |uri| is the raw invocation URI (berrybrowser://...).
+// Fired when the Navigator delivers an invocation (NAVIGATOR_INVOKE_TARGET):
+// the user tapped a pinned home-screen shortcut created with
+// navigator_add_uri(), or another app opened or shared something to us.
+// |uri| is the invocation URI (berrybrowser://..., https://...) or, for a
+// Share that has none, the shared text itself, which need not be a URL.
 using QnxScreenInvokeUriCallback = void (*)(const char* uri);
 void SetQnxScreenInvokeUriCallback(QnxScreenInvokeUriCallback cb);
 QnxScreenInvokeUriCallback GetQnxScreenInvokeUriCallback();

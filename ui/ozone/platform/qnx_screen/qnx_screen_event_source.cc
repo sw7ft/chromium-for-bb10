@@ -94,6 +94,9 @@ static void QnxKbdDescribeSym(int sym, char* out, size_t len) {
     snprintf(out, len, "0x%x", sym);
 }
 
+// Shared text is only searched for a link, so there is no use in more.
+constexpr int kQnxInvokeMaxPayload = 8192;
+
 static_assert(kQnxSymLeftShift == KEYCODE_LEFT_SHIFT, "keycodes.h mismatch");
 static_assert(kQnxSymRightShift == KEYCODE_RIGHT_SHIFT, "keycodes.h mismatch");
 static_assert(kQnxSymCapsLock == KEYCODE_CAPS_LOCK, "keycodes.h mismatch");
@@ -226,19 +229,44 @@ void QnxScreenEventSource::PollEvents() {
           // Home-screen shortcut (navigator_add_uri), Open-with from another
           // app, or a cold-start URL invoke. INVOKE_TARGET carries a structured
           // invocation; legacy NAVIGATOR_INVOKE puts the URL in event data.
-          const char* uri = nullptr;
+          //
+          // A Share from another app usually has no URI of its own (or the
+          // "data://" placeholder) and carries the link, or text containing
+          // it, as the invocation's data instead.
+          std::string payload;
+          const char* action = nullptr;
+          const char* mime = nullptr;
           if (code == NAVIGATOR_INVOKE_TARGET) {
             const navigator_invoke_invocation_t* inv =
                 navigator_invoke_event_get_invocation(event);
-            uri = inv ? navigator_invoke_invocation_get_uri(inv) : nullptr;
+            if (inv) {
+              action = navigator_invoke_invocation_get_action(inv);
+              mime = navigator_invoke_invocation_get_type(inv);
+              const char* uri = navigator_invoke_invocation_get_uri(inv);
+              if (uri && uri[0] && strncmp(uri, "data:", 5) != 0)
+                payload = uri;
+              if (payload.empty()) {
+                const void* data = navigator_invoke_invocation_get_data(inv);
+                const int len = navigator_invoke_invocation_get_data_length(inv);
+                if (data && len > 0) {
+                  payload.assign(static_cast<const char*>(data),
+                                 std::min(len, kQnxInvokeMaxPayload));
+                }
+              }
+            }
           }
-          if (!uri || !uri[0])
-            uri = navigator_event_get_data(event);
-          QnxKbdLogf("KBD:nav INVOKE code=%d uri=%s\n", code,
-                     uri && uri[0] ? uri : "(null)");
-          if (uri && uri[0]) {
+          if (payload.empty()) {
+            if (const char* data = navigator_event_get_data(event))
+              payload.assign(data, std::min<size_t>(strlen(data),
+                                                    kQnxInvokeMaxPayload));
+          }
+          // The payload is whatever the user shared; log its size only.
+          QnxKeyTracef("KBD:nav INVOKE code=%d action=%.40s type=%.40s len=%d\n",
+                       code, action ? action : "-", mime ? mime : "-",
+                       static_cast<int>(payload.size()));
+          if (!payload.empty()) {
             if (auto cb = GetQnxScreenInvokeUriCallback())
-              cb(uri);
+              cb(payload.c_str());
           }
           break;
         }
