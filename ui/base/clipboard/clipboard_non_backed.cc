@@ -879,11 +879,13 @@ void ClipboardNonBacked::ReadData(const ClipboardFormatType& format,
 
 #if BUILDFLAG(IS_OZONE)
 bool ClipboardNonBacked::IsSelectionBufferAvailable() const {
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-  return false;
-#else
-  return true;
-#endif
+  // The selection buffer is only created in the constructor on Linux and Fuchsia
+  // (see kClipboardBuffers above). On other Ozone platforms such as QNX/BB10 it is
+  // never created, so unconditionally returning true here led callers to
+  // GetInternalClipboard(ClipboardBuffer::kSelection), whose flat_map::at()
+  // CHECK-fails on the first text selection. Report availability from the actual
+  // buffer set so the answer is accurate on every platform.
+  return internal_clipboards_.contains(ClipboardBuffer::kSelection);
 }
 #endif  // BUILDFLAG(IS_OZONE)
 
